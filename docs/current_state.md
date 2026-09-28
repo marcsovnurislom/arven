@@ -8,7 +8,8 @@ _Last updated: 2026-09-28_
 - Stage 3 has not been started.
 - Split dates, `forward_start`, the architecture, the DuckDB index/storage design and the 300 s OI availability delay
   are all unchanged.
-- Nothing has been committed.
+- Stage 1 + Stage 2 are committed on branch `feat/historical-data` (commit `efb6677`, "feat(data): complete historical
+  market data pipeline"). The working tree was clean at that commit.
 
 ## Full backfill results (per yearly chunk)
 
@@ -189,10 +190,19 @@ tests/
 .venv/Scripts/python.exe -m arven status
 ```
 
-Without `--start`/`--end`, commands use `data.history_start`/`history_end` (the full 2020-01 → 2026-07 period), so
-**don't run them without arguments until the full backfill is approved.**
+The examples above use the 2024-01 → 2024-03 slice. Without `--start`/`--end`, commands use
+`data.history_start`/`history_end` (the full 2020-01 → 2026-07 period).
 
-## Test-slice results (2024-01-01 → 2024-03-01, run 2026-09-28)
+The full backfill is already completed and verified (see "Full backfill results"), so there is nothing left to
+backfill. A full-period `ingest` re-run is idempotent: it skips all already-ingested files and downloads nothing
+(verified in "Final verification"). Use `--start`/`--end` to limit a run to a sub-range. `crosscheck` has so far only
+been run on sample months.
+
+## Historical: Step-1 test-slice results (2024-01-01 → 2024-03-01, run 2026-09-28)
+
+_These are the results of the small Step-1 test slice, kept for reference. They are **not** the final results; for
+those see "Full backfill results" and "Final verification" above. The sizes and full-period estimate at the end of this
+section are superseded by the actual full-backfill figures._
 
 **Ingestion**
 - 64 files: 2 monthly 1m klines, 2 monthly funding, 60 daily metrics.
@@ -264,17 +274,17 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 2. **`forward_start = 2026-07-01` is already in the past** (unchanged as instructed). It needs relabelling before paper trading.
 3. **Contiguous splits with no embargo.** To be handled by purging/embargo in Stage 6.
 4. **DuckDB size and compaction.** The DB is 475 MB uncompacted for the full period; the storage design is frozen for now.
-6. **Stage 3 input decisions:**
+5. **Stage 3 input decisions:**
    - how volume features treat the 2021-05-15 source anomaly and the zero-volume bars
    - how OI features represent the 156 source gaps and the pre-2020-09 boundary (NaN/staleness, never interpolation)
-5. LLM provider (later). Thesis success criterion.
+6. LLM provider (later). Thesis success criterion.
 
 ## What does NOT exist yet
 
 - Features, regime, strategies, ML, decision, risk, backtest, live/paper, news, LLM, dashboard.
 - REST incremental updates (only bulk files are supported so far).
 - `config/strategies.yaml`, `config/risk.yaml`.
-- Git: branch `master`, **no commits yet**.
+- Git: current branch `feat/historical-data`; one commit so far, `efb6677` (Stage 1 + Stage 2).
 
 ## Environment
 
