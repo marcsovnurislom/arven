@@ -1,0 +1,26 @@
+# Transaction cost assumptions. Nothing about costs is hard-coded in the source.
+# Units: basis points (1 bp = 0.01% = 0.0001). Values are per side, on notional.
+# Defaults approximate Binance USD-M futures VIP 0 — verify against the current fee schedule.
+
+fees:
+  maker_fee_bps: 2.0            # may be negative for rebate tiers
+  taker_fee_bps: 5.0
+  entry_order_type: taker       # MVP assumption: market orders on entry
+  exit_order_type: taker        # target exits
+  stop_order_type: taker        # stop exits are always market orders in practice
+
+slippage:
+  model: fixed_plus_volatility
+  # slippage_bps = fixed_bps + volatility_multiplier * (1m bar range in bps)
+  fixed_bps: 1.0
+  volatility_multiplier: 0.1
+  # Robustness runs re-evaluate with slippage multiplied by this factor.
+  stress_multiplier: 2.0
+
+funding:
+  # historical: apply actual recorded funding rates at their funding timestamps.
+  source: historical
+  # What to do if a funding rate is missing for a funding timestamp while a position is open.
+  missing_policy: error         # error | assume_rate
+  assumed_rate_bps: 1.0         # used only when missing_policy = assume_rate (0.01% per interval)
+  default_interval_hours: 8     # informational fallback; real timestamps come from data

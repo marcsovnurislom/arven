@@ -1,0 +1,15 @@
+# Chronological data periods. Half-open intervals [start, end), UTC.
+# Periods must be ordered and must not overlap.
+# The test period is SEALED: use it only for final evaluation; every access is logged.
+
+development:
+  start: "2020-01-01"
+  end: "2023-07-01"
+validation:
+  start: "2023-07-01"
+  end: "2025-01-01"
+test:
+  start: "2025-01-01"
+  end: "2026-07-01"
+  sealed: true
+forward_start: "2026-07-01"     # forward paper-trading (true out-of-sample) begins here

@@ -1,0 +1,35 @@
+# ARVEN default configuration.
+# All timestamps are UTC. Periods are half-open: [start, end).
+
+project:
+  name: arven
+  random_seed: 42
+
+market:
+  exchange: binance
+  market_type: usdm_perpetual
+  symbol: BTCUSDT
+  base_timeframe: 1m            # canonical stored data; higher TFs are derived from it
+  feature_timeframes: [5m, 15m, 1h, 4h]
+  decision_timeframe: 1h        # signals are produced at each 1h bar close
+  context_timeframe: 4h         # higher-timeframe context (trend / regime)
+
+data:
+  data_dir: data                # relative to the project root; git-ignored
+  history_start: "2020-01-01"
+  history_end: "2026-07-01"     # end of the historical target period (exclusive)
+  # A bar is treated as available only this many seconds after its close,
+  # to model ingestion latency and avoid using a bar at the exact close instant.
+  bar_availability_delay_seconds: 0
+  # OI snapshot stamped T is treated as usable from T + this delay (publication lag is unknown; conservative).
+  open_interest_availability_delay_seconds: 300
+
+download:
+  base_url: https://data.binance.vision
+  timeout_seconds: 30
+  max_attempts: 6
+  backoff_initial_seconds: 1.0
+  backoff_multiplier: 2.0
+  backoff_max_seconds: 30.0
+  # Native Binance klines downloaded only to cross-check our 1m -> higher-TF resampling.
+  crosscheck_timeframes: [5m, 15m, 1h, 4h]
