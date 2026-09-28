@@ -202,6 +202,14 @@ DecisionEngine.decide(...)   -> ProposedDecision(action, confidence, reasons)
 RiskEngine.apply(decision, portfolio_state, snap) -> Signal (possibly NO_TRADE with veto reason)
 ```
 
+> **As implemented in Stage 3** (details in `current_state.md`): `features/` is pure numpy with no I/O; reading from DuckDB is
+> `data/reader.py` and the cache is `data/storage/feature_store.py`. The `MarketSnapshot` of this sketch is not a separate class
+> yet: `core/series.py::MarketInputs.available_until(t)` provides the point-in-time view, and the same builder serves batch and
+> single-`t` use. Features are computed on the 1h bar-close grid, higher/lower TFs joined by backward as-of on `available_at`.
+> The `feature_sets` table (section 7) is replaced by `data/features/<version>/manifest.json` next to the Parquet cache, so the
+> Stage 2 storage design is unchanged. Recursive indicators are seeded at the first stored bar and masked for `warmup_factor x
+> period` bars, so builds always start at the first stored bar (dropping early history changes them slightly).
+
 Performance note: for backtests, features are computed **vectorised over the whole history** (fast), but
 every feature function must be *causal* so that the vectorised result equals the bar-by-bar result. The
 truncation leakage test enforces this equivalence.

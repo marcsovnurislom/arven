@@ -1,0 +1,55 @@
+# ARVEN feature configuration (Stage 3).
+# Every window / period used by a feature lives here. Changing any value changes the feature
+# definition hash recorded in the cache manifest; adding, removing or redefining a feature requires a
+# new `version`.
+#
+# Features are computed on the decision grid = 1h bar closes. Row `t` uses only data with
+# available_at <= t (see docs/architecture.md section 10).
+
+version: v1
+
+# Recursive indicators (EMA, Wilder smoothing) are seeded at the first stored bar. Their output is NaN
+# until ceil(warmup_factor * period) valid inputs have been seen.
+warmup_factor: 5
+
+returns:                        # log returns over N bars of the source timeframe
+  h1_horizons: [1, 4, 24, 72, 168]
+  h4_horizons: [1, 6, 30]
+  m15_horizons: [1, 4]
+
+volatility:
+  atr_period: 14                # ATR% on 1h and 4h
+  rv5m_short_hours: 1           # realized vol from 5m returns, hourly-equivalent
+  rv5m_long_hours: 24
+  cc_vol_short_bars: 24         # std of 1h log returns
+  cc_vol_long_bars: 168
+  parkinson_window: 24          # 1h bars
+
+trend:
+  ema_periods: [20, 50, 200]    # log(close / EMA) on 1h and 4h
+  slope_ema_period: 50          # must be one of ema_periods
+  slope_bars: 5
+  adx_period: 14
+  donchian_windows: [24, 168]   # 1h bars
+
+momentum:
+  rsi_period: 14                # on 15m, 1h and 4h
+  macd_fast: 12                 # 1h
+  macd_slow: 26
+  macd_signal: 9
+  bollinger_window: 20          # 1h
+  bollinger_k: 2.0
+
+volume:
+  relative_window: 24           # 1h bars, trailing mean of the previous N bars (current bar excluded)
+
+funding:
+  z_window: 90                  # number of trailing settled fundings
+  sum_periods: 3                # sum of the last N settled fundings (3 x 8h = 24h)
+  max_age_intervals: 1.5        # latest funding older than this many intervals => NaN
+
+open_interest:
+  max_staleness_seconds: 900    # latest snapshot older than this (from its timestamp) => NaN, never carried forward
+  change_hours: [1, 4, 24]
+  z_window_hours: 720           # 30 days of hourly as-of values
+  z_min_valid_fraction: 0.9     # trailing window needs at least this share of valid hourly values

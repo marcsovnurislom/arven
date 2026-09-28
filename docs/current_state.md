@@ -1,15 +1,85 @@
 # ARVEN — Current state
 
-_Last updated: 2026-09-28_
+_Last updated: 2026-09-28 (Stage 3 complete)_
 
 ## Phase
 
-**Stage 2 is complete: the full backfill 2020-01-01 → 2026-07-01 is ingested, verified and awaiting user review.**
-- Stage 3 has not been started.
-- Split dates, `forward_start`, the architecture, the DuckDB index/storage design and the 300 s OI availability delay
-  are all unchanged.
+**Stage 3 (features) is complete: reviewed and approved by the user on 2026-09-28 as implemented, no redesign required. It is not committed yet.**
+- Stage 2 is complete: the full backfill 2020-01-01 → 2026-07-01 is ingested and verified (see below).
+- Stage 4 (backtester) has not been started.
+- Split dates, `forward_start`, the DuckDB index/storage design and the 300 s OI availability delay are unchanged.
+  No Stage 0–2 behaviour changed: the only edits to existing files are `cli.py` (new `features` command),
+  `pyproject.toml` (`numpy` dependency, pytest path/marker) and doc updates.
 - Stage 1 + Stage 2 are committed on branch `feat/historical-data` (commit `efb6677`, "feat(data): complete historical
-  market data pipeline"). The working tree was clean at that commit.
+  market data pipeline"), followed by a docs commit (`4be9329`). Stage 3 changes are in the working tree.
+
+## Stage 3 — features (v1)
+
+**What was built** (see "What exists" for files): a causal feature builder that turns the stored 1m-derived bars,
+funding and open interest into **61 columns per 1h bar close** (56 952 rows, 2020-01-01 00:00 → 2026-06-30 23:00 UTC),
+cached as `data/features/v1/features_1h.parquet` + `manifest.json`.
+
+**Feature groups (v1)** — every window is in `config/features.yaml`:
+
+| Group | Columns |
+|---|---|
+| Returns | `h1_ret_{1,4,24,72,168}`, `h4_ret_{1,6,30}`, `m15_ret_{1,4}` |
+| Volatility | `h1_atr_pct`, `h4_atr_pct`, `h1_cc_vol_{24,168}`, `h1_vol_ratio`, `h1_parkinson_24`, `m5_rv_{1h,24h}` |
+| Trend | `h1_/h4_ema_dist_{20,50,200}`, `h1_/h4_ema_slope`, `h1_/h4_adx`, `h1_donchian_pos_{24,168}` |
+| Momentum | `m15_/h1_/h4_rsi`, `h1_macd_hist`, `h1_bb_z`, `h1_bb_width` |
+| Volume / candle | `h1_rel_volume`, `h1_rel_trades`, `h1_/h4_taker_buy_ratio`, `h1_body_ratio`, `h1_upper_wick`, `h1_lower_wick` |
+| Funding | `fund_rate`, `fund_z`, `fund_sum_last_3`, `fund_hours_to_next`, `funding_available` |
+| Open interest | `oi_chg_{1,4,24}h`, `oi_z`, `oi_top_ls_log`, `oi_taker_ls_log`, `oi_age_s`, `oi_available` |
+| Time | `time_hour_{sin,cos}`, `time_dow_{sin,cos}` |
+| Quality | `feat_ready` (1 if every *required* feature is finite; OI features are optional) |
+
+**Point-in-time rules as implemented**
+- Decision time `t` = a 1h bar close. Row `t` uses only records with `available_at <= t`; the bar closing at `t` is included
+  (with `bar_availability_delay_seconds > 0` it is not). Fills belong to the backtester (next bar's open).
+- 4h / 15m / 5m data are joined to the 1h grid with a backward as-of join on `available_at` (`features/asof.py`, the only join
+  used). A bar older than its own timeframe is NaN, never carried forward.
+- Each timeframe is computed on a gap-free grid: missing or incomplete bars are NaN rows, so `shift(k)` means k bars.
+- Rolling windows are explicit shifted additions; a NaN in a window gives NaN. **Recursive indicators (EMA, Wilder RSI/ATR/ADX)
+  are seeded at the first stored bar and emit only after `ceil(5 × period)` valid inputs** (`warmup_factor`, configurable). A NaN
+  input resets them. Consequence: `h4_ema_dist_200` needs 1 000 4h bars, so the first `feat_ready` row is
+  **2020-06-15 16:00 UTC** (52 951 ready rows).
+- **Builds always start at the first stored bar.** Dropping early history changes recursive features slightly (tested and documented),
+  so the cache is the canonical form; a live loop must compute over the same history (Stage 7).
+- Nothing is interpolated or forward-filled. Values are NaN or finite, never ±inf.
+- Missing-data policy (settles former Stage 3 input decisions):
+  - **OI**: latest snapshot with `available_at <= t`, used only if its timestamp is ≤ `open_interest.max_staleness_seconds`
+    (900 s) old. OI changes and the z-score use hourly as-of values, so source gaps yield NaN instead of shifting windows; the
+    z-score needs ≥ 90 % of the trailing 720 h. OI features are NaN before 2020-09-01.
+  - **Funding**: latest record with `available_at <= t`, NaN if older than 1.5 intervals; windows count *contiguous* settled fundings.
+  - **Zero-volume bars**: 0/0 ratios are NaN (e.g. taker-buy ratio), a real 0 volume gives `rel_volume = 0`.
+  - **2021-05-15 00:20 anomaly**: the 1m-derived values are used as decided in Stage 2; nothing is patched.
+
+**Validation (2026-09-28)**
+- Full suite: **403 tests pass** (109 from Stages 1–2, 294 new). New: `tests/features/` (indicators against hand-computed cases
+  and naive references, as-of/alignment, warm-up declarations, funding/OI policies, config, registry, builder, cache) and
+  `tests/leakage/`.
+- Leakage suite (`tests/leakage/`): for **every** registered feature, a **truncation test** (row at `t` from all data equals the
+  row from only data available at `t`) and a **perturbation test** (replacing everything that became available after `t` with
+  garbage changes nothing), both bitwise-exact; also with a bar availability delay and late-published funding. **Canary tests**
+  prove the checks catch a future-close feature, a centred rolling mean and a full-sample z-score, and do not flag a causal control.
+  **Static rules** (AST scan): no `shift(-k)`, centred windows, `bfill`/`ffill`/interpolation, whole-series mean/std/rank/quantile,
+  and `features/` imports nothing from `data`, storage, `ml`, `strategies`, `risk`, `backtest`, `regime`, etc.
+- Real-data spot check (`ARVEN_REAL_DATA_TESTS=1 ARVEN_REAL_DATA_SAMPLES=200`, development period only, read-only; inputs end at
+  2023-07-01): **passed**. Truncation test at 235 decision times (200 random from 2020-07 on, 25 early, 7 hand-picked: OI start
+  2020-09-01, the 2021-06-22 OI gap, the 2021-05-15 anomaly, 2021-12 and 2022-03) and perturbation test at 13 of them: no feature
+  changed, all 61 columns compared bitwise. Also: `h1_ret_1`/`h4_ret_1` equal an independent SQL computation at 25 random times,
+  and value invariants hold on all 30 648 development rows. Runs in about 1 minute.
+- Real build: 6.7 s, **peak working set 282 MB** (target < 500 MB). Two consecutive builds gave the identical content hash
+  (`c06b09e7…`); the manifest records definition hash, feature-config hash, app-config hash, source-data fingerprint, git commit.
+- `arven features check`: definition hash, column list, content hash and value invariants (RSI/ADX in [0,100], ratios in
+  [0,1], no ±inf) all pass. Statistics are printed for the **development period only**; the sealed test period was not inspected.
+
+**Data findings surfaced by the feature build (not pipeline bugs)**
+- Binance metrics files have **empty `sum_toptrader_long_short_ratio` for almost every row from 2021-12 to 2022-12** (only parts of
+  2022-06 and 2022-12 are filled) and **empty `sum_taker_long_short_vol_ratio` from 2021-12 to 2022-05**. The stored NULLs match
+  the raw files (Stage 2 verified stored vs raw). So in the development period `oi_top_ls_log` is NaN for 44 % of rows and
+  `oi_taker_ls_log` for 29 %; `oi_chg_*` / `oi_z` are NaN for 19–22 % (mostly the pre-2020-09 boundary).
+- `oi_age_s` has mean 300.1 s (the publication delay) and maximum 900 s (the staleness limit) in the development period.
 
 ## Full backfill results (per yearly chunk)
 
@@ -126,14 +196,24 @@ Architecture (`docs/architecture.md`) is approved as the *target* architecture, 
 
 ```
 .gitignore                  # .venv, /data/ (root-anchored!), .env, caches, *.duckdb
-pyproject.toml              # deps: duckdb, pydantic, pyyaml; dev: pytest; script `arven`; installed editable (pip -e)
+pyproject.toml              # deps: duckdb, numpy, pydantic, pyyaml; dev: pytest; script `arven`; installed editable (pip -e); pytest path src+tests, marker real_data
 config/
   default.yaml              # project, market, data (data_dir, history_start/end, bar + OI availability delays), download (retry policy, crosscheck TFs)
   costs.yaml                # maker/taker fee bps, order types, slippage model params, funding assumptions
   splits.yaml               # dev 2020-01-01→2023-07-01, val →2025-01-01, sealed test →2026-07-01, forward_start 2026-07-01
+  features.yaml             # feature version, warm-up factor, every window/period of the v1 features (own hash; not part of AppConfig.config_hash)
 src/arven/
-  __main__.py, cli.py       # python -m arven {ingest|resample|crosscheck|quality|export|status}
-  core/                     # time.py, timeframes.py, types.py, config.py (Stage 1)
+  __main__.py, cli.py       # python -m arven {ingest|resample|crosscheck|quality|export|status|features build|check|status}
+  core/                     # time.py, timeframes.py, types.py, config.py (Stage 1); series.py (columnar BarSeries/FundingSeries/OpenInterestSeries/MarketInputs
+                            #   with available_until + regularized), features_config.py (Stage 3)
+  features/                 # Stage 3, pure numpy (no I/O, no DB, no later-stage imports; enforced by tests)
+    indicators.py             # causal primitives: shift, rolling sum/mean/std/max/min, EMA, Wilder RMA, ATR, RSI, ADX, MACD, Bollinger, Donchian, Parkinson
+    asof.py                   # backward as-of join on available_at with staleness limit
+    spec.py, registry.py      # FeatureSpec (name, group, source, warmup_bars, required) and the ordered registry + definition hash
+    bars.py                   # 5m/15m/1h/4h features, each defined once next to its spec
+    futures.py                # funding, open-interest and time features
+    builder.py                # build_features(MarketInputs, decision times, config) -> FeatureTable; decision_grid
+    checks.py                 # value-range invariants
   data/
     adapters/binance_bulk.py  # Binance bulk layout, SourceFile, plan_files, parse_checksum, has_header
     download.py               # Downloader: retries + exponential backoff with jitter, SHA-256 verify, .part + atomic rename
@@ -144,12 +224,18 @@ src/arven/
     crosscheck.py             # derived bars vs Binance native klines (ohlcv_native)
     quality.py                # QualityChecker → quality_results, data_gaps
     export.py                 # Parquet export (atomic swap)
+    reader.py                 # read-only DuckDB -> MarketInputs (bars with delay applied, funding, OI)  (Stage 3)
+    storage/feature_store.py  # feature cache: Parquet via in-memory DuckDB (NaN <-> NULL) + manifest.json  (Stage 3)
 tests/
   conftest.py               # make_config fixture (isolated tmp data_dir)
+  synthetic_market.py, leakage_harness.py   # deterministic synthetic bars/funding/OI; generic truncation + perturbation checks
   unit/                     # time, timeframes, types, config, binance_bulk, download, resample
   integration/test_ingestion_pipeline.py   # local fake-Binance HTTP server: formats, resets, 404, checksum, rollback, idempotency, quality
+  features/                 # indicators, series + as-of, bar features (warm-up, alignment, delay, gaps), funding/OI/time, config/registry/builder, cache
+  leakage/                  # test_no_lookahead (every feature), test_canary, test_static_rules, test_real_data (opt-in)
 ```
-109 tests, all passing (`.venv/Scripts/python.exe -m pytest`, about 30 s).
+403 tests, all passing (`.venv/Scripts/python.exe -m pytest`, about 40 s). Real-data leakage checks are opt-in:
+`ARVEN_REAL_DATA_TESTS=1 ARVEN_REAL_DATA_SAMPLES=200 .venv/Scripts/python.exe -m pytest tests/leakage/test_real_data.py`.
 
 ### Conventions (all later stages must follow)
 
@@ -188,9 +274,12 @@ tests/
 .venv/Scripts/python.exe -m arven quality    --start 2024-01-01 --end 2024-03-01
 .venv/Scripts/python.exe -m arven export
 .venv/Scripts/python.exe -m arven status
+.venv/Scripts/python.exe -m arven features build     # full history -> data/features/v1/ (about 7 s, 282 MB peak; DB opened read-only)
+.venv/Scripts/python.exe -m arven features check     # cache hash/invariants + development-period statistics only
+.venv/Scripts/python.exe -m arven features status
 ```
 
-The examples above use the 2024-01 → 2024-03 slice. Without `--start`/`--end`, commands use
+The data examples above use the 2024-01 → 2024-03 slice. Without `--start`/`--end`, commands use
 `data.history_start`/`history_end` (the full 2020-01 → 2026-07 period).
 
 The full backfill is already completed and verified (see "Full backfill results"), so there is nothing left to
@@ -270,27 +359,41 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 
 ## Open issues / decisions for the user
 
-1. ~~Full backfill~~: done (see above). Review pending.
+1. ~~Full backfill~~: done. ~~Stage 3 features~~: done and approved (final review re-run: 403 tests green, 3 opt-in real-data tests pass).
 2. **`forward_start = 2026-07-01` is already in the past** (unchanged as instructed). It needs relabelling before paper trading.
 3. **Contiguous splits with no embargo.** To be handled by purging/embargo in Stage 6.
 4. **DuckDB size and compaction.** The DB is 475 MB uncompacted for the full period; the storage design is frozen for now.
-5. **Stage 3 input decisions:**
-   - how volume features treat the 2021-05-15 source anomaly and the zero-volume bars
-   - how OI features represent the 156 source gaps and the pre-2020-09 boundary (NaN/staleness, never interpolation)
+5. ~~Stage 3 input decisions~~: resolved by the missing-data policy in "Stage 3 — features" (OI gaps and the pre-2020-09 boundary
+   are NaN with staleness, never interpolated; zero-volume ratios are NaN; the 2021-05-15 anomaly is left as is).
 6. LLM provider (later). Thesis success criterion.
+7. **Top-trader and taker long/short ratios are empty in the source from 2021-12 to 2022-12 (taker: to 2022-05).** `oi_top_ls_log` /
+   `oi_taker_ls_log` are therefore NaN for a large part of the development period. **Carried to Stage 5 (strategy inputs) and Stage 6
+   (ML feature selection, fitted on training folds only):** decide whether to use, drop or restrict them; `oi_chg_*`, `oi_z` and the open-interest level itself are unaffected.
+8. **The feature cache covers the whole history, including validation and sealed-test rows** (features are a causal transform with
+   no fitting, and only development-period statistics were inspected). **Carried to Stage 4 (backtest data loader must enforce the split
+   rules and log every read of the sealed period) and Stage 6 (purged walk-forward, sealed-test evaluation log).**
+9. **Warm-up costs the first 167 days** of the development period for `feat_ready` (`h4_ema_dist_200` needs 1 000 4h bars).
+   Lowering `warmup_factor` or dropping the 4h EMA200 is possible via `config/features.yaml`, at the price of a new feature version.
+10. The manifest records `git_commit` = `4be9329` because Stage 3 code was uncommitted when the cache was built. After the Stage 3 commit,
+    rebuild once so the manifest points at the commit that contains the code (the content hash `c06b09e7…` must not change).
+11. `features build` always rebuilds the full history (about 7 s); there is no incremental update yet (Stage 7). If bars are
+    re-ingested, rebuild: the manifest's `source_fingerprint` identifies the data a cache was built from.
 
 ## What does NOT exist yet
 
-- Features, regime, strategies, ML, decision, risk, backtest, live/paper, news, LLM, dashboard.
+- Regime, strategies, ML, decision, risk, backtest, live/paper, news, LLM, dashboard.
+- Labels (`ml/labels`), `MarketSnapshot` as a separate class (its job is done by `core.series.MarketInputs.available_until` and
+  `data.reader`), and the `feature_sets` DuckDB table (replaced by `manifest.json`).
 - REST incremental updates (only bulk files are supported so far).
 - `config/strategies.yaml`, `config/risk.yaml`.
-- Git: current branch `feat/historical-data`; one commit so far, `efb6677` (Stage 1 + Stage 2).
+- Git: branch `feat/historical-data`; commits `efb6677` (Stage 1 + 2) and `4be9329` (docs). Stage 3 is uncommitted.
 
 ## Environment
 
 - `.venv`: Python 3.13.12.
   - Added in Stage 1: `pyyaml`, `pytest`.
   - Added in Stage 2: `duckdb 1.5.5`, plus the project itself installed editable (`pip install -e .`).
+  - Added in Stage 3: `numpy 2.5.3` (the only new dependency; the install needed several retries because of connection resets).
   - Not installed: pandas, pyarrow.
 - Pre-existing packages from the user: `openai`, `pydantic`, `httpx2`, `python-dotenv`.
 
@@ -313,3 +416,8 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-09-28 | Exact duplicate source rows dropped and counted; conflicting duplicates fail the file | implemented (Stage 2) |
 | 2026-09-28 | OI availability delay 300 s (conservative, configurable) | implemented (Stage 2) |
 | 2026-09-28 | Only new dependency is `duckdb` (stdlib for HTTP/zip/hash); no pandas/pyarrow yet | implemented (Stage 2) |
+| 2026-09-28 | Stage 3 plan: numpy only; 1h bar-close decision grid; 5x configurable warm-up for recursive indicators; Parquet + manifest cache; v1 feature set; regime/strategy features left to Stage 5 | approved |
+| 2026-09-28 | Features are pure numpy under `features/`; DB reading (`data/reader.py`) and cache I/O (`data/storage/feature_store.py`) live in `data/`; shared columnar types in `core/series.py` | implemented (Stage 3) |
+| 2026-09-28 | Builds always start at the first stored bar (recursive indicators are seeded there); the cache is the canonical form | implemented (Stage 3) |
+| 2026-09-28 | Missing data is NaN, never interpolated or carried forward; OI/funding staleness limits in `config/features.yaml` | implemented (Stage 3) |
+| 2026-09-28 | Feature config has its own hash; `AppConfig.config_hash()` unchanged | implemented (Stage 3) |
