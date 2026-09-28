@@ -15,6 +15,7 @@ import numpy as np
 
 from arven.core.config import AppConfig
 from arven.core.series import REQUIRED_TIMEFRAMES, BarSeries, FundingSeries, MarketInputs, OpenInterestSeries
+from arven.core.splitguard import AllowedWindow
 from arven.core.time import to_ms
 from arven.core.timeframes import Timeframe
 
@@ -101,3 +102,43 @@ def load_feature_inputs(
         funding=load_funding(con, symbol, start_ms, end_ms),
         open_interest=load_open_interest(con, symbol, start_ms, end_ms),
     )
+
+
+def load_1m_bars(
+    con: duckdb.DuckDBPyConnection, symbol: str, window: AllowedWindow, query_log: list[dict] | None = None
+) -> dict[str, np.ndarray]:
+    """Raw 1m OHLC of an allowed window ``[start, end)`` (Stage 4). Only the window is ever queried."""
+    if query_log is not None:
+        query_log.append({"dataset": "ohlcv_1m", "start_ms": window.start_ms, "end_ms": window.end_ms})
+    d = con.execute(
+        "SELECT open_time_ms, open, high, low, close FROM ohlcv_1m "
+        "WHERE symbol = ? AND open_time_ms >= ? AND open_time_ms < ? ORDER BY open_time_ms",
+        [symbol, window.start_ms, window.end_ms],
+    ).fetchnumpy()
+    out = {
+        "time_ms": _i64(d["open_time_ms"]),
+        "open": _f64(d["open"]),
+        "high": _f64(d["high"]),
+        "low": _f64(d["low"]),
+        "close": _f64(d["close"]),
+    }
+    if len(out["time_ms"]):
+        window.assert_inside(int(out["time_ms"][0]), int(out["time_ms"][-1]), "ohlcv_1m")
+    return out
+
+
+def load_funding_window(
+    con: duckdb.DuckDBPyConnection, symbol: str, window: AllowedWindow, query_log: list[dict] | None = None
+) -> tuple[np.ndarray, np.ndarray]:
+    """Stored funding ``(time_ms, rate)`` rows of an allowed window (Stage 4)."""
+    if query_log is not None:
+        query_log.append({"dataset": "funding_rates", "start_ms": window.start_ms, "end_ms": window.end_ms})
+    d = con.execute(
+        "SELECT funding_time_ms, funding_rate FROM funding_rates "
+        "WHERE symbol = ? AND funding_time_ms >= ? AND funding_time_ms < ? ORDER BY funding_time_ms",
+        [symbol, window.start_ms, window.end_ms],
+    ).fetchnumpy()
+    t, r = _i64(d["funding_time_ms"]), _f64(d["funding_rate"])
+    if len(t):
+        window.assert_inside(int(t[0]), int(t[-1]), "funding_rates")
+    return t, r

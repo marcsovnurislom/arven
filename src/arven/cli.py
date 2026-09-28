@@ -277,6 +277,109 @@ def cmd_features_status(cfg: AppConfig, args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_metrics(m: dict) -> None:
+    def f(x, spec=".6g"):
+        return "n/a" if x is None else format(x, spec)
+
+    print(f"  period {m['period']}  days {m['window_days']:.1f}  initial {f(m['initial_equity'], ',.2f')}  final {f(m['final_equity'], ',.2f')}")
+    print(f"  total_return {f(m['total_return'])}  gross_return {f(m['gross_return'])}  net_pnl {f(m['net_pnl_usdt'], ',.2f')} USDT  cagr {f(m['cagr'])}")
+    print(f"  volatility {f(m['volatility'])}  sharpe {f(m['sharpe'])}  sortino {f(m['sortino'])}")
+    print(f"  max_drawdown {f(m['max_drawdown'])} (intrabar {f(m['max_intrabar_drawdown'])}, {m['max_drawdown_duration_days']:.1f} days)")
+    print(f"  trades {m['n_trades']}  win_rate {f(m['win_rate'])}  profit_factor {f(m['profit_factor'])}  avg_trade {f(m['avg_trade_usdt'])} USDT")
+    print(f"  fees {f(m['fees_total'], ',.2f')}  slippage {f(m['slippage_total'], ',.2f')}  funding {f(m['funding_total'], ',.2f')}  turnover {f(m['turnover'])}  exposure {f(m['exposure_time'])}")
+    print(f"  exits {m['exit_reasons']}  orders {m['orders']}  liquidations {m['liquidations']}")
+    for w in m["warnings"]:
+        print(f"  WARNING: {w}")
+
+
+def _resolve_window(cfg: AppConfig, args: argparse.Namespace, context: dict):
+    from arven.core.splitguard import BacktestPeriod
+    from arven.runs import make_guard
+
+    start = to_ms(to_utc_datetime(args.start)) if args.start else None
+    end = to_ms(to_utc_datetime(args.end)) if args.end else None
+    return make_guard(cfg).resolve(
+        BacktestPeriod(args.period), start, end, allow_sealed=args.allow_sealed, reason=args.reason, context=context
+    )
+
+
+def cmd_backtest_run(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from arven.backtest.baselines import BuyAndHold, NoTrade, RandomEntry
+    from arven.core.backtest_config import load_backtest_config
+    from arven.runs import backtests_dir, execute_run, load_inputs
+
+    bt, fcfg = load_backtest_config(args.config_dir), load_features_config(args.config_dir)
+    window = _resolve_window(cfg, args, {"command": "backtest run", "provider": args.provider})
+    inputs = load_inputs(cfg, fcfg, window)
+    if args.provider == "no_trade":
+        provider = NoTrade()
+    elif args.provider == "buy_and_hold":
+        provider = BuyAndHold(bt.baselines.buy_and_hold.notional_fraction)
+    else:
+        re = bt.baselines.random_entry
+        provider = RandomEntry(
+            base_seed=cfg.project.random_seed, spawn_index=args.seed_index, n_trades=re.n_trades,
+            holding_minutes=re.holding_minutes, notional_fraction=re.notional_fraction, direction_mode=re.direction_mode,
+        )
+    out = execute_run(cfg, bt, fcfg, window, provider, inputs, stress=args.stress, out_dir=backtests_dir(cfg))
+    print(f"run {out.run_id} ({args.provider}) -> {out.run_dir}")
+    _print_metrics(out.metrics)
+    print(f"  result_hash {out.result_hash}   touched_test_set={out.manifest['touched_test_set']}   git_dirty={out.manifest['git_dirty']}")
+    return 0
+
+
+def cmd_backtest_baselines(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from arven.core.backtest_config import load_backtest_config
+    from arven.runs import comparison_text, load_inputs, run_baselines
+
+    bt, fcfg = load_backtest_config(args.config_dir), load_features_config(args.config_dir)
+    window = _resolve_window(cfg, args, {"command": "backtest baselines"})
+    inputs = load_inputs(cfg, fcfg, window)
+    summary = run_baselines(cfg, bt, fcfg, window, inputs, stress=args.stress, n_seeds=args.seeds)
+    print(comparison_text(summary))
+    print(f"artifacts: {summary['dir']}")
+    peak = _peak_working_set_mb()
+    if peak is not None:
+        print(f"peak working set: {peak:.0f} MB")
+    return 0 if summary["random_entry"]["reproducibility_check_seed0"] else 1
+
+
+def _find_run_dir(cfg: AppConfig, arg: str):
+    from pathlib import Path
+
+    from arven.runs import backtests_dir
+
+    p = Path(arg)
+    if p.exists():
+        return p
+    q = backtests_dir(cfg) / arg
+    if q.exists():
+        return q
+    raise SystemExit(f"no such run directory: {arg}")
+
+
+def cmd_backtest_verify(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from arven.runs import verify_run
+
+    res = verify_run(_find_run_dir(cfg, args.run))
+    print(f"verify {args.run}: {'OK' if res['ok'] else 'FAILED'}  result_hash {res['result_hash']}  touched_test_set={res['touched_test_set']}")
+    for p in res["problems"]:
+        print(f"  PROBLEM {p}")
+    return 0 if res["ok"] else 1
+
+
+def cmd_backtest_show(cfg: AppConfig, args: argparse.Namespace) -> int:
+    d = _find_run_dir(cfg, args.run)
+    m = json.loads((d / "run.json").read_text(encoding="utf-8"))
+    if "metrics" not in m:
+        print(json.dumps(m, indent=2, sort_keys=True)[:4000])
+        return 0
+    print(f"run {m['run_id']}  provider {m['provider'].get('name')}  git {m['git_commit']}{' (dirty)' if m['git_dirty'] else ''}")
+    _print_metrics(m["metrics"])
+    print(f"  feature {m['feature_version']} content {m['feature_content_hash'][:12]}  result_hash {m['result_hash']}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="arven", description="ARVEN data pipeline (research only, no execution)")
     parser.add_argument("--config-dir", default=None, help="configuration directory (default: <project>/config)")
@@ -307,6 +410,32 @@ def build_parser() -> argparse.ArgumentParser:
     fsub.add_parser("build", help="compute features on the 1h grid, write the Parquet cache").set_defaults(func=cmd_features_build)
     fsub.add_parser("check", help="verify the cache and print development-period stats").set_defaults(func=cmd_features_check)
     fsub.add_parser("status", help="show the cache manifest").set_defaults(func=cmd_features_status)
+
+    p = sub.add_parser("backtest", help="deterministic 1m backtester and baselines (Stage 4)")
+    bsub = p.add_subparsers(dest="backtest_command", required=True)
+
+    def with_window(q: argparse.ArgumentParser) -> argparse.ArgumentParser:
+        q.add_argument("--period", choices=["development", "validation", "test"], default="development")
+        q.add_argument("--start", help="UTC start date inside the period (default: period start)")
+        q.add_argument("--end", help="UTC end date inside the period (default: period end)")
+        q.add_argument("--stress", action="store_true", help="multiply slippage by costs.slippage.stress_multiplier")
+        q.add_argument("--allow-sealed", action="store_true", help="acknowledge access to the SEALED test period (logged)")
+        q.add_argument("--reason", help="required with --allow-sealed; recorded permanently in the sealed-access log")
+        return q
+
+    q = with_window(bsub.add_parser("run", help="run one baseline provider on a period"))
+    q.add_argument("--provider", choices=["no_trade", "buy_and_hold", "random_entry"], required=True)
+    q.add_argument("--seed-index", type=int, default=0, help="random_entry spawn index")
+    q.set_defaults(func=cmd_backtest_run)
+    q = with_window(bsub.add_parser("baselines", help="no-trade, buy-and-hold and the random-entry distribution, side by side"))
+    q.add_argument("--seeds", type=int, default=None, help="override baselines.random_entry.n_seeds")
+    q.set_defaults(func=cmd_backtest_baselines)
+    q = bsub.add_parser("verify", help="recompute a run's hashes from its files")
+    q.add_argument("run")
+    q.set_defaults(func=cmd_backtest_verify)
+    q = bsub.add_parser("show", help="print a stored run's metrics")
+    q.add_argument("run")
+    q.set_defaults(func=cmd_backtest_show)
     return parser
 
 

@@ -1,0 +1,47 @@
+# ARVEN backtest configuration (Stage 4).
+# Fees, slippage and funding policy live in costs.yaml; this file holds the account, margin and reporting
+# assumptions. Values marked "assumption" are NOT verified against the exchange's current schedule and must
+# be checked before results are quoted anywhere.
+
+initial_equity_usdt: 10000.0        # assumption
+leverage: 3.0                       # exchange leverage setting AND cap on notional / equity (architecture: "e.g. 3x")
+margin_mode: isolated               # one position; margin = notional / leverage; loss capped at that margin
+
+# Isolated-margin liquidation: margin balance <= maintenance_margin_rate * notional.
+# Assumption: single flat rate (no tiered schedule), from the first BTCUSDT tier. Must satisfy rate < 1 / leverage.
+maintenance_margin_rate: 0.004
+
+# DECISION PENDING (found by the first real buy-and-hold run, see docs/current_state.md).
+# true : funding payments are debited from the position's isolated margin, so the liquidation price moves with the
+#        margin balance (margin + funding + unrealized PnL <= maintenance margin liquidates). Equity cannot go negative.
+# false: the approved plan's D11 model - liquidation price fixed at entry, funding ignored. A long held for years then
+#        drains the wallet below zero without ever being liquidated (equity < 0), which no real account allows.
+liquidation_includes_funding: true
+
+# Lot rules for BTCUSDT. Assumptions.
+qty_step_btc: 0.001
+min_notional_usdt: 100.0
+
+# The order created at decision time t fills at the open of the 1m bar at t + latency (architecture default: the
+# first 1m bar after t). Must be >= data.bar_availability_delay_seconds and < 60 minutes. No forward search: if that
+# bar is missing the order is cancelled.
+latency_minutes: 0
+
+end_of_period: close_last_bar        # open position is closed at the close of the last 1m bar of the window
+data_gap_policy: exit_at_next_open   # a missing-bar gap while in a position closes it at the first open after the gap
+
+# Metric conventions.
+annualization_days: 365
+risk_free_rate: 0.0                  # annual, simple
+min_days_for_ratios: 30              # Sharpe / Sortino / volatility are null below this many daily returns
+min_trades_warning: 30
+
+baselines:
+  buy_and_hold:
+    notional_fraction: 1.0
+  random_entry:                      # standalone Stage 4 defaults; a strategy-matched mode comes with Stage 5
+    n_seeds: 200
+    n_trades: 100
+    holding_minutes: 1440
+    direction_mode: random_50_50
+    notional_fraction: 1.0

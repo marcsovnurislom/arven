@@ -1,17 +1,21 @@
 # ARVEN — Current state
 
-_Last updated: 2026-09-28 (Stage 3 complete)_
+_Last updated: 2026-09-28 (Stage 4 implemented, awaiting review)_
 
 ## Phase
 
-**Stage 3 (features) is complete: reviewed and approved by the user on 2026-09-28 as implemented, no redesign required. It is not committed yet.**
+**Stage 4 (backtester) is implemented and validated; it awaits user review and is not committed.**
+- Stage 3 (features) is complete: reviewed, approved and committed (`6ac57d4`).
 - Stage 2 is complete: the full backfill 2020-01-01 → 2026-07-01 is ingested and verified (see below).
-- Stage 4 (backtester) has not been started.
+- Stage 5 (regime, strategies, decision, risk) has not been started.
 - Split dates, `forward_start`, the DuckDB index/storage design and the 300 s OI availability delay are unchanged.
-  No Stage 0–2 behaviour changed: the only edits to existing files are `cli.py` (new `features` command),
-  `pyproject.toml` (`numpy` dependency, pytest path/marker) and doc updates.
-- Stage 1 + Stage 2 are committed on branch `feat/historical-data` (commit `efb6677`, "feat(data): complete historical
-  market data pipeline"), followed by a docs commit (`4be9329`). Stage 3 changes are in the working tree.
+  No Stage 0–3 behaviour changed: the only edits to existing files are `cli.py` (new `features` and `backtest`
+  commands), `data/reader.py` and `data/storage/feature_store.py` (new windowed read functions, purely additive —
+  184 insertions, 0 deletions across the three files), `pyproject.toml` (Stage 3: `numpy`, pytest path/marker) and
+  doc updates.
+- Stage 1 + Stage 2 are committed on branch `feat/historical-data` (commit `efb6677`), followed by a docs commit
+  (`4be9329`) and the Stage 3 commit (`6ac57d4`, "feat(features): causal 1h-grid feature set v1 with leakage test
+  suite"). Stage 4 changes are in the working tree.
 
 ## Stage 3 — features (v1)
 
@@ -80,6 +84,142 @@ cached as `data/features/v1/features_1h.parquet` + `manifest.json`.
   the raw files (Stage 2 verified stored vs raw). So in the development period `oi_top_ls_log` is NaN for 44 % of rows and
   `oi_taker_ls_log` for 29 %; `oi_chg_*` / `oi_z` are NaN for 19–22 % (mostly the pre-2020-09 boundary).
 - `oi_age_s` has mean 300.1 s (the publication delay) and maximum 900 s (the staleness limit) in the development period.
+
+## Stage 4 — backtester
+
+**What was built** (see "What exists" for files): a deterministic, event-driven 1m execution backtester. It turns a
+`SignalProvider`'s `Signal`s (decided at each 1h bar close, from Stage 3's `feat_ready` grid) into fills, funding
+settlements, exits and a full order/fill/trade/equity ledger, with fees, slippage, isolated margin and liquidation.
+
+**Execution model**
+- **Clock:** `SimulationClock` iterates the pre-computed 1h decision grid of the requested window; nothing in
+  `backtest/` reads the wall clock (`test_backtest_static_rules.py` enforces this with an AST scan).
+- **Decision → order → fill:** at `t`, the provider sees a `FeatureView` (raises `LookAheadError` for any row after
+  `t`) and a `PortfolioSnapshot`, and returns a `Signal | None`. LONG/SHORT becomes an order that fills at the open
+  of the 1m bar at `t + latency_minutes` (default: `t` itself, i.e. the next bar). If that bar is missing, the order
+  is `CANCELLED(no_market_data)` — no forward search.
+- **Costs:** taker fee (`costs.yaml`), and slippage = `s * (fixed_bps + volatility_multiplier * bar_range_bps) / 1e4`
+  on the fill/exit bar's own range (`s` = `stress_multiplier` with `--stress`), adverse to the trade direction.
+- **Sizing / leverage / margin:** `notional_fraction * equity`, rounded down to `qty_step_btc`; rejected (with a
+  reason, never resized) if it exceeds `leverage`, falls below `min_notional_usdt`, or the isolated margin
+  (`notional / leverage`) plus the entry fee exceeds the wallet.
+- **Stop/target/time-stop:** distances are fractions of the fill price. In one bar, an adverse level (stop or
+  liquidation) always beats the take-profit; between two adverse levels the one nearer the entry triggers first. A
+  stop the market gaps through fills at the bar's open, never at the stop level. A target never fills better than
+  its level.
+- **Funding:** settled from the recorded rate at each funding timestamp while a position is open (entry instant
+  excluded, exit instant included), at `qty * open-price-at-that-minute * rate`; a missing rate aborts the run by
+  default (`costs.funding.missing_policy`).
+- **Liquidation:** `liquidation_includes_funding` (new; see open issue #13) — **true** (current default): funding is
+  debited from the position's isolated margin, so the liquidation price moves with the margin balance and equity can
+  never go negative; **false**: the plan's original model (liquidation price fixed at entry, funding never triggers
+  it — which a real long-held position with persistent positive funding can push into negative wallet equity, see
+  #13). Either way, on liquidation the wallet loses exactly the (possibly funding-adjusted) isolated margin; no exit
+  fee or extra slippage.
+- **One position, no pyramiding:** a second entry signal while a position is open is `REJECTED(position_open)`; only
+  an explicit `NO_TRADE(close_position=True)` closes early. Data gaps while a position is open close it at the first
+  bar after the gap (`DATA_GAP`). An open position at the window end is force-closed at the last bar's close
+  (`END_OF_PERIOD`).
+
+**Point-in-time and split enforcement**
+- `FeatureView` and `MarketData` are read-only, window-scoped, and every timestamp loaded is asserted inside the
+  requested `AllowedWindow`.
+- `SplitGuard.resolve(period, start?, end?)` is the only way to obtain an `AllowedWindow` (its constructor refuses to
+  be called directly — `test_allowed_window_cannot_be_forged`). A range crossing a period boundary is refused. The
+  sealed `test` period additionally needs `allow_sealed=True` and a non-empty `reason`; the access is appended to
+  `data/backtests/sealed_test_log.jsonl` **before** any data is read, so even an aborted attempt is logged.
+- Verified on real data: a development-period `arven backtest run` was refused for `--period test` without
+  `--allow-sealed`/`--reason`, and no sealed-log entry was written for the refusal.
+
+**Determinism and reproducibility**
+- Money is float64 with a fixed operation order; the only randomness is `RandomEntry`'s, seeded from
+  `SeedSequence(project.random_seed).spawn(n_seeds)[i]` (documented, and verified to match the plain
+  `spawn_key=(i,)` construction).
+- `result_hash` is a SHA-256 over the canonical (fixed column order, 10-decimals-rounded) CSV of every ledger; two
+  independent runs of the same inputs give an identical hash (verified on real development-period data, and with
+  golden hashes on three fixed synthetic scenarios in `test_report_determinism.py`).
+- Each run's `run.json` records: `git_commit` + `git_dirty`, the feature cache's `definition_hash` /
+  `data_sha256` (content hash) / `source_fingerprint`, a fingerprint of the 1m+funding arrays actually used,
+  `app_config_hash`, `backtest_config_hash`, the period/window, `touched_test_set`, the provider's parameters and a
+  `provider_hash`, the random-seed derivation, per-table hashes and `result_hash`. `arven backtest verify <run_id>`
+  recomputes every hash from the written files and checks that no logged data range left the window.
+
+**Correctness validation**
+- **Independent oracle:** a deliberately separate, naive bar-by-bar reference implementation of the same
+  specification (no shared code with the engine) matched the fast engine exactly (trades, exit reasons, funding,
+  every decision-time equity value, final wallet) on 300 seeded random scenarios covering every exit reason.
+- **~30 hand-computed accounting cases**, each with by-hand expected numbers: fees, slippage (with/without stress),
+  take-profit/stop/gap-through/same-bar-tie/liquidation-vs-stop-vs-target ordering, funding sign and boundary timing,
+  a missing funding rate (error and assumed-rate policies), each rejection reason, latency, end-of-period close,
+  a frictionless buy-and-hold matching independent price arithmetic, and both liquidation models.
+- **Accounting invariants** on 150 further random scenarios: `final_wallet = initial + Σ net_pnl`; per-trade
+  `net = gross_ref - slippage - fees + funding (+ liquidation loss)`; fill price = fill bar's open (adjusted); one
+  position at a time; notional ≤ leverage × equity; equity never negative when `liquidation_includes_funding=true`.
+- **Leakage** (`tests/leakage/test_backtest_leakage.py`): `FeatureView` refuses future rows; **prefix invariance**
+  (cutting all data at `T` leaves every trade closed before `T` and the equity curve up to `T` byte-identical) and
+  **perturbation** (garbage after `T` changes nothing decided or completed at or before `T`), both on 25 seeded
+  scenarios; a fills-at-next-open test (a price gap exactly at the decision time proves the fill is not the signal
+  bar's close); a test-only provider with raw access to the market's future is caught by its impossible return
+  (> 0.3 on a 30-day driftless random walk after costs), while 24 seeded `RandomEntry` runs on the same data show no
+  edge before costs (mean gross PnL within 4 standard errors of 0) and a loss after costs matching the fee+slippage
+  total almost exactly.
+- **Static rules:** an AST scan forbids wall-clock/file/unseeded-random calls and enforces that `backtest/` imports
+  nothing from `data`, `features`, `strategies`, `risk`, `regime`, `ml`, `decision` or `duckdb`, and that no
+  lower-layer or later-stage package imports `backtest`/`runs`.
+
+**Baselines on the real development period** (2020-01-01 → 2023-07-01, 1 277 days, repo `config/backtest.yaml` +
+`costs.yaml`, `liquidation_includes_funding=true`, git `6ac57d47` + Stage 4 working tree, `touched_test_set=false`;
+`arven backtest baselines --period development`, artifacts in `data/backtests/baselines-20260928T184751Z-b5abd36a/`):
+
+| metric | no_trade | buy_and_hold | random p5 | random mean | random p95 |
+|---|---:|---:|---:|---:|---:|
+| total_return | 0 | −1.905 | −0.562 | −0.083 | 0.612 |
+| net_pnl (USDT) | 0 | −19 046 | −5 616 | −829 | 6 115 |
+| max_drawdown | 0 | 1.155 | 0.194 | 0.388 | 0.616 |
+| n_trades | 0 | 1 | 100 | 100 | 100 |
+| win_rate | n/a | 0 | 0.400 | 0.478 | 0.551 |
+| profit_factor | n/a | n/a | 0.488 | 0.918 | 1.480 |
+| fees (USDT) | 0 | 5.0 | 644 | 953 | 1 372 |
+| slippage (USDT) | 0 | 4.2 | 325 | 476 | 693 |
+| funding (USDT, signed) | 0 | −19 041 | −136 | −3.0 | 118 |
+| turnover | 0 | 2.44 | 187 | 198 | 207 |
+| exposure_time | 0 | 0.570 | 0.078 | 0.078 | 0.078 |
+| sharpe | n/a | −0.205 | −1.099 | −0.149 | 0.808 |
+
+- **no_trade:** equity exactly flat at 10 000 (asserted).
+- **buy_and_hold** (`notional_fraction=1.0`, i.e. up to the 3× leverage cap): entered 2020-06-15 (the first
+  `feat_ready` decision) at 9 293.92, and was **liquidated 2022-06-13** at a reference price of 24 004.01 — a net
+  loss of 19 045.45 USDT (−190.5 % of the initial equity), *before* the price ever fell far enough alone: cumulative
+  funding of −19 040.46 USDT over ~2 years eroded the isolated margin, and with
+  `liquidation_includes_funding=true` that pulled the liquidation trigger price up to meet BTC's June 2022 decline.
+  This is the same scenario that originally exposed the fixed-liquidation-price model's flaw (see open issue #13),
+  now confirmed on real data: re-run with `liquidation_includes_funding=false` (the plan's original D11 model), the
+  identical trade instead runs to `END_OF_PERIOD` and ends at 12 262.68 (+22.6 %) — but along the way, at
+  2022-11-21 22:00 UTC, **equity reaches −2 585.50 USDT**, which no real isolated-margin account allows. Same market
+  data, same entry, only this one switch differs (`result_hash` for `false`: `b55d9d0c…`).
+- **random_entry** (200 seeds, 100 trades of 1 440 min = 24 h each, `notional_fraction=1.0`, 50/50 long/short): mean
+  net PnL is negative (−829 USDT) and mostly a function of costs — mean fees + slippage + |funding| ≈ 953 + 476 + 3 ≈
+  1 432 USDT, against a mean net loss of 829 USDT, so roughly two-thirds of the average loss is explained by
+  round-trip costs on a direction with no edge, consistent with a fair coin flip. All 200 seed schedules and their
+  `result_hash`es are stored in `random_entry/seeds.csv`; the seed-0 self-check reproduced exactly.
+- These are baseline measurements of the simulator (its costs, its leverage/liquidation mechanics), **not evidence
+  that any strategy is profitable** — no strategy exists yet.
+
+**Known limitations, all deliberate MVP simplifications (documented, not bugs)**
+- No maker fills (`require_taker_only` raises `ConfigurationError` if `costs.yaml` ever selects maker); no tiered
+  maintenance-margin schedule; no order-book/market-impact model; single funding-interval assumption
+  (`costs.funding.default_interval_hours`, informational elsewhere) drives the funding grid actually queried.
+- `qty_step_btc`, `min_notional_usdt` and `maintenance_margin_rate` are stated assumptions, not verified against
+  Binance's current live schedule (open issue #12).
+- The 3 real strategies, the ML meta-filter and the risk engine are Stage 5/6 — the backtester takes a
+  `SignalProvider`, not a strategy; only the 3 baselines exist in Stage 4, as the roadmap requires.
+
+**Operational notes**
+- `con.executemany` / a single large parameterised `INSERT` into a table with a `PRIMARY KEY` ART index is
+  pathologically slow in the installed DuckDB version (≈20 ms/row; 5 000 rows ≈ 94 s — this is what caused the first
+  integration-test run to hang for several minutes). Stage 2's own ingestion never hits this, since it loads via
+  `COPY … FROM` a file. Test helpers now use the same idiom (`bt_helpers.bulk_insert_1m/_funding`, `COPY FROM` a temp
+  CSV): 5 000 rows in ≈0.09 s. Nothing in `src/` was affected; this is a test-infrastructure fix only.
 
 ## Full backfill results (per yearly chunk)
 
@@ -202,10 +342,12 @@ config/
   costs.yaml                # maker/taker fee bps, order types, slippage model params, funding assumptions
   splits.yaml               # dev 2020-01-01→2023-07-01, val →2025-01-01, sealed test →2026-07-01, forward_start 2026-07-01
   features.yaml             # feature version, warm-up factor, every window/period of the v1 features (own hash; not part of AppConfig.config_hash)
+  backtest.yaml              # Stage 4: initial equity, leverage, margin/liquidation, lot rules, latency, metric conventions, baseline params (own hash)
 src/arven/
-  __main__.py, cli.py       # python -m arven {ingest|resample|crosscheck|quality|export|status|features build|check|status}
+  __main__.py, cli.py       # python -m arven {ingest|resample|crosscheck|quality|export|status|features ...|backtest ...}
   core/                     # time.py, timeframes.py, types.py, config.py (Stage 1); series.py (columnar BarSeries/FundingSeries/OpenInterestSeries/MarketInputs
                             #   with available_until + regularized), features_config.py (Stage 3)
+                            # signal.py (Signal: the decision->backtest contract), backtest_config.py, splitguard.py (Stage 4)
   features/                 # Stage 3, pure numpy (no I/O, no DB, no later-stage imports; enforced by tests)
     indicators.py             # causal primitives: shift, rolling sum/mean/std/max/min, EMA, Wilder RMA, ATR, RSI, ADX, MACD, Bollinger, Donchian, Parkinson
     asof.py                   # backward as-of join on available_at with staleness limit
@@ -225,17 +367,38 @@ src/arven/
     quality.py                # QualityChecker → quality_results, data_gaps
     export.py                 # Parquet export (atomic swap)
     reader.py                 # read-only DuckDB -> MarketInputs (bars with delay applied, funding, OI)  (Stage 3)
+                               # + load_1m_bars/load_funding_window (Stage 4): take an AllowedWindow, assert results lie inside it
     storage/feature_store.py  # feature cache: Parquet via in-memory DuckDB (NaN <-> NULL) + manifest.json  (Stage 3)
+                               # + read_window_parquet (Stage 4): reads only rows inside a window
+  backtest/                   # Stage 4, pure numpy/stdlib (no I/O, no DB, no wall-clock, no strategy/risk/ML imports; enforced by tests)
+    types.py                    # frozen records: Order, OrderEvent, Fill, FundingEvent, Position, Trade, EquityPoint, AccountState
+    costs.py, margin.py         # fee/slippage and isolated-margin arithmetic (pure)
+    accounting.py               # entry/funding/exit state transitions; the accounting equations (docstring)
+    marketdata.py                # validated 1m OHLC + funding-grid arrays; gap detection; fingerprint
+    clock.py                     # SimulationClock: the only source of "now"; pre-computed decision grid, no wall-clock
+    provider.py                  # FeatureView (clock-bound, raises LookAheadError), PortfolioSnapshot, DecisionContext, SignalProvider protocol
+    execution.py                 # 1m event-driven Simulator: funding -> liquidation/stop/gap/time-stop -> fill -> intrabar barriers, per bar
+    engine.py                    # Backtester: clock loop, decision -> order -> Simulator; BacktestResult
+    baselines.py                 # NoTrade, BuyAndHold, RandomEntry (seeded via SeedSequence(base_seed).spawn)
+    metrics.py                   # return/vol/Sharpe/Sortino/drawdown/trade stats/turnover/exposure; summarize_distribution (no ranking)
+    report.py                    # canonical CSV serialisation, table/result hashes
+  runs.py                     # composition root (Stage 4): load_inputs (window-scoped), execute_run/run_baselines, artifact + index writers, verify_run
 tests/
   conftest.py               # make_config fixture (isolated tmp data_dir)
   synthetic_market.py, leakage_harness.py   # deterministic synthetic bars/funding/OI; generic truncation + perturbation checks
+  bt_helpers.py, bt_scenarios.py            # Stage 4: tiny hand-made markets, scripted/random providers, the independent oracle engine,
+                                             #   bulk_insert_1m/bulk_insert_funding (COPY-based; see "Operational notes")
   unit/                     # time, timeframes, types, config, binance_bulk, download, resample
   integration/test_ingestion_pipeline.py   # local fake-Binance HTTP server: formats, resets, 404, checksum, rollback, idempotency, quality
   features/                 # indicators, series + as-of, bar features (warm-up, alignment, delay, gaps), funding/OI/time, config/registry/builder, cache
-  leakage/                  # test_no_lookahead (every feature), test_canary, test_static_rules, test_real_data (opt-in)
+  backtest/                 # config/Signal/MarketData, costs/margin, hand-computed accounting (~30 cases), oracle (300 seeds), invariants,
+                             #   baselines, metrics, report/determinism (golden hashes), splitguard+loaders, runs integration, static rules
+  leakage/                  # test_no_lookahead (every feature), test_canary, test_static_rules, test_real_data (opt-in),
+                             #   test_backtest_leakage.py (Stage 4: FeatureView/clock, prefix invariance, perturbation, cheater vs random)
 ```
-403 tests, all passing (`.venv/Scripts/python.exe -m pytest`, about 40 s). Real-data leakage checks are opt-in:
-`ARVEN_REAL_DATA_TESTS=1 ARVEN_REAL_DATA_SAMPLES=200 .venv/Scripts/python.exe -m pytest tests/leakage/test_real_data.py`.
+1145 tests (1137 passed, 8 skipped), all passing (`.venv/Scripts/python.exe -m pytest`, about 85 s). Skipped: the 3
+opt-in real-data checks and 5 static-import checks for packages that don't exist yet (Stage 5+). Real-data leakage
+checks are opt-in: `ARVEN_REAL_DATA_TESTS=1 ARVEN_REAL_DATA_SAMPLES=200 .venv/Scripts/python.exe -m pytest tests/leakage/test_real_data.py`.
 
 ### Conventions (all later stages must follow)
 
@@ -277,7 +440,14 @@ tests/
 .venv/Scripts/python.exe -m arven features build     # full history -> data/features/v1/ (about 7 s, 282 MB peak; DB opened read-only)
 .venv/Scripts/python.exe -m arven features check     # cache hash/invariants + development-period statistics only
 .venv/Scripts/python.exe -m arven features status
+.venv/Scripts/python.exe -m arven backtest run --provider no_trade|buy_and_hold|random_entry --period development
+.venv/Scripts/python.exe -m arven backtest baselines --period development   # all three side by side, no ranking
+.venv/Scripts/python.exe -m arven backtest verify <run_id>                  # recompute hashes from the written files
+.venv/Scripts/python.exe -m arven backtest show <run_id>
 ```
+`backtest run`/`baselines` take `--start`/`--end` (must lie inside `--period`, default the whole period),
+`--stress` (multiplies slippage by `costs.slippage.stress_multiplier`), and, for the sealed `test` period only,
+`--allow-sealed --reason "..."` (logged permanently before any data is read).
 
 The data examples above use the 2024-01 → 2024-03 slice. Without `--start`/`--end`, commands use
 `data.history_start`/`history_end` (the full 2020-01 → 2026-07 period).
@@ -369,15 +539,31 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 7. **Top-trader and taker long/short ratios are empty in the source from 2021-12 to 2022-12 (taker: to 2022-05).** `oi_top_ls_log` /
    `oi_taker_ls_log` are therefore NaN for a large part of the development period. **Carried to Stage 5 (strategy inputs) and Stage 6
    (ML feature selection, fitted on training folds only):** decide whether to use, drop or restrict them; `oi_chg_*`, `oi_z` and the open-interest level itself are unaffected.
-8. **The feature cache covers the whole history, including validation and sealed-test rows** (features are a causal transform with
-   no fitting, and only development-period statistics were inspected). **Carried to Stage 4 (backtest data loader must enforce the split
-   rules and log every read of the sealed period) and Stage 6 (purged walk-forward, sealed-test evaluation log).**
+8. ~~The feature cache covers the whole history, including validation and sealed-test rows~~: **enforced by Stage 4's
+   `SplitGuard`/`AllowedWindow`** — every backtest data read (1m bars, funding, feature rows) is confined to one configured
+   period; a range crossing a period boundary is refused; the sealed test period additionally needs `--allow-sealed` and a
+   `--reason`, logged to `data/backtests/sealed_test_log.jsonl` before any data loads. Verified: a development run's reader
+   never queries at or after 2023-07-01 (`test_loaders_return_only_rows_inside_the_window_and_log_the_ranges`). Still open for
+   Stage 6: purged walk-forward, sealed-test evaluation log for ML.
 9. **Warm-up costs the first 167 days** of the development period for `feat_ready` (`h4_ema_dist_200` needs 1 000 4h bars).
    Lowering `warmup_factor` or dropping the 4h EMA200 is possible via `config/features.yaml`, at the price of a new feature version.
-10. The manifest records `git_commit` = `4be9329` because Stage 3 code was uncommitted when the cache was built. After the Stage 3 commit,
-    rebuild once so the manifest points at the commit that contains the code (the content hash `c06b09e7…` must not change).
+10. ~~Feature cache manifest recorded the pre-commit git hash~~: resolved — rebuilt once after the Stage 3 commit; the content
+    hash (`c06b09e7…`) was verified unchanged and the manifest now records `git_commit = 6ac57d47…`.
 11. `features build` always rebuilds the full history (about 7 s); there is no incremental update yet (Stage 7). If bars are
     re-ingested, rebuild: the manifest's `source_fingerprint` identifies the data a cache was built from.
+12. **Stage 4 assumptions not verified against Binance's live schedule:** `maintenance_margin_rate` (0.4%, single flat tier,
+    no tiered schedule), `qty_step_btc` (0.001), `min_notional_usdt` (100). All are in `config/backtest.yaml`, clearly labelled,
+    and easy to correct once checked. They affect margin/liquidation levels and rejection thresholds, not the accounting logic.
+13. **`liquidation_includes_funding` (config/backtest.yaml) was added beyond the approved D11 model.** The first real
+    buy-and-hold run (held ~3.5 years) showed the plan's fixed-liquidation-price model lets a persistently-paying long
+    drain the wallet **below zero** without ever being liquidated — no real exchange allows negative equity on an isolated
+    position. With the switch **on** (now the default), funding is debited from the position's isolated margin and the
+    liquidation price moves with it, so equity can no longer go negative; with it **off**, behaviour matches the plan
+    exactly (fixed liquidation price, funding never triggers it). Both paths are implemented, hand-computed and tested
+    (`test_funding_can_liquidate_when_it_is_debited_from_the_margin`,
+    `test_long_hold_through_persistent_positive_funding_is_liquidated_not_negative`). **This needs your confirmation**:
+    keep the default `true`, or explicitly choose `false` to match the plan's original D11 to the letter (equity can then
+    go negative on paper, which the metrics/report would need to flag more loudly if ever selected).
 
 ## What does NOT exist yet
 

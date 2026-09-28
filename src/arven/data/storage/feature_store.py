@@ -78,6 +78,20 @@ def read_table_parquet(path: Path, version: str, specs: tuple[FeatureSpec, ...])
     return FeatureTable(version, t_ms, columns, specs)
 
 
+def read_window_parquet(path: Path, version: str, specs: tuple[FeatureSpec, ...], start_ms: int, end_ms: int) -> FeatureTable:
+    """Read only the rows with ``start_ms <= t_ms < end_ms`` (so a caller never loads rows outside its window)."""
+    con = duckdb.connect(":memory:")
+    try:
+        d = con.execute(
+            f"SELECT * FROM read_parquet('{_sql_path(path)}') WHERE t_ms >= ? AND t_ms < ? ORDER BY t_ms", [start_ms, end_ms]
+        ).fetchnumpy()
+    finally:
+        con.close()
+    t_ms = np.asarray(d.pop("t_ms"), dtype=np.int64)
+    columns = {name: np.ma.filled(np.ma.asarray(arr).astype(np.float64), np.nan) for name, arr in d.items()}
+    return FeatureTable(version, t_ms, columns, specs)
+
+
 def build_manifest(
     table: FeatureTable,
     *,
