@@ -317,10 +317,11 @@ paper_trades(signal_id, entry_time, entry_price, exit_time, exit_price, pnl, exi
 >   liquidation) the one nearer the entry triggers first. A stop gapped through fills at the bar's open.
 > - **Fees are taker-only** in Stage 4 (`ConfigurationError` if `costs.yaml` ever selects a maker order type) — a
 >   maker fill-probability model is out of scope for the MVP.
-> - **Leverage / margin / liquidation:** isolated margin = notional / leverage; a config switch
->   `liquidation_includes_funding` (default **true**) decides whether funding is debited from the position's margin
->   (so the liquidation price moves and equity can never go negative) or fixed at entry per the original sketch
->   below (which a real multi-year hold with persistent funding can push into negative equity — see
+> - **Leverage / margin / liquidation:** isolated margin = notional / leverage. `liquidation_includes_funding = true`
+>   is the confirmed, final setting (2026-09-29): funding is debited from the position's margin, so the liquidation
+>   price moves with it and equity can never go negative. The alternative (`false`, fixed liquidation price per the
+>   original sketch below) remains implemented for reference but is not used — it can push a real multi-year hold
+>   with persistent funding into negative equity, see
 >   `current_state.md` open issue #13 for the real-data example that surfaced this).
 > - **Pipeline / `SignalProvider`:** Stage 5's strategy/ML/decision/risk stack does not exist yet, so the engine
 >   takes any `SignalProvider` (`decide(DecisionContext) -> Signal | None`); Stage 4 ships only the three baselines.

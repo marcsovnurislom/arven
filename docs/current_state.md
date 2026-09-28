@@ -554,16 +554,16 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 12. **Stage 4 assumptions not verified against Binance's live schedule:** `maintenance_margin_rate` (0.4%, single flat tier,
     no tiered schedule), `qty_step_btc` (0.001), `min_notional_usdt` (100). All are in `config/backtest.yaml`, clearly labelled,
     and easy to correct once checked. They affect margin/liquidation levels and rejection thresholds, not the accounting logic.
-13. **`liquidation_includes_funding` (config/backtest.yaml) was added beyond the approved D11 model.** The first real
-    buy-and-hold run (held ~3.5 years) showed the plan's fixed-liquidation-price model lets a persistently-paying long
-    drain the wallet **below zero** without ever being liquidated — no real exchange allows negative equity on an isolated
-    position. With the switch **on** (now the default), funding is debited from the position's isolated margin and the
-    liquidation price moves with it, so equity can no longer go negative; with it **off**, behaviour matches the plan
-    exactly (fixed liquidation price, funding never triggers it). Both paths are implemented, hand-computed and tested
-    (`test_funding_can_liquidate_when_it_is_debited_from_the_margin`,
-    `test_long_hold_through_persistent_positive_funding_is_liquidated_not_negative`). **This needs your confirmation**:
-    keep the default `true`, or explicitly choose `false` to match the plan's original D11 to the letter (equity can then
-    go negative on paper, which the metrics/report would need to flag more loudly if ever selected).
+13. ~~`liquidation_includes_funding` needs your confirmation~~ — **resolved, final decision (2026-09-29):
+    `liquidation_includes_funding = true`.** `liquidation_includes_funding` (config/backtest.yaml) was added beyond
+    the approved D11 model. The first real buy-and-hold run (held ~3.5 years) showed the plan's fixed-liquidation-price
+    model lets a persistently-paying long drain the wallet **below zero** without ever being liquidated — no real
+    exchange allows negative equity on an isolated position. With the confirmed setting, funding is debited from the
+    position's isolated margin and the liquidation price moves with it, so equity can no longer go negative. The
+    alternative (`false`: fixed liquidation price, funding never triggers it, matching D11 to the letter) remains
+    implemented and tested for reference (`test_funding_can_liquidate_when_it_is_debited_from_the_margin`,
+    `test_long_hold_through_persistent_positive_funding_is_liquidated_not_negative`) but is not the configured
+    behaviour. `config/backtest.yaml` and `docs/architecture.md` §9 reflect this as final, not provisional.
 
 ## What does NOT exist yet
 
