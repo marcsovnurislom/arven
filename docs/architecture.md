@@ -417,6 +417,17 @@ clean A/B comparison "strategies alone" vs "strategies + ML".
 
 ## 12. Market regime detection
 
+> **As implemented in Stage 5** (`src/arven/regime/detector.py`; details in `current_state.md`): the trend
+> axis needs 4h ADX above threshold **and** 1h ADX confirmation, with direction from the 4h EMA-slope sign
+> agreeing with price-vs-EMA200; any disagreement is `NO_TREND`. The stress flag is implemented (funding
+> z-score or hourly OI-change magnitude); the "gap/outage" component is not — data staleness is instead a
+> risk-engine veto (`stale_or_incomplete_data`), not a regime state. Hysteresis is a dwell counter: a
+> candidate state must be the raw classifier's output for `min_dwell_bars` consecutive decisions —
+> including the very first transition away from `NO_TREND` — before the detector switches; there is no
+> separate lower "exit" threshold (X and Y are the same threshold in both directions). Volatility percentile
+> uses the configured trailing window (default matches "1-year" here) but is computed on however much
+> history actually exists early on, converging to the full window over time, rather than being undefined.
+
 Start **rule-based and interpretable**, computed on 4h (context) with 1h confirmation, using only trailing data:
 
 | Axis | Measure | States |
@@ -435,6 +446,16 @@ Combined regime examples: `TREND_UP/NORMAL`, `RANGE/LOW`, `ANY/HIGH+STRESS`.
 ---
 
 ## 13. Combining multiple strategies
+
+> **As implemented in Stage 5** (`src/arven/strategies/`, `src/arven/decision/engine.py`): only strategies
+> 1-3 below were built (explicit Stage 5 scope); #4 (funding/positioning contrarian) was not. Weights are
+> equal (1.0 each) and static — the "later, weights ∝ validated performance" refinement is not implemented
+> (would need Stage 6-level backtesting-of-weights, out of scope here). **Step 4, the ML filter, does not
+> exist and was skipped entirely** (Stage 6) — the pipeline goes straight from the conflict/threshold check
+> (steps 3 and 5) to the risk engine. "Weighted vote" is exactly `score = Σ weight_s × strength_s`, summed
+> separately per direction then subtracted — `direction_s` isn't a separate multiplicative term since
+> candidates of one direction are summed together first. Output additionally carries a weighted-average
+> stop/take-profit hint and the shortest of the winning candidates' holding caps, for the risk engine.
 
 Initial strategy set (simple, independent, well-known — the point is the framework, not secret alpha):
 1. **Trend following** — EMA crossover / Donchian breakout on 1h with 4h trend filter.
@@ -457,6 +478,18 @@ Stacking (ML over all strategy outputs) is a later option once enough data exist
 ---
 
 ## 14. Risk-management architecture
+
+> **As implemented in Stage 5** (`src/arven/risk/engine.py`, `config/risk.yaml`; details in
+> `current_state.md`): rule 2 (macro-event blackout) is not implemented — it was already marked "later
+> stage" here (Stage 8) before Stage 5 began. All other rules (1, 3-8) are implemented as an ordered
+> veto/reduce chain; rule 7 (portfolio limits) is checked earliest in the actual code (position-already-open,
+> daily-loss, drawdown and cooldown are all cheap checks that make everything downstream moot if any holds),
+> not in numeric order — the numbering above is the architecture's, not the execution order. Leverage and
+> the maintenance-margin rate are read from `config/backtest.yaml` (one source of truth with the backtester),
+> not duplicated in `risk.yaml`. The liquidation-distance check (rule 8) reuses
+> `arven.backtest.margin.liquidation_price` — a pure function, not the execution engine — and exploits that
+> the *relative* liquidation distance depends only on `(side, leverage, maintenance_margin_rate)`, not on the
+> actual entry price, so the risk engine never needs a live price to run this check.
 
 The risk engine is the **last gate**. It receives a proposed decision and the portfolio/market state and
 returns a final `Signal`. It can only **reduce size or veto** — never create or flip a direction.

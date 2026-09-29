@@ -1,0 +1,59 @@
+# ARVEN strategy configuration (Stage 5).
+# Three independent, rule-based strategies (docs/architecture.md section 13, items 1-3; the 4th, funding
+# contrarian, is out of Stage 5 scope). Each reads only Stage 3 causal features; none knows about the others,
+# about risk, or about regime detection internals — regime *gating* (allowed_trends/allowed_vols below) is
+# applied by the decision engine, not by the strategy itself.
+#
+# All ATR-based stop/take-profit hints are expressed as fractions of the fill price (h1_atr_pct is already a
+# fraction); the risk engine bounds and may adjust them before sizing.
+
+version: v1
+
+decision:
+  weights:              # equal weights (architecture: "start with equal weights")
+    trend_momentum: 1.0
+    breakout: 1.0
+    mean_reversion: 1.0
+  decision_threshold: 0.35   # |weighted score| below this => NO_TRADE
+  conflict_threshold: 0.35   # both directions' weighted mass at or above this => NO_TRADE (strong disagreement)
+
+trend_momentum:            # architecture #1: EMA crossover on 1h, ADX-based 4h trend filter, momentum confirmation
+  ema_fast: 20              # must be one of features.trend.ema_periods (20/50/200)
+  ema_slow: 50
+  adx_4h_threshold: 20.0    # 4h trend filter: h4_adx must clear this
+  adx_strength_scale: 50.0  # strength = clip(h4_adx / this, 0, 1)
+  rsi_overbought_block: 75.0   # do not chase a long when h1_rsi is already this extreme (and mirrored for shorts)
+  rsi_oversold_block: 25.0
+  require_macd_confirm: true   # h1_macd_hist sign must agree with the EMA-cross direction
+  stop_atr_mult: 1.5
+  take_profit_atr_mult: 3.0
+  max_holding_minutes: 4320    # 3 days
+  allowed_trends: [TREND_UP, TREND_DOWN]   # decision-engine regime gate; null = any
+  allowed_vols: null
+  require_not_stress: true
+
+breakout:                  # architecture #3: volatility breakout (range compression, then expansion)
+  bb_width_window_bars: 480       # 20 days on 1h: the reference window for "was this compressed?"
+  compression_lookback_bars: 48   # 2 days: the squeeze must have been observed within this many bars of now
+  compression_percentile: 25.0    # bb_width at or below this percentile (of the window) counts as compressed
+  donchian_feature: h1_donchian_pos_24
+  breakout_upper: 0.95      # donchian position >= this => breaking to new highs
+  breakout_lower: 0.05      # donchian position <= this => breaking to new lows
+  stop_atr_mult: 2.0
+  take_profit_atr_mult: 3.0
+  max_holding_minutes: 2880    # 2 days
+  allowed_trends: null         # breakout direction is decided by the break itself, not a pre-existing trend
+  allowed_vols: [NORMAL, HIGH]
+  require_not_stress: false
+
+mean_reversion:            # architecture #2: Bollinger/RSI extremes, only in RANGE (NO_TREND)
+  bb_z_threshold: 2.0
+  bb_z_strength_scale: 4.0
+  rsi_oversold_confirm: 35.0
+  rsi_overbought_confirm: 65.0
+  stop_atr_mult: 1.0
+  take_profit_atr_mult: 1.5
+  max_holding_minutes: 1440    # 1 day
+  allowed_trends: [NO_TREND]
+  allowed_vols: null
+  require_not_stress: true

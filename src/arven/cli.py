@@ -311,10 +311,22 @@ def cmd_backtest_run(cfg: AppConfig, args: argparse.Namespace) -> int:
     bt, fcfg = load_backtest_config(args.config_dir), load_features_config(args.config_dir)
     window = _resolve_window(cfg, args, {"command": "backtest run", "provider": args.provider})
     inputs = load_inputs(cfg, fcfg, window)
+    pipeline = None
     if args.provider == "no_trade":
         provider = NoTrade()
     elif args.provider == "buy_and_hold":
         provider = BuyAndHold(bt.baselines.buy_and_hold.notional_fraction)
+    elif args.provider == "pipeline":
+        from arven.core.regime_config import load_regime_config
+        from arven.core.risk_config import load_risk_config
+        from arven.core.strategies_config import load_strategies_config
+        from arven.decision.pipeline import Stage5Pipeline
+
+        pipeline = Stage5Pipeline(
+            load_regime_config(args.config_dir), load_strategies_config(args.config_dir),
+            load_risk_config(args.config_dir), bt,
+        )
+        provider = pipeline
     else:
         re = bt.baselines.random_entry
         provider = RandomEntry(
@@ -325,6 +337,11 @@ def cmd_backtest_run(cfg: AppConfig, args: argparse.Namespace) -> int:
     print(f"run {out.run_id} ({args.provider}) -> {out.run_dir}")
     _print_metrics(out.metrics)
     print(f"  result_hash {out.result_hash}   touched_test_set={out.manifest['touched_test_set']}   git_dirty={out.manifest['git_dirty']}")
+    if pipeline is not None:
+        from arven.reports import format_breakdown, per_regime_breakdown
+
+        print("\nper-regime breakdown (development-period analysis; see docs/current_state.md):")
+        print(format_breakdown(per_regime_breakdown(out.result, pipeline.history)))
     return 0
 
 
@@ -424,7 +441,7 @@ def build_parser() -> argparse.ArgumentParser:
         return q
 
     q = with_window(bsub.add_parser("run", help="run one baseline provider on a period"))
-    q.add_argument("--provider", choices=["no_trade", "buy_and_hold", "random_entry"], required=True)
+    q.add_argument("--provider", choices=["no_trade", "buy_and_hold", "random_entry", "pipeline"], required=True)
     q.add_argument("--seed-index", type=int, default=0, help="random_entry spawn index")
     q.set_defaults(func=cmd_backtest_run)
     q = with_window(bsub.add_parser("baselines", help="no-trade, buy-and-hold and the random-entry distribution, side by side"))

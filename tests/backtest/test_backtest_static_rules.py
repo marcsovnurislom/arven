@@ -77,9 +77,18 @@ def test_lower_layers_never_import_the_backtester(package):
 
 
 @pytest.mark.parametrize("package", ["strategies", "risk", "regime", "decision", "ml"])
-def test_future_stage_packages_may_not_import_the_backtester(package):
+def test_later_stage_packages_never_import_backtest_execution_or_accounting_internals(package):
+    """Written before Stage 5 existed as a blanket "no arven.backtest import at all"; Stage 5's actual,
+    approved design legitimately imports arven.backtest.provider (to implement SignalProvider) and
+    arven.backtest.margin (one pure function, reused by the risk engine - see docs/architecture.md section
+    9's note and tests/pipeline/test_stage5_static_rules.py for the precise per-package rules). What must
+    still hold for every later stage, without exception, is that none of them reaches into the engine's
+    execution or accounting internals - that would bypass the Stage 4 engine outright.
+    """
     d = SRC / package
     if not d.exists():
-        pytest.skip(f"{package} does not exist yet (Stage 5+)")
+        pytest.skip(f"{package} does not exist yet (Stage 6+)")
+    forbidden = ("arven.backtest.engine", "arven.backtest.execution", "arven.backtest.accounting")
     for path in d.rglob("*.py"):
-        assert not [m for m in _imports(ast.parse(path.read_text(encoding="utf-8"))) if m.startswith("arven.backtest")], path
+        bad = [m for m in _imports(ast.parse(path.read_text(encoding="utf-8"))) if m.startswith(forbidden)]
+        assert not bad, f"{path}: {bad}"

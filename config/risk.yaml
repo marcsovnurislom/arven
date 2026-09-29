@@ -1,0 +1,40 @@
+# ARVEN risk-engine configuration (Stage 5). docs/architecture.md section 14: the risk engine is the last
+# gate; it can only reduce size or veto, never create or flip a direction. Every veto is recorded with its
+# reason. Leverage and the maintenance-margin rate are NOT duplicated here: the risk engine is constructed
+# with config/backtest.yaml's values directly (single source of truth for those exchange-level parameters).
+
+# 2. Event blackout (macro calendar) is explicitly deferred in architecture.md ("later stage") — Stage 8. Not
+#    implemented here; no config for it.
+
+# 3. Volatility guard
+high_vol_size_multiplier: 0.5   # HIGH-volatility regime: multiply the sized notional_fraction by this
+veto_on_stress: true             # regime.stress (extreme funding z or OI shock) -> veto outright
+
+# 4. Funding guard (entering the side that pays extreme funding)
+funding_guard_reduce_z: 2.0      # |fund_z| >= this, entering the paying side -> reduce
+funding_guard_veto_z: 4.0        # |fund_z| >= this, entering the paying side -> veto
+funding_guard_reduce_multiplier: 0.5
+
+# 5. Stop & target bounds (the strategy/decision hint is clamped into this range; target is extended, never
+#    shortened, to meet the minimum reward:risk ratio)
+min_stop_pct: 0.003
+max_stop_pct: 0.08
+min_reward_risk_ratio: 1.2
+
+# 6. Position sizing: fixed-fractional. notional_fraction = risk_fraction_per_trade / stop_pct (architecture:
+#    "size = (equity x risk%) / stop_distance"), then the volatility/funding multipliers above are applied,
+#    then capped.
+risk_fraction_per_trade: 0.0075   # 0.75% of equity risked per trade
+max_notional_fraction: 1.0        # absolute cap regardless of leverage (Stage 4's own leverage cap still applies)
+
+# 7. Portfolio limits (one-position-at-a-time is already enforced by Stage 4; this is an earlier, explicitly-
+#    reasoned veto for the same condition, plus circuit breakers no Stage 4 mechanism provides)
+max_daily_loss_pct: 0.02      # new entries halted for the rest of the UTC day once daily realized loss reaches this
+max_drawdown_halt_pct: 0.20   # new entries halted once running-peak equity drawdown reaches this
+drawdown_resume_pct: 0.15     # ... resumed once the drawdown recovers back below this
+cooldown_after_losses: 3      # this many consecutive losing trades ...
+cooldown_bars: 24             # ... halts new entries for this many decision bars
+
+# 8. Liquidation-distance check: the stop must be at least this multiple closer to entry than the estimated
+#    liquidation price (computed from config/backtest.yaml's leverage and maintenance_margin_rate).
+liquidation_min_multiple: 1.5

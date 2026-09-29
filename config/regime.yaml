@@ -1,0 +1,26 @@
+# ARVEN regime-detection configuration (Stage 5).
+# Rule-based, interpretable market-state classifier: Trend x Volatility (+ an optional Stress flag).
+# All inputs are Stage 3 causal features (config/features.yaml); this file adds no new indicators, only
+# thresholds and windows. Computed on 4h (context) with 1h confirmation, per docs/architecture.md section 12.
+
+version: v1
+
+trend:
+  adx_4h_threshold: 20.0       # h4_adx >= this => "trending" (else NO_TREND)
+  adx_1h_confirm_threshold: 15.0   # 1h confirmation: h1_adx must also clear this, or the 4h trend is downgraded to NO_TREND
+  # Direction needs h4_ema_slope and h4_ema_dist_200 (price vs EMA200) to agree in sign; disagreement => NO_TREND.
+
+volatility:
+  # Percentile rank of h1_atr_pct within a trailing window (causal: only bars up to and including t).
+  window_hours: 8760            # trailing ~1 year (architecture: "vs trailing 1-year window")
+  min_history_bars: 720         # need at least 30 days of history before classifying LOW/HIGH; NORMAL until then
+  low_percentile: 33.0           # at or below this percentile => LOW
+  high_percentile: 67.0          # at or above this percentile => HIGH
+
+stress:
+  funding_z_threshold: 3.0       # |fund_z| >= this => stress
+  oi_change_1h_threshold: 0.05   # |oi_chg_1h| >= this (log change) => stress
+
+# Hysteresis: a newly-observed regime must be the classifier's raw output for this many consecutive decision
+# bars before the detector actually switches its reported state. Reduces flip-flopping at threshold crossings.
+min_dwell_bars: 3

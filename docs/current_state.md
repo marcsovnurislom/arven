@@ -1,21 +1,26 @@
 # ARVEN — Current state
 
-_Last updated: 2026-09-28 (Stage 4 implemented, awaiting review)_
+_Last updated: 2026-09-29 (Stage 5 implemented, awaiting review)_
 
 ## Phase
 
-**Stage 4 (backtester) is implemented and validated; it awaits user review and is not committed.**
+**Stage 5 (regime, strategies, decision, risk) is implemented and validated; it awaits user review and is
+not committed.**
+- Stage 4 (backtester) is complete: reviewed, approved (including the final `liquidation_includes_funding =
+  true` decision) and committed (`8009719`, docs correction `a6da56b`).
 - Stage 3 (features) is complete: reviewed, approved and committed (`6ac57d4`).
 - Stage 2 is complete: the full backfill 2020-01-01 → 2026-07-01 is ingested and verified (see below).
-- Stage 5 (regime, strategies, decision, risk) has not been started.
+- Stage 6 (ML meta-filter) has not been started. Stage 5 deliberately contains no ML.
 - Split dates, `forward_start`, the DuckDB index/storage design and the 300 s OI availability delay are unchanged.
-  No Stage 0–3 behaviour changed: the only edits to existing files are `cli.py` (new `features` and `backtest`
-  commands), `data/reader.py` and `data/storage/feature_store.py` (new windowed read functions, purely additive —
-  184 insertions, 0 deletions across the three files), `pyproject.toml` (Stage 3: `numpy`, pytest path/marker) and
-  doc updates.
+  No Stage 0–4 behaviour changed: the only edit to an existing file is `cli.py` (new `--provider pipeline`
+  choice on `backtest run`, 18 insertions / 1 deletion — the deletion is the old choices list being extended,
+  not removed logic). `tests/backtest/test_backtest_static_rules.py` was updated (12 insertions / 3 deletions)
+  to replace a Stage-4-era placeholder ("no Stage 5+ package may import `arven.backtest` at all") with the
+  precise rule now that Stage 5's real, approved design exists (it legitimately imports
+  `arven.backtest.provider` and, in one place, `arven.backtest.margin` — see "Stage 5" below).
 - Stage 1 + Stage 2 are committed on branch `feat/historical-data` (commit `efb6677`), followed by a docs commit
-  (`4be9329`) and the Stage 3 commit (`6ac57d4`, "feat(features): causal 1h-grid feature set v1 with leakage test
-  suite"). Stage 4 changes are in the working tree.
+  (`4be9329`), the Stage 3 commit (`6ac57d4`), the Stage 4 commit (`8009719`) and a docs-only correction
+  (`a6da56b`). Stage 5 changes are in the working tree.
 
 ## Stage 3 — features (v1)
 
@@ -221,6 +226,173 @@ settlements, exits and a full order/fill/trade/equity ledger, with fees, slippag
   `COPY … FROM` a file. Test helpers now use the same idiom (`bt_helpers.bulk_insert_1m/_funding`, `COPY FROM` a temp
   CSV): 5 000 rows in ≈0.09 s. Nothing in `src/` was affected; this is a test-infrastructure fix only.
 
+## Stage 5 — regime, strategies, decision, risk
+
+**What was built:** a rule-based regime detector, three independent strategies, a decision engine (regime
+gate + weighted vote) and a risk engine (8 ordered veto/reduce rules), wired into one
+`Stage5Pipeline` that implements Stage 4's `SignalProvider` protocol unmodified — `arven backtest run
+--provider pipeline` runs it exactly like the Stage 4 baselines.
+
+**Regime detection** (`config/regime.yaml`, `src/arven/regime/detector.py`)
+- **Trend** (`TREND_UP` / `TREND_DOWN` / `NO_TREND`): `h4_adx >= 20` **and** `h1_adx >= 15` (the 1h
+  confirmation), then direction from the sign of `h4_ema_slope` agreeing with the sign of `h4_ema_dist_200`
+  (price vs EMA200); any disagreement (including ADX high but slope/price disagreeing) is `NO_TREND`.
+- **Volatility** (`LOW` / `NORMAL` / `HIGH`): percentile rank of `h1_atr_pct` in its own trailing window
+  (causal — only bars up to and including `t`; NaNs filtered, not treated as zero), default window ~1 year
+  (architecture's own wording), classified once at least 720 (30 days) valid values exist, `NORMAL` before that.
+- **Stress** (flag, not an axis): `|fund_z| >= 3.0` or `|oi_chg_1h| >= 0.05` (log change).
+- **Hysteresis:** a candidate trend state must be the raw classifier's output for `min_dwell_bars = 3`
+  consecutive decisions (including the very first transition away from `NO_TREND`) before the detector
+  actually switches; a reverting candidate resets its counter. Stateful, causal, reset at the start of every run.
+
+**The three strategies** (`config/strategies.yaml`, `src/arven/strategies/`) — each reads only Stage 3
+features, returns a `CandidateSignal(direction, strength, stop_pct, take_profit_pct, ...)` or `None`, and
+never sees the other strategies, the portfolio, or the regime label (regime *gating* is config declared per
+strategy and applied by the decision engine, not by the strategy):
+1. **Trend/Momentum** (architecture #1): direction from the 1h EMA(20) vs EMA(50) relationship (derived from
+   `h1_ema_dist_20 - h1_ema_dist_50`); a 4h filter requires `h4_adx >= 20` and the 4h EMA-slope sign to agree;
+   optional MACD-histogram confirmation (on by default); blocked if `h1_rsi` is already extreme in that
+   direction (75 / 25). Strength = `h4_adx / 50`, clamped. Stop = `1.5 × h1_atr_pct`, target = `3 × h1_atr_pct`.
+   Gated to `TREND_UP`/`TREND_DOWN`, any volatility, not during stress.
+2. **Breakout** (architecture #3, volatility breakout): a squeeze is detected causally — `h1_bb_width` must
+   have been strictly below the 25th percentile of its own 480-bar (20-day) trailing window (percentile and
+   squeeze check both computed **excluding the current bar**, so a bar can't set its own threshold) at some
+   point in the last 48 bars (2 days); the trigger is `h1_donchian_pos_24` at or beyond 0.95 / 0.05 **now**.
+   Stop = `2 × h1_atr_pct`, target = `3 × h1_atr_pct`. Gated to `NORMAL`/`HIGH` volatility, any trend.
+3. **Mean Reversion** (architecture #2): contrarian on `h1_bb_z` beyond ±2.0, confirmed by `h1_rsi` beyond
+   35/65 in the same direction. Stop = `1.0 × h1_atr_pct`, target = `1.5 × h1_atr_pct`. Gated to `NO_TREND`
+   only ("RANGE" in the architecture's wording), not during stress.
+- The 4th architecture strategy (funding/positioning contrarian) is out of the explicit Stage 5 scope and was
+  not built.
+
+**Decision engine** (`src/arven/decision/engine.py`) — architecture section 13, steps 1-3, 5, 6 (step 4, the
+ML filter, is Stage 6 and was **omitted**, not stubbed):
+1. **Regime gate:** each strategy's `allowed_trends`/`allowed_vols`/`require_not_stress` (config) filters its
+   candidate out entirely if the current regime doesn't match; gated-out ids are kept for logging.
+2. **Weighted vote:** `score = Σ weight_s × strength_s` over the *allowed* candidates, separately summed for
+   each direction (`pos_mass`, `neg_mass`); `score = pos_mass - neg_mass`. Equal weights (1.0 each) by default.
+3. **Conflict rule:** `pos_mass >= 0.35` **and** `neg_mass >= 0.35` (both, not just close) ⇒ `NO_TRADE`.
+4. **Threshold:** `|score| < 0.35` ⇒ `NO_TRADE`. No candidates ⇒ `NO_TRADE`. These are also the *only* ways to
+   reach `NO_TRADE` here — the default outcome is always `NO_TRADE` unless something actively clears both bars.
+5. **Output:** the winning direction's contributing strategies, a weighted average of their stop/take-profit
+   hints, the most conservative (shortest) of their holding caps, and `confidence = |score| / Σ(all weights)`.
+- The decision engine never receives the portfolio (enforced by a static test on its signature): sizing and
+  vetoing is entirely the risk engine's job.
+
+**Risk engine** (`config/risk.yaml`, `src/arven/risk/engine.py`) — architecture section 14, an ordered
+pipeline of independent rules, each vetoing or reducing, never creating/flipping a direction; rule 2 (macro
+event blackout) is explicitly deferred there ("later stage" = Stage 8) and was not implemented:
+1. **Data-quality gate:** `feat_ready != 1` ⇒ veto `stale_or_incomplete_data`.
+2. *(deferred to Stage 8)*
+3. **Volatility guard:** `regime.stress` ⇒ veto `extreme_volatility_stress` (config `veto_on_stress: true`);
+   `HIGH` volatility ⇒ size ×0.5.
+4. **Funding guard:** entering the side that *pays* extreme funding (`direction × fund_z`) — ×0.5 at
+   `|·| >= 2.0`, veto `extreme_funding` at `|·| >= 4.0`. Longs pay on a positive rate, shorts on a negative
+   one (matches `arven.backtest.accounting`'s sign convention exactly — the same fact, not re-derived).
+5. **Stop & target bounds:** the decision layer's hint is clamped to `[0.3%, 8%]`; the target is *extended*
+   (never shortened) to meet `take_profit_pct >= stop_pct × 1.2` if it doesn't already.
+6. **Position sizing:** `notional_fraction = risk_fraction_per_trade (0.75%) / stop_pct`, then the guard
+   multipliers above, capped at `max_notional_fraction = 1.0` and at `config/backtest.yaml`'s `leverage` (one
+   source of truth — risk.yaml does **not** duplicate leverage or `maintenance_margin_rate`).
+7. **Portfolio limits** (checked early, before 3-6, since nothing downstream matters if any holds): a position
+   or a pending order already exists ⇒ veto `position_already_open`; max daily loss 2% (UTC-day baseline,
+   resets each day) ⇒ veto `max_daily_loss_halt`; running-peak drawdown ≥ 20% ⇒ veto `max_drawdown_halt` until
+   it recovers to ≤ 15%; 3 consecutive losing trades ⇒ veto `loss_streak_cooldown` for 24 decision bars. All
+   four are stateful and causal (driven only by the sequence of `PortfolioSnapshot`s the engine itself
+   observes at each decision — never a peek at a future trade's outcome), reset at the start of every run.
+8. **Liquidation-distance check:** the relative liquidation distance is a pure function of
+   `(side, leverage, maintenance_margin_rate)` alone — **not of price** — reusing
+   `arven.backtest.margin.liquidation_price` (one pure function; nothing here touches the engine, execution or
+   accounting). Veto `stop_too_close_to_liquidation` if that distance is less than `1.5 ×` the (bounded) stop.
+- A veto or a pass-through (`NO_TRADE` proposed) always returns `None` (no `Signal`) to the backtester; every
+  outcome — pass, reduce, veto, or pass-through — is recorded with its reason and numbers in the pipeline's
+  `DecisionRecord` history.
+
+**Module separation, enforced mechanically** (`tests/pipeline/test_stage5_static_rules.py`,
+`tests/backtest/test_backtest_static_rules.py`): `regime` imports nothing from `strategies`/`decision`/`risk`;
+`strategies` imports nothing from `risk`/`decision`/`regime`/`arven.backtest.margin`; `risk` imports nothing
+from `strategies`, and only `arven.backtest.provider` (types) + `arven.backtest.margin` (one pure function)
+from `backtest`; `decision` imports nothing from `backtest` at all; nothing in any of the four imports
+`arven.backtest.engine`/`execution`/`accounting` (would bypass the engine); no lower layer or Stage 6+ package
+imports any Stage 5 package. The per-regime analysis report (`arven.reports`, see below) deliberately lives
+**outside** `arven.decision` — it runs only after a backtest finishes and never feeds back into a live
+decision, so it is not bound by the same separation rules, and a static test confirms the dependency stays
+one-directional (`regime`/`strategies`/`decision`/`risk` never import `arven.reports`).
+
+**Validation**
+- **Unit tests** (`tests/regime/`, `tests/strategies/`, `tests/decision/`, `tests/risk/`): hand-computed cases
+  for every rule branch of the regime classifier (including hysteresis/dwell and its reset), each strategy
+  (using a hand-built `FeatureView` via the real Stage 3 column names, so a renamed column fails the test
+  rather than silently reading NaN), the decision engine's gating/vote/conflict/threshold/confidence
+  arithmetic, and all 8 risk rules including the 4 stateful circuit breakers. One real bug was found and fixed
+  by these tests: the breakout strategy's compression check used `>` instead of a strict `<`, so a perfectly
+  flat (untouched) `bb_width` series tied its own percentile and was wrongly read as "compressed" — fixed to
+  `>=` (i.e. strictly below the threshold only).
+- **Leakage / causality** (`tests/pipeline/test_leakage.py`): prefix invariance (cutting all data — both the
+  Stage 3 feature table and the raw 1m market — at time `T` leaves every trade closed before `T` and every
+  decision-time equity value up to `T` byte-identical) and perturbation (replacing everything after `T` with
+  Stage-3-plausible garbage changes nothing decided or completed at or before `T`), each on 5 seeded 250-day
+  scenarios; a further check that the regime detector's own hysteresis-state sequence up to `T` is identical
+  under perturbation (proving the sequential state itself doesn't leak, not just the final trades). `FeatureView`'s
+  existing `LookAheadError` guard (Stage 4) is exercised throughout, since every strategy/regime read goes
+  through it.
+- **Determinism / reproducibility** (`tests/pipeline/test_determinism.py`): two independent runs of the same
+  inputs give an identical `result_hash`; reusing one `Stage5Pipeline` object for two `Backtester.run()` calls
+  (as the engine does internally) gives the same result as two fresh objects — `prepare()` fully resets regime
+  and risk state; the full decision history (not just the ledgers) reproduces exactly; `--stress` changes the
+  result deterministically.
+- **Accounting/execution integration** (`tests/pipeline/test_backtest_integration.py`): Stage 4's own
+  invariants (`final_wallet = initial + Σ net_pnl`, one position at a time, notional ≤ leverage × equity, fill
+  price = the fill bar's open, ...) hold on 30 seeded runs driven entirely by the Stage 5 pipeline on a
+  volatile synthetic 1m market (needed for stops/targets/rare liquidations to actually trigger — the Stage 4
+  test helper's default market is flat); every trade's tag carries its contributing strategies and regime;
+  stop-exit R-multiples cluster near −1 and take-profit R-multiples clear roughly the configured minimum
+  reward:risk ratio; liquidations stay under a sanity ceiling.
+- **Real development-period data** (opt-in, `ARVEN_REAL_DATA_TESTS=1`, `tests/pipeline/test_pipeline_real_data.py`):
+  the pipeline runs on the real database + Stage 3 v1 feature cache, reproduces its `result_hash` on an
+  independent re-run, the sealed test period is refused without `--allow-sealed --reason`, the validation
+  period is allowed and correctly marked `touched_test_set=false`, and the development run's own data-range
+  log never reaches or exceeds its window's end.
+- **Full suite:** 1338 passed, 8 skipped (3 Stage 3/4 + 4 Stage 5 opt-in real-data checks, 1 Stage-6-doesn't-exist-yet),
+  ≈5 minutes. All 8 skipped tests pass when run with `ARVEN_REAL_DATA_TESTS=1` (verified together, 7 tests, ≈44 s
+  — the 8th, the `ml` static-rule check, has no meaning until Stage 6 exists).
+
+**Real backtest result** (development period, `arven backtest run --provider pipeline --period development`,
+git `8009719`+working tree, `touched_test_set=false`, result_hash `3eca0a70…`, reproduced identically on an
+independent re-run and via `arven backtest verify`):
+
+| metric | value |
+|---|---|
+| trades | 111 (74 STOP, 37 TAKE_PROFIT, 0 liquidations) |
+| total_return | −20.3% (final equity 7 973.83 from 10 000) |
+| win_rate | 33.3% |
+| profit_factor | 0.566 |
+| max_drawdown | 20.6% (intrabar 22.3%) |
+| sharpe | −1.43 |
+| fees / slippage / funding | 829.19 / 640.69 / −7.04 USDT |
+| exposure_time | 3.0% |
+
+No parameters were tuned to make this positive (CLAUDE.md rule: "do not optimize parameters"), and this is a
+measurement of the *framework* with unoptimized, architecture-derived defaults — not a claim that these three
+strategies have an edge. The per-regime breakdown (`arven.reports.per_regime_breakdown`, printed by the CLI)
+shows losses concentrated in `NO_TREND/LOW` (51 of 111 trades, −812 USDT) and `NO_TREND/NORMAL` (14 trades,
+−635 USDT) — i.e. mean-reversion trades in quiet/normal-vol ranging conditions were the main drag — while
+`TREND_DOWN/HIGH` was the only regime with a net positive contribution (+44.76 USDT, 7 trades). This is exactly
+the kind of regime-conditional signal the roadmap's "per-regime analysis" deliverable exists to surface; it is
+not evidence either way about whether the framework has value, only about where *this* unoptimized
+configuration's losses concentrated.
+
+**Known limitations, all deliberate MVP scope (not bugs)**
+- No ML filter (Stage 6) and no macro-event blackout (Stage 8) — architecture explicitly places both later.
+- No parameter search of any kind was performed or is provided (CLAUDE.md rule; the config values are the
+  architecture's own stated defaults, e.g. "risk 0.5-1%" → 0.75%, "max leverage e.g. 3×" → uses `backtest.yaml`'s 3×).
+- The regime volatility window (`window_hours: 8760`, "trailing 1-year") means the first ~1 year of the
+  development period classifies mostly on partial history (`NORMAL` until 720 bars/30 days exist, then a
+  percentile over a still-growing window) — matches the architecture's own stated window, not a shortcut.
+- `arven.reports.per_regime_breakdown` attributes a trade to the regime at its **signal** time (when the
+  decision was made), not its fill or exit time — the natural choice, since regime gating happens at the
+  decision, but worth stating explicitly for anyone extending the analysis.
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -343,11 +515,15 @@ config/
   splits.yaml               # dev 2020-01-01→2023-07-01, val →2025-01-01, sealed test →2026-07-01, forward_start 2026-07-01
   features.yaml             # feature version, warm-up factor, every window/period of the v1 features (own hash; not part of AppConfig.config_hash)
   backtest.yaml              # Stage 4: initial equity, leverage, margin/liquidation, lot rules, latency, metric conventions, baseline params (own hash)
+  regime.yaml                # Stage 5: trend/vol/stress thresholds, volatility window, dwell bars (own hash)
+  strategies.yaml            # Stage 5: decision weights/thresholds + each of the 3 strategies' parameters and regime gates (own hash)
+  risk.yaml                  # Stage 5: the 8 risk rules' thresholds/limits (own hash; leverage/mmr read from backtest.yaml, not duplicated)
 src/arven/
   __main__.py, cli.py       # python -m arven {ingest|resample|crosscheck|quality|export|status|features ...|backtest ...}
   core/                     # time.py, timeframes.py, types.py, config.py (Stage 1); series.py (columnar BarSeries/FundingSeries/OpenInterestSeries/MarketInputs
                             #   with available_until + regularized), features_config.py (Stage 3)
                             # signal.py (Signal: the decision->backtest contract), backtest_config.py, splitguard.py (Stage 4)
+                            # regime_config.py, strategies_config.py, risk_config.py (Stage 5)
   features/                 # Stage 3, pure numpy (no I/O, no DB, no later-stage imports; enforced by tests)
     indicators.py             # causal primitives: shift, rolling sum/mean/std/max/min, EMA, Wilder RMA, ATR, RSI, ADX, MACD, Bollinger, Donchian, Parkinson
     asof.py                   # backward as-of join on available_at with staleness limit
@@ -383,6 +559,16 @@ src/arven/
     metrics.py                   # return/vol/Sharpe/Sortino/drawdown/trade stats/turnover/exposure; summarize_distribution (no ranking)
     report.py                    # canonical CSV serialisation, table/result hashes
   runs.py                     # composition root (Stage 4): load_inputs (window-scoped), execute_run/run_baselines, artifact + index writers, verify_run
+  regime/detector.py          # Stage 5: RegimeDetector (stateful, causal, hysteresis), classify_series (batch, for reporting)
+  strategies/                 # Stage 5, pure numpy/stdlib (no risk/decision/regime/backtest.margin imports; enforced by tests)
+    base.py                     # CandidateSignal, Strategy/RegimeGate protocols
+    trend_momentum.py, breakout.py, mean_reversion.py   # the 3 strategies (one file each, independently testable)
+  decision/
+    engine.py                   # DecisionEngine: regime gate -> weighted vote -> conflict/threshold -> ProposedDecision (no portfolio access)
+    pipeline.py                  # Stage5Pipeline: implements SignalProvider, wires regime+strategies+decision+risk; DecisionRecord history
+  risk/engine.py               # RiskEngine: the 8 ordered rules, stateful circuit breakers (daily loss/drawdown/cooldown); imports only
+                                #   arven.backtest.provider (types) and arven.backtest.margin (one pure function), never engine/execution/accounting
+  reports.py                   # Stage 5, deliberately outside arven.decision: per_regime_breakdown (post-hoc only, one-directional dependency)
 tests/
   conftest.py               # make_config fixture (isolated tmp data_dir)
   synthetic_market.py, leakage_harness.py   # deterministic synthetic bars/funding/OI; generic truncation + perturbation checks
@@ -395,10 +581,18 @@ tests/
                              #   baselines, metrics, report/determinism (golden hashes), splitguard+loaders, runs integration, static rules
   leakage/                  # test_no_lookahead (every feature), test_canary, test_static_rules, test_real_data (opt-in),
                              #   test_backtest_leakage.py (Stage 4: FeatureView/clock, prefix invariance, perturbation, cheater vs random)
+  stage5_helpers.py, pipeline_helpers.py    # Stage 5: exact-value FeatureView builder (real Stage 3 column names); synthetic-market-driven
+                                             #   pipeline runner, truncate/garbage helpers for both the feature and 1m-market sides
+  regime/, strategies/, decision/, risk/    # hand-computed unit tests per rule/branch, plus each package's own config-validation tests
+  pipeline/                 # test_pipeline_wiring, test_stage5_static_rules, test_leakage, test_determinism,
+                             #   test_backtest_integration (accounting invariants via the real engine), test_pipeline_real_data (opt-in)
+  test_reports.py           # per-regime breakdown (hand-built fixtures)
 ```
-1145 tests (1137 passed, 8 skipped), all passing (`.venv/Scripts/python.exe -m pytest`, about 85 s). Skipped: the 3
-opt-in real-data checks and 5 static-import checks for packages that don't exist yet (Stage 5+). Real-data leakage
-checks are opt-in: `ARVEN_REAL_DATA_TESTS=1 ARVEN_REAL_DATA_SAMPLES=200 .venv/Scripts/python.exe -m pytest tests/leakage/test_real_data.py`.
+1346 tests (1338 passed, 8 skipped), all passing (`.venv/Scripts/python.exe -m pytest`, about 5 min). Skipped by
+default: 7 opt-in real-data checks (3 Stage 3/4 + 4 Stage 5) and 1 static-import check for `ml` (Stage 6, doesn't
+exist yet). All 7 real-data checks pass together: `ARVEN_REAL_DATA_TESTS=1 .venv/Scripts/python.exe -m pytest
+tests/leakage/test_real_data.py tests/pipeline/test_pipeline_real_data.py` (about 45 s; add
+`ARVEN_REAL_DATA_SAMPLES=200` for the fuller Stage 3 sample count).
 
 ### Conventions (all later stages must follow)
 
@@ -440,11 +634,13 @@ checks are opt-in: `ARVEN_REAL_DATA_TESTS=1 ARVEN_REAL_DATA_SAMPLES=200 .venv/Sc
 .venv/Scripts/python.exe -m arven features build     # full history -> data/features/v1/ (about 7 s, 282 MB peak; DB opened read-only)
 .venv/Scripts/python.exe -m arven features check     # cache hash/invariants + development-period statistics only
 .venv/Scripts/python.exe -m arven features status
-.venv/Scripts/python.exe -m arven backtest run --provider no_trade|buy_and_hold|random_entry --period development
-.venv/Scripts/python.exe -m arven backtest baselines --period development   # all three side by side, no ranking
+.venv/Scripts/python.exe -m arven backtest run --provider no_trade|buy_and_hold|random_entry|pipeline --period development
+.venv/Scripts/python.exe -m arven backtest baselines --period development   # no_trade + buy_and_hold + random_entry, side by side, no ranking
 .venv/Scripts/python.exe -m arven backtest verify <run_id>                  # recompute hashes from the written files
 .venv/Scripts/python.exe -m arven backtest show <run_id>
 ```
+`--provider pipeline` runs the full Stage 5 regime+strategies+decision+risk pipeline and additionally prints a
+per-regime breakdown after the usual metrics.
 `backtest run`/`baselines` take `--start`/`--end` (must lie inside `--period`, default the whole period),
 `--stress` (multiplies slippage by `costs.slippage.stress_multiplier`), and, for the sealed `test` period only,
 `--allow-sealed --reason "..."` (logged permanently before any data is read).
@@ -529,7 +725,9 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 
 ## Open issues / decisions for the user
 
-1. ~~Full backfill~~: done. ~~Stage 3 features~~: done and approved (final review re-run: 403 tests green, 3 opt-in real-data tests pass).
+1. ~~Full backfill~~: done. ~~Stage 3 features~~: done and approved. ~~Stage 4 backtester~~: done and approved
+   (including the final `liquidation_includes_funding=true` decision, #13 below). ~~Stage 5 pipeline~~: implemented
+   and validated (1338 tests green, 7 opt-in real-data tests pass together); awaiting review.
 2. **`forward_start = 2026-07-01` is already in the past** (unchanged as instructed). It needs relabelling before paper trading.
 3. **Contiguous splits with no embargo.** To be handled by purging/embargo in Stage 6.
 4. **DuckDB size and compaction.** The DB is 475 MB uncompacted for the full period; the storage design is frozen for now.
@@ -537,8 +735,10 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
    are NaN with staleness, never interpolated; zero-volume ratios are NaN; the 2021-05-15 anomaly is left as is).
 6. LLM provider (later). Thesis success criterion.
 7. **Top-trader and taker long/short ratios are empty in the source from 2021-12 to 2022-12 (taker: to 2022-05).** `oi_top_ls_log` /
-   `oi_taker_ls_log` are therefore NaN for a large part of the development period. **Carried to Stage 5 (strategy inputs) and Stage 6
-   (ML feature selection, fitted on training folds only):** decide whether to use, drop or restrict them; `oi_chg_*`, `oi_z` and the open-interest level itself are unaffected.
+   `oi_taker_ls_log` are therefore NaN for a large part of the development period. **None of the Stage 5 strategies or the
+   regime detector read either column** (the regime stress flag uses `oi_chg_1h`, not the ratios), so Stage 5 did not need to
+   resolve this. **Still carried to Stage 6:** ML feature selection, fitted on training folds only, decides whether to use, drop
+   or restrict them; `oi_chg_*`, `oi_z` and the open-interest level itself are unaffected.
 8. ~~The feature cache covers the whole history, including validation and sealed-test rows~~: **enforced by Stage 4's
    `SplitGuard`/`AllowedWindow`** — every backtest data read (1m bars, funding, feature rows) is confined to one configured
    period; a range crossing a period boundary is refused; the sealed test period additionally needs `--allow-sealed` and a
@@ -564,15 +764,26 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
     implemented and tested for reference (`test_funding_can_liquidate_when_it_is_debited_from_the_margin`,
     `test_long_hold_through_persistent_positive_funding_is_liquidated_not_negative`) but is not the configured
     behaviour. `config/backtest.yaml` and `docs/architecture.md` §9 reflect this as final, not provisional.
+14. **Stage 5's ML filter step (architecture §13 step 4) and macro-event blackout (risk rule 2) are both
+    genuinely absent, not stubbed** — the decision engine has no probability gate and the risk engine has no
+    calendar check. Both are explicitly later stages (6 and 8) per the architecture; nothing today pretends to
+    gate on a probability or a blackout window that doesn't exist.
+15. **Stage 5's regime/strategy/risk parameters are architecture-derived defaults, not fitted or searched**
+    (CLAUDE.md: "do not optimize parameters"). The real development-period result (−20.3% over 3.5 years, 111
+    trades) is a measurement of the framework, not evidence the three unoptimized strategies have an edge —
+    see "Stage 5" above for the per-regime breakdown.
 
 ## What does NOT exist yet
 
-- Regime, strategies, ML, decision, risk, backtest, live/paper, news, LLM, dashboard.
-- Labels (`ml/labels`), `MarketSnapshot` as a separate class (its job is done by `core.series.MarketInputs.available_until` and
+- ML (labels, meta-filter, calibration), macro/news ingestion, LLM, live/paper trading loop, dashboard.
+- `MarketSnapshot` as a separate class (its job is done by `core.series.MarketInputs.available_until` and
   `data.reader`), and the `feature_sets` DuckDB table (replaced by `manifest.json`).
 - REST incremental updates (only bulk files are supported so far).
-- `config/strategies.yaml`, `config/risk.yaml`.
-- Git: branch `feat/historical-data`; commits `efb6677` (Stage 1 + 2) and `4be9329` (docs). Stage 3 is uncommitted.
+- The macro-event blackout (risk rule 2) and the ML probability gate (decision step 4) — both explicitly
+  later stages (8 and 6), not implemented, not stubbed.
+- A 4th strategy (funding/positioning contrarian, architecture §13 item 4) — out of the explicit Stage 5 scope.
+- Git: branch `feat/historical-data`; commits `efb6677` (Stage 1+2), `4be9329` (docs), `6ac57d4` (Stage 3),
+  `8009719` (Stage 4), `a6da56b` (docs). Stage 5 is uncommitted.
 
 ## Environment
 
@@ -580,6 +791,7 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
   - Added in Stage 1: `pyyaml`, `pytest`.
   - Added in Stage 2: `duckdb 1.5.5`, plus the project itself installed editable (`pip install -e .`).
   - Added in Stage 3: `numpy 2.5.3` (the only new dependency; the install needed several retries because of connection resets).
+  - Stage 4 and Stage 5 added no new dependencies.
   - Not installed: pandas, pyarrow.
 - Pre-existing packages from the user: `openai`, `pydantic`, `httpx2`, `python-dotenv`.
 
@@ -607,3 +819,9 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-09-28 | Builds always start at the first stored bar (recursive indicators are seeded there); the cache is the canonical form | implemented (Stage 3) |
 | 2026-09-28 | Missing data is NaN, never interpolated or carried forward; OI/funding staleness limits in `config/features.yaml` | implemented (Stage 3) |
 | 2026-09-28 | Feature config has its own hash; `AppConfig.config_hash()` unchanged | implemented (Stage 3) |
+| 2026-09-28 | Stage 4 plan: D1-D27 decision register (initial equity 10 000, leverage 3x, isolated margin, latency 0, run registry as files not a DuckDB table, ...) | approved |
+| 2026-09-28 | Backtester implemented: SimulationClock, 1m Simulator, accounting equations, SplitGuard-enforced periods, hash-verified run artifacts, 3 baselines | implemented (Stage 4) |
+| 2026-09-29 | `liquidation_includes_funding = true`: funding debited from isolated margin, so equity can never go negative (the D11 fixed-price alternative remains implemented for reference, not used) | approved (final) |
+| 2026-09-29 | Stage 5 scope: rule-based regime (trend x vol + stress flag), 3 strategies (trend/momentum, breakout, mean-reversion — the 4th, funding contrarian, excluded), decision engine (regime gate + weighted vote, no ML filter), risk engine (8 ordered rules, no macro blackout) | approved |
+| 2026-09-29 | Regime/strategy/risk gating and reporting kept in 4 separate packages (`regime`, `strategies`, `decision`, `risk`) plus `reports.py` outside `decision` for post-hoc analysis; boundaries enforced by static AST tests | implemented (Stage 5) |
+| 2026-09-29 | No ML, no parameter optimization, no bypass of the Stage 4 engine — Stage 5 talks to Stage 4 only via `SignalProvider`/`Signal` | implemented (Stage 5) |
