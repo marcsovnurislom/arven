@@ -1,26 +1,24 @@
 # ARVEN — Current state
 
-_Last updated: 2026-09-29 (Stage 5 implemented, awaiting review)_
+_Last updated: 2026-09-29 (Stage 6 implemented and validated, awaiting review)_
 
 ## Phase
 
-**Stage 5 (regime, strategies, decision, risk) is implemented and validated; it awaits user review and is
-not committed.**
+**Stage 6 (ML meta-filter) is implemented and validated; it awaits user review and is not committed.**
+- Stage 5 (regime, strategies, decision, risk) is complete: reviewed, approved and committed (`2298e5a`).
 - Stage 4 (backtester) is complete: reviewed, approved (including the final `liquidation_includes_funding =
   true` decision) and committed (`8009719`, docs correction `a6da56b`).
 - Stage 3 (features) is complete: reviewed, approved and committed (`6ac57d4`).
 - Stage 2 is complete: the full backfill 2020-01-01 → 2026-07-01 is ingested and verified (see below).
-- Stage 6 (ML meta-filter) has not been started. Stage 5 deliberately contains no ML.
 - Split dates, `forward_start`, the DuckDB index/storage design and the 300 s OI availability delay are unchanged.
-  No Stage 0–4 behaviour changed: the only edit to an existing file is `cli.py` (new `--provider pipeline`
-  choice on `backtest run`, 18 insertions / 1 deletion — the deletion is the old choices list being extended,
-  not removed logic). `tests/backtest/test_backtest_static_rules.py` was updated (12 insertions / 3 deletions)
-  to replace a Stage-4-era placeholder ("no Stage 5+ package may import `arven.backtest` at all") with the
-  precise rule now that Stage 5's real, approved design exists (it legitimately imports
-  `arven.backtest.provider` and, in one place, `arven.backtest.margin` — see "Stage 5" below).
+  No Stage 0–5 behaviour changed: the only edit to an existing file that carries real logic is
+  `decision/pipeline.py` (adds an optional `ml_filter` parameter, default `None` — Stage 5's committed
+  behaviour is unchanged when absent, verified byte-identical by `tests/pipeline/test_stage5_no_ml_regression.py`);
+  `cli.py` gained additive `ml train`/`verify`/`show` subcommands and `--ml-model`/`--random-filter-rate`
+  options on `backtest run`; `pyproject.toml` gained the one new dependency, `lightgbm`.
 - Stage 1 + Stage 2 are committed on branch `feat/historical-data` (commit `efb6677`), followed by a docs commit
-  (`4be9329`), the Stage 3 commit (`6ac57d4`), the Stage 4 commit (`8009719`) and a docs-only correction
-  (`a6da56b`). Stage 5 changes are in the working tree.
+  (`4be9329`), the Stage 3 commit (`6ac57d4`), the Stage 4 commit (`8009719`), a docs-only correction
+  (`a6da56b`) and the Stage 5 commit (`2298e5a`). Stage 6 changes are in the working tree, uncommitted.
 
 ## Stage 3 — features (v1)
 
@@ -393,6 +391,215 @@ configuration's losses concentrated.
   decision was made), not its fill or exit time — the natural choice, since regime gating happens at the
   decision, but worth stating explicitly for anyone extending the analysis.
 
+## Stage 6 — ML meta-filter
+
+**What was built:** a `MetaFilter` that estimates `P(success)` for the single `ProposedDecision`
+`DecisionEngine.decide()` already produced, and either passes it through unchanged or replaces its action
+with `NO_TRADE`. It sits strictly between `DecisionEngine.decide()` and `RiskEngine.apply()` inside
+`Stage5Pipeline`, wired through one new, optional constructor parameter (`ml_filter: MLFilterProtocol | None
+= None`, default `None`) — with no filter, `Stage5Pipeline` is byte-identical to the committed Stage 5
+behaviour (`tests/pipeline/test_stage5_no_ml_regression.py`, 9 tests). The ML layer can never flip direction,
+create a trade, resize a position, change risk parameters, or bypass the risk engine or Stage 4 execution —
+it has exactly two outcomes: pass or veto.
+
+**Labels** (`src/arven/ml/labels.py`) — triple-barrier, resolved on 1m bars, net of the same cost functions
+Stage 4 uses (`arven.backtest.costs.adverse_price`/`slippage_fraction`/`taker_fee_rate`; pure functions, not
+the execution engine): stop/take-profit distances from the candidate's own hints, vertical barrier =
+`max_holding_minutes`. Same-bar tie ⇒ stop wins (worst-case, matching CLAUDE.md rule 4). Label = 1 if net
+return ≥ `min_net_return_for_positive_label` (0.0 — net-of-costs already implies "TP must exceed round-trip
+cost"). `None` (unresolvable) if the fill bar is missing or the horizon runs past stored data. Documented
+simplifications: no gap-through adjustment (uses the barrier level, not a gapped price — slightly optimistic
+vs Stage 4's real fill model), no funding cost, no liquidation modelling in the label itself.
+
+**Dataset construction** (`src/arven/ml/dataset.py`) — replays the *real* `RegimeDetector`, the real
+`build_strategies`, the real `DecisionEngine`, and the real `RiskEngine` (imported directly, not
+reimplemented — enforced by a static test) over development+validation, exactly as Stage 5 does, except every
+candidate is risk-checked against a fixed, always-flat `PortfolioSnapshot` before being reset (D3): dataset
+eligibility reflects each candidate's own merit — data-quality/stress/funding/stop-distance rules still
+apply, only the *portfolio-state* rules (position-open, daily-loss halt, drawdown halt, cooldown) are
+neutralised. This is deliberately not the same population a real backtest sees (which only opens one
+position at a time), and is documented as such everywhere it matters. Feature row = 60 causal Stage 3
+columns + 18 Stage 5 context columns (3 trend one-hot + 3 vol one-hot + stress flag + 3 contributing-strategy
+flags + 3 contributing-strategy strengths + score + confidence + stop/take-profit/max-holding hints) = 78
+columns total.
+
+**Splits** (`src/arven/ml/splits.py`) — purged, embargoed, **expanding**-window walk-forward, date-agnostic
+(takes plain start/end ms; a static test locks that it never imports `SplitGuard` or the app config — the
+real development/validation boundary is resolved once, by the caller, through the existing `SplitGuard`, not
+duplicated here). A training row is purged if its label horizon overlaps the validation block or falls within
+`embargo_hours` (96) before it starts. `min_train_months=12`, `retrain_interval_months=3` (D4) — on
+development+validation this produced **17 chronological folds**.
+
+**Models** (`src/arven/ml/model.py`) — pure-numpy Newton's-method logistic regression (intercept never
+regularized, deterministic) and a LightGBM adapter (`deterministic=True, force_row_wise=True,
+num_threads=1`, all four seed parameters fixed from the project seed, early stopping). D7: LightGBM uses all
+78 columns; logistic regression restricts the Stage-3-sourced portion to the 51 `required=True` Stage 3
+columns (context columns are always finite, so aren't restricted) = 69 columns. Hyperparameters: a fixed grid
+of ≤4 configurations per family (`config/ml.yaml`, D5), selected per walk-forward fold by mean validation
+log-loss — no open-ended search, no sealed-test involvement anywhere. Calibration is isotonic only (D6,
+stack-based PAVA), fitted on each fold's held-out validation rows, never the rows a model trained on.
+
+**Model artifacts** (`src/arven/ml/artifact.py`) — every saved model carries the full provenance list agreed
+in planning: model id/family, `git_commit`+`git_dirty`, feature/ML/app/backtest/regime/strategies/risk config
+hashes, feature definition and content hashes, training/validation period bounds, random seed, the selected
+hyperparameters, the complete per-fold walk-forward summary, a dataset fingerprint, the model artifact's own
+SHA-256 hash, threshold, feature names, all candidate/ineligible/train/calibration row counts, raw and
+calibrated metrics, warnings, environment, and `touched_test_set` (always `False` for a Stage 6 training
+run — `arven.ml_runs` never resolves `BacktestPeriod.TEST`, checked both by test and by a static string
+scan). `arven ml verify <model_id>` recomputes the artifact hash from the saved files.
+- **One real bug found and fixed during implementation:** `LightGBMModel` originally stored the raw
+  `lgb.Booster` object; pickling a freshly-trained Booster gave different bytes than pickling the same model
+  after a save→load round trip (LightGBM reconstructs its pickled state from an internal text dump, and that
+  round trip isn't byte-stable), so `arven ml verify` failed only for LightGBM models. Fixed by storing the
+  canonical `model_str` text dump instead, with a `booster` property that reconstructs on demand; locked by
+  `test_two_independently_trained_lightgbm_artifacts_with_the_same_seed_have_the_same_hash`.
+
+**MetaFilter** (`src/arven/ml/filter.py`) — `build_row()` encodes the same 78-column row live, from the
+`ProposedDecision` and the current `FeatureView` (never a later time — `FeatureView`'s existing Stage 4
+`LookAheadError` guard is inherited unchanged, no new leakage-prevention code was written). `apply()` returns
+the proposed decision unchanged if it's already `NO_TRADE` or `P(success) ≥ threshold` (0.55, D-approved
+config default); otherwise returns it with the action replaced by `NO_TRADE` and the stop/target/holding
+fields cleared. `RandomFilter` (control) — a seeded uniform rejection at a fixed rate, same interface, used
+for the matched-rate control below.
+
+**CLI** (`src/arven/cli.py`, additive only): `arven ml train --model-family {logistic,lightgbm}
+[--shuffle-labels-seed N]`, `arven ml verify <model_id>`, `arven ml show <model_id>`; `arven backtest run
+--provider pipeline` gained `--ml-model <model_id>` (loads a trained `MetaFilter`) and
+`--random-filter-rate <p>` (the `RandomFilter` control).
+
+**Module separation, enforced mechanically** (`tests/ml/test_ml_static_rules.py`,
+`tests/leakage/test_ml_leakage.py`): `arven.ml` never imports the Stage 4 execution/accounting engine or
+`duckdb` directly; the `lightgbm` package itself is imported only by `model.py` and `artifact.py` (the
+version string); `regime`/`strategies`/`risk`/`decision` never import `lightgbm` or `arven.ml` (one-directional
+dependency, ML depends on Stage 5, never the reverse); `features/` never imports `arven.ml.labels`
+(forward-looking labels never reachable from causal feature code); `dataset.py` imports the real
+`RiskEngine`, not a local reimplementation; `splits.py` takes only plain ms/int parameters, no
+`SplitGuard`/app-config imports.
+
+**Validation**
+- **Leakage canaries** (`tests/leakage/test_ml_leakage.py`, 11 tests): all 5 planned deliberate-break types
+  — (1) a future label folded into a feature column (structural: only `.label`/`.net_return` are ever read
+  from a `LabelResult` into `x`), (2) a future feature read (`FeatureView`'s `LookAheadError`, exercised
+  directly against `build_row`), (3) random temporal shuffling (a synthetic regime-flip dataset demonstrates
+  shuffled train/test assignment looks *falsely* better than real walk-forward, and fold boundaries are
+  proven monotonic/non-overlapping), (4) full-period normalisation (train-only standardisation is proven to
+  differ from full-period statistics; calibration fit on a model's own training rows is proven to differ
+  from a proper held-out fit), (5) sealed-test contamination (`arven.ml_runs` never resolves
+  `BacktestPeriod.TEST`; a direct `.resolve(TEST)` raises `SealedAccessError`; fold generation is bounded
+  exactly at `validation.end_ms`, never beyond).
+- **Hand-computed label cases** (`tests/ml/test_labels.py`, 12 tests): known entry/stop/target/time-barrier
+  combinations against by-hand expected outcomes and net returns, including a zero-cost control case and the
+  same-bar-tie-favours-stop rule.
+- **Purge/embargo property tests** (`tests/ml/test_splits.py`, 28 tests): exhaustive 20-seed property test
+  that no purged training row's label horizon ever overlaps a validation block or falls inside the embargo.
+- **Determinism**: two independent real-data training runs give identical `model_artifact_hash` and
+  `training_dataset_fingerprint` for both model families (`tests/ml/test_ml_real_data.py`, opt-in;
+  `test_two_independently_trained_{lightgbm,logistic}_artifacts...` in `tests/ml/test_artifact.py`, always-on).
+- **Stage 5 no-ML regression** (`tests/pipeline/test_stage5_no_ml_regression.py`, 9 tests): `Stage5Pipeline`
+  with `ml_filter=None` reproduces the exact committed Stage 5 decision history, signals and `result_hash` —
+  confirmed on the full `tests/pipeline tests/decision tests/regime tests/strategies tests/risk` suite too
+  (191 passed, 4 skipped, unchanged from before Stage 6).
+- **Full suite:** **1523 passed, 13 skipped** in ≈254 s (skips are all opt-in real-data checks — up from 8
+  skips at the Stage 5 commit because the one `arven.ml`-doesn't-exist-yet static check now runs for real).
+  All 13 pass together with `ARVEN_REAL_DATA_TESTS=1` (≈123 s): the original 7 (Stage 3/4/5) plus 6 new Stage
+  6 real-data checks (both model families: train+verify, determinism, sealed-test refusal, honest
+  insufficient-data reporting).
+
+**Real development+validation data results** (`config/ml.yaml` + repo Stage 3-5 configs, git `2298e5a` +
+Stage 6 working tree, `touched_test_set=false` on every training run and backtest below):
+- **Dataset:** 7 572 raw candidates → 350 rejected by non-portfolio-state risk rules, 26 unresolvable labels
+  (horizon past stored data) → **7 196 eligible** (4 790 train rows before the development/validation split,
+  2 406 calibration rows in validation). This is far healthier than the pessimistic "a few thousand" planning
+  estimate, precisely because D3 evaluates every candidate independently of the single capital path a real
+  backtest follows (which only produced 111 trades over the same period).
+- **Walk-forward:** 17 chronological expanding-window folds (3-month retrain interval, 12-month minimum
+  training window, 96h embargo); logistic regression evaluated 51 fold×hyperparameter combinations (3
+  configs), LightGBM evaluated 68 (4 configs); best config selected by mean fold validation log-loss.
+
+  | model | selected hyperparameters | raw val. log-loss | calibrated val. log-loss | raw val. ROC-AUC | calibrated ECE |
+  |---|---|---:|---:|---:|---:|
+  | logistic | `l2=10.0` | 0.634 | 0.623 | 0.518 | ≈0 |
+  | lightgbm | `num_leaves=15, max_depth=4, lr=0.03, min_data_in_leaf=30, feature_fraction=0.7, bagging_fraction=0.7, l1=1.0, l2=1.0` | 0.630 | 0.788 | 0.538 | 0.032 |
+
+  LightGBM's calibrated log-loss is *worse* than its raw log-loss — traced to a single 36-sample calibration
+  bin that isotonic regression pinned to exactly `p=0.0` despite a 41.7% actual positive rate in that bin: a
+  genuine small-edge-bin isotonic failure mode (confirmed not a `_pava` bug via separate hand tests), reported
+  honestly rather than silently discarded or worked around.
+- **Backtest A/B** (`arven backtest run --provider pipeline --period development`, real database, same
+  period as the Stage 5 baseline above):
+
+  | run | trades | total_return | max_drawdown | win_rate | profit_factor | sharpe |
+  |---|---:|---:|---:|---:|---:|---:|
+  | Stage 5 only (no ML) | 111 | −20.3% | 20.6% | 33.3% | 0.566 | −1.43 |
+  | + logistic MetaFilter (`threshold=0.50`, selected — see the threshold-selection note below) | 44 | **+9.0%** | 2.8% | 54.5% | 1.730 | 0.81 |
+  | + LightGBM MetaFilter (`threshold=0.50`, fallback selection — see below) | 0 | 0% | 0% | n/a | n/a | n/a |
+  | + shuffled-label logistic control | 0 | 0% | 0% | n/a | n/a | n/a |
+  | + random filter, matched to the logistic model's ≈98% empirical reject rate | 77 | −15.1% | 20.2% | 28.6% | 0.579 | −1.13 |
+
+  **Threshold selection (Stage 6 pre-commit audit's BLOCKER 2 fix, implemented 2026-09-29):** the threshold is
+  no longer a hardcoded config default — `arven.ml.train.select_threshold` genuinely selects it from
+  `config/ml.yaml`'s 5 fixed candidates (`[0.50, 0.55, 0.60, 0.65, 0.70]`) by maximizing precision
+  `P(label=1 | p≥threshold)` on validation-period predictions only, restricted to candidates with ≥20
+  validation rows passing (never optimizing Sharpe/return/drawdown, never touching the sealed test period,
+  never depending on this table's own backtest result — selection happens once, at training time, before any
+  backtest using the model is ever run). On real data: logistic's candidates 0.50–0.65 are **exact ties**
+  (28 rows, precision 0.679 each — the isotonic calibrator's step function has no achieved value strictly
+  between them); the lowest tied candidate (0.50) wins by the documented tie-break rule. Candidate 0.70 has
+  a higher precision (0.75) but only 4 rows — correctly excluded by the coverage floor. LightGBM's every
+  candidate has 0 validation rows passing (its calibrated scores never reach even 0.50), so it falls back to
+  the smallest candidate, honestly flagged `used_fallback=true` in its manifest — its 0-trade backtest result
+  is unchanged by this fix, for the same underlying calibration-quality reason documented above.
+
+  The LightGBM filter and the shuffled-label control both reject essentially everything (the poorly-calibrated
+  LightGBM scores never reach 0.55; the shuffled-label model, as intended, learned nothing so its scores are
+  also below threshold) — 0 trades in both cases, so no trade statistics are meaningful for them. The
+  matched-rate random filter (same ≈98% reject rate as the real logistic model, but rejecting *at random*
+  rather than by score) still loses money (−15.1%) though less than the unfiltered baseline (fewer trades ⇒
+  less cost exposure) — worse than the trained logistic model's result on every metric. This is a **single
+  run on one development-period slice**, not a validated edge: it is reported as suggestive, single-run
+  evidence that the logistic filter's score carries real information beyond "trade less often," consistent
+  with CLAUDE.md's rule against claiming or implying guaranteed profitability. The 111→44 trade drop for the
+  real model on a real backtest (vs the model passing 143 of 7 196 dataset rows, ≈98.01% rejection) reflects
+  portfolio-state risk vetoes that only apply in the real one-position-at-a-time backtest, not in dataset
+  construction (D3) — expected, not a bug.
+- **Methodological limitation, found by the Stage 6 pre-commit audit (2026-09-29): the A/B comparison above
+  conflates two distinct mechanical effects, and neither Stage 5's risk parameters nor the drawdown halt were
+  changed to investigate this.** Instrumenting `Stage5Pipeline.history` directly (not just the trade ledger)
+  shows the Stage 5-only baseline's `max_drawdown_halt` circuit breaker (risk rule 7, unmodified) fired for
+  **4 358 of its 5 037 risk vetoes (86.5%)**, and **all 111 of its executed trades occurred in 2020** — zero
+  trades in 2021, 2022, or the first half of 2023, because the 20%-drawdown halt (which only releases once
+  drawdown recovers to ≤15%) was never satisfied again for the rest of the development period. The
+  logistic-filtered run's 44 trades are spread across the whole period (2020: 7, 2021: 17, 2022: 10, 2023: 10)
+  because it never triggered a sustained drawdown in the first place. **The observed −20.3% vs +8.6%
+  difference therefore combines (a) trade-selection effects from the meta-filter and (b) a different
+  interaction with the existing portfolio risk circuit breakers — not filtering-quality alone** — and the two
+  are not separated in the table above. This is not evidence the logistic filter "wins" or "beats" the
+  baseline; it is a description of what mechanically produced the two numbers. Separating these two effects
+  (e.g., measuring the same filter's effect starting from a portfolio that never breached the drawdown halt)
+  was not attempted here and would need its own controlled comparison, not a parameter change to Stage 5.
+- **Model artifacts on disk:** `data/models/logistic-20260929T104905Z-50c98444/`,
+  `data/models/lightgbm-20260929T104943Z-50c98444/` (both `arven ml verify`-clean, post-BLOCKER-1/2/3-fix); a
+  shuffled-label control model and various earlier exploratory/pre-fix runs are also present, all gitignored
+  (`/data/` root-anchored rule).
+
+**Known limitations, all deliberate MVP scope or honestly-reported findings (not bugs)**
+- **The A/B table's −20.3%/+8.6% comparison combines trade-selection and circuit-breaker effects** (see the
+  methodological-limitation bullet above) — not interpreted as proof either model "wins."
+- LightGBM's isotonic calibration underperforms on this dataset size (see above) — the model is trained,
+  saved, and verifiable, but its backtest result (0 trades) is not usable as-is; a larger dataset, fewer
+  calibration bins, or Platt scaling as a fallback are the natural next steps, not attempted here (no
+  hyperparameter/calibration-method search against real-data results, per the "no sealed-test optimization,
+  no manufacturing samples" instruction — and this is development+validation, not even the sealed test).
+- All A/B and control results are a **single run over one fixed period** — no repeated-seed distribution
+  exists for the ML-filtered backtests (unlike Stage 4's baselines, which use many seeded runs). Multiple
+  seeds/periods would strengthen the evidence but were not requested for Stage 6.
+- The diagnostics described in planning (SHAP summaries, calibration reliability diagrams, per-regime/
+  per-strategy `P(success)` breakdowns) are computed and printable via the existing metrics functions and
+  LightGBM's native Tree-SHAP, but are not yet formalised as a saved report artifact the way
+  `arven.reports.per_regime_breakdown` is for Stage 5 — left for a follow-up, not blocking Stage 6 review.
+- The A/B comparison above was produced by four separate `arven ml train`/`arven backtest run` invocations,
+  not a single reusable `arven ml` subcommand — also left for a follow-up.
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -508,7 +715,7 @@ Architecture (`docs/architecture.md`) is approved as the *target* architecture, 
 
 ```
 .gitignore                  # .venv, /data/ (root-anchored!), .env, caches, *.duckdb
-pyproject.toml              # deps: duckdb, numpy, pydantic, pyyaml; dev: pytest; script `arven`; installed editable (pip -e); pytest path src+tests, marker real_data
+pyproject.toml              # deps: duckdb, numpy, pydantic, pyyaml, lightgbm; dev: pytest; script `arven`; installed editable (pip -e); pytest path src+tests, marker real_data
 config/
   default.yaml              # project, market, data (data_dir, history_start/end, bar + OI availability delays), download (retry policy, crosscheck TFs)
   costs.yaml                # maker/taker fee bps, order types, slippage model params, funding assumptions
@@ -518,12 +725,13 @@ config/
   regime.yaml                # Stage 5: trend/vol/stress thresholds, volatility window, dwell bars (own hash)
   strategies.yaml            # Stage 5: decision weights/thresholds + each of the 3 strategies' parameters and regime gates (own hash)
   risk.yaml                  # Stage 5: the 8 risk rules' thresholds/limits (own hash; leverage/mmr read from backtest.yaml, not duplicated)
+  ml.yaml                    # Stage 6: labels, dataset, walk-forward (D4), hyperparameter grids (D5), calibration (D6), threshold, determinism (own hash)
 src/arven/
   __main__.py, cli.py       # python -m arven {ingest|resample|crosscheck|quality|export|status|features ...|backtest ...}
   core/                     # time.py, timeframes.py, types.py, config.py (Stage 1); series.py (columnar BarSeries/FundingSeries/OpenInterestSeries/MarketInputs
                             #   with available_until + regularized), features_config.py (Stage 3)
                             # signal.py (Signal: the decision->backtest contract), backtest_config.py, splitguard.py (Stage 4)
-                            # regime_config.py, strategies_config.py, risk_config.py (Stage 5)
+                            # regime_config.py, strategies_config.py, risk_config.py (Stage 5); ml_config.py (Stage 6)
   features/                 # Stage 3, pure numpy (no I/O, no DB, no later-stage imports; enforced by tests)
     indicators.py             # causal primitives: shift, rolling sum/mean/std/max/min, EMA, Wilder RMA, ATR, RSI, ADX, MACD, Bollinger, Donchian, Parkinson
     asof.py                   # backward as-of join on available_at with staleness limit
@@ -569,6 +777,19 @@ src/arven/
   risk/engine.py               # RiskEngine: the 8 ordered rules, stateful circuit breakers (daily loss/drawdown/cooldown); imports only
                                 #   arven.backtest.provider (types) and arven.backtest.margin (one pure function), never engine/execution/accounting
   reports.py                   # Stage 5, deliberately outside arven.decision: per_regime_breakdown (post-hoc only, one-directional dependency)
+  ml/                          # Stage 6, imports the real regime/strategies/decision/risk (never a copy) + pure Stage 4 cost functions;
+                                #   never the execution/accounting engine or duckdb directly (enforced by tests)
+    labels.py                    # triple-barrier resolution on 1m bars, net of costs (reuses arven.backtest.costs, not the engine)
+    dataset.py                   # replays the real RegimeDetector/strategies/DecisionEngine/RiskEngine with a fixed flat portfolio (D3)
+    splits.py                    # purged, embargoed, expanding-window walk-forward folds; date-agnostic (no SplitGuard/config import)
+    model.py                     # numpy logistic regression (Newton's method) + LightGBM adapter (deterministic, model_str-based)
+    calibration.py               # isotonic regression (stack-based PAVA)
+    metrics.py                   # log-loss, Brier, ROC-AUC, PR-AUC, calibration curve/ECE, precision-coverage (pure numpy)
+    train.py                     # feature-column selection (D7), walk-forward hyperparameter selection, final fit + calibration
+    artifact.py                  # ModelArtifact, full-provenance manifest, save/load/verify (content-hash pattern)
+    filter.py                    # MetaFilter (pass/veto only) and RandomFilter (matched-rate control)
+  ml_runs.py                    # Stage 6 composition root (mirrors runs.py): dataset -> walk-forward -> final model -> saved artifact;
+                                 #   never resolves BacktestPeriod.TEST (checked by test and by a static string scan)
 tests/
   conftest.py               # make_config fixture (isolated tmp data_dir)
   synthetic_market.py, leakage_harness.py   # deterministic synthetic bars/funding/OI; generic truncation + perturbation checks
@@ -581,17 +802,26 @@ tests/
                              #   baselines, metrics, report/determinism (golden hashes), splitguard+loaders, runs integration, static rules
   leakage/                  # test_no_lookahead (every feature), test_canary, test_static_rules, test_real_data (opt-in),
                              #   test_backtest_leakage.py (Stage 4: FeatureView/clock, prefix invariance, perturbation, cheater vs random)
+                             #   test_ml_leakage.py (Stage 6: all 5 canary types - future label, future feature, shuffling,
+                             #   full-period normalisation, sealed-test contamination)
   stage5_helpers.py, pipeline_helpers.py    # Stage 5: exact-value FeatureView builder (real Stage 3 column names); synthetic-market-driven
                                              #   pipeline runner, truncate/garbage helpers for both the feature and 1m-market sides
   regime/, strategies/, decision/, risk/    # hand-computed unit tests per rule/branch, plus each package's own config-validation tests
   pipeline/                 # test_pipeline_wiring, test_stage5_static_rules, test_leakage, test_determinism,
                              #   test_backtest_integration (accounting invariants via the real engine), test_pipeline_real_data (opt-in)
+                             #   test_stage5_no_ml_regression.py (Stage 6: Stage5Pipeline with ml_filter=None is byte-identical)
+  ml/                       # Stage 6: test_labels (hand-computed triple-barrier), test_splits (purge/embargo property test, 20 seeds),
+                             #   test_model, test_calibration (PAVA), test_ml_metrics, test_dataset (regression vs a direct Stage5
+                             #   replay), test_artifact (round trip, manifest completeness, hash verification/determinism), test_filter
+                             #   (30-seed property test), test_ml_config, test_ml_static_rules (import boundaries), test_ml_real_data (opt-in)
   test_reports.py           # per-regime breakdown (hand-built fixtures)
 ```
-1346 tests (1338 passed, 8 skipped), all passing (`.venv/Scripts/python.exe -m pytest`, about 5 min). Skipped by
-default: 7 opt-in real-data checks (3 Stage 3/4 + 4 Stage 5) and 1 static-import check for `ml` (Stage 6, doesn't
-exist yet). All 7 real-data checks pass together: `ARVEN_REAL_DATA_TESTS=1 .venv/Scripts/python.exe -m pytest
-tests/leakage/test_real_data.py tests/pipeline/test_pipeline_real_data.py` (about 45 s; add
+1523 tests (1510 passed, 13 skipped), all passing (`.venv/Scripts/python.exe -m pytest`, about 4m14s). Skipped by
+default: 13 opt-in real-data checks (7 from Stages 3-5 + 6 new Stage 6 ones). The `arven.ml`-doesn't-exist-yet
+static check counted as 1 of Stage 5's 8 skips is gone: `arven.ml` exists now, so that test runs for real (it's
+inside the always-on `test_ml_static_rules.py`/`test_ml_leakage.py`, not a skip). All 13 real-data checks pass
+together: `ARVEN_REAL_DATA_TESTS=1 .venv/Scripts/python.exe -m pytest tests/leakage/test_real_data.py
+tests/pipeline/test_pipeline_real_data.py tests/ml/test_ml_real_data.py` (about 123 s; add
 `ARVEN_REAL_DATA_SAMPLES=200` for the fuller Stage 3 sample count).
 
 ### Conventions (all later stages must follow)
@@ -726,10 +956,15 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 ## Open issues / decisions for the user
 
 1. ~~Full backfill~~: done. ~~Stage 3 features~~: done and approved. ~~Stage 4 backtester~~: done and approved
-   (including the final `liquidation_includes_funding=true` decision, #13 below). ~~Stage 5 pipeline~~: implemented
-   and validated (1338 tests green, 7 opt-in real-data tests pass together); awaiting review.
+   (including the final `liquidation_includes_funding=true` decision, #13 below). ~~Stage 5 pipeline~~: done and
+   approved, committed `2298e5a`. **Stage 6 ML meta-filter**: implemented and validated (1523 tests green, 13
+   opt-in real-data tests pass together); awaiting review.
 2. **`forward_start = 2026-07-01` is already in the past** (unchanged as instructed). It needs relabelling before paper trading.
-3. **Contiguous splits with no embargo.** To be handled by purging/embargo in Stage 6.
+3. ~~Contiguous splits with no embargo~~: **resolved by Stage 6's purged, embargoed expanding-window
+   walk-forward** (`src/arven/ml/splits.py` — 96-hour embargo, purges any training row whose label horizon
+   overlaps a validation block; 20-seed exhaustive property test). The underlying Stage 4/5 chronological
+   development/validation/test split dates are still contiguous with no embargo between them (unchanged,
+   as instructed) — Stage 6 only adds embargo *within* its own walk-forward folds, on top of that.
 4. **DuckDB size and compaction.** The DB is 475 MB uncompacted for the full period; the storage design is frozen for now.
 5. ~~Stage 3 input decisions~~: resolved by the missing-data policy in "Stage 3 — features" (OI gaps and the pre-2020-09 boundary
    are NaN with staleness, never interpolated; zero-volume ratios are NaN; the 2021-05-15 anomaly is left as is).
@@ -737,14 +972,20 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 7. **Top-trader and taker long/short ratios are empty in the source from 2021-12 to 2022-12 (taker: to 2022-05).** `oi_top_ls_log` /
    `oi_taker_ls_log` are therefore NaN for a large part of the development period. **None of the Stage 5 strategies or the
    regime detector read either column** (the regime stress flag uses `oi_chg_1h`, not the ratios), so Stage 5 did not need to
-   resolve this. **Still carried to Stage 6:** ML feature selection, fitted on training folds only, decides whether to use, drop
-   or restrict them; `oi_chg_*`, `oi_z` and the open-interest level itself are unaffected.
+   resolve this. **Stage 6:** both columns are included in LightGBM's full 78-column feature set (they are among the 60
+   causal Stage 3 columns) but excluded from logistic regression's 69-column set, since neither is Stage-3 `required=True`
+   (D7 — the required/optional split, not an ad hoc Stage 6 selection). No NaN-imputation or dropping was added; a NaN
+   value flows into LightGBM's native missing-value handling the same way it would in any other Stage 6 row.
 8. ~~The feature cache covers the whole history, including validation and sealed-test rows~~: **enforced by Stage 4's
    `SplitGuard`/`AllowedWindow`** — every backtest data read (1m bars, funding, feature rows) is confined to one configured
    period; a range crossing a period boundary is refused; the sealed test period additionally needs `--allow-sealed` and a
    `--reason`, logged to `data/backtests/sealed_test_log.jsonl` before any data loads. Verified: a development run's reader
-   never queries at or after 2023-07-01 (`test_loaders_return_only_rows_inside_the_window_and_log_the_ranges`). Still open for
-   Stage 6: purged walk-forward, sealed-test evaluation log for ML.
+   never queries at or after 2023-07-01 (`test_loaders_return_only_rows_inside_the_window_and_log_the_ranges`).
+   **Stage 6 extends this, not replaces it:** `arven.ml_runs.train_and_save` resolves only `DEVELOPMENT`/`VALIDATION`
+   through the same `SplitGuard`, and never resolves `TEST` (verified by test and by a static scan for the literal
+   `BacktestPeriod.TEST` in `ml_runs.py`); a Stage-6-specific sealed-test evaluation log (analogous to
+   `sealed_test_log.jsonl`) does not exist yet because no Stage 6 code path reaches the test period at all — left for
+   whichever later stage first evaluates a trained model against the sealed test.
 9. **Warm-up costs the first 167 days** of the development period for `feat_ready` (`h4_ema_dist_200` needs 1 000 4h bars).
    Lowering `warmup_factor` or dropping the 4h EMA200 is possible via `config/features.yaml`, at the price of a new feature version.
 10. ~~Feature cache manifest recorded the pre-commit git hash~~: resolved — rebuilt once after the Stage 3 commit; the content
@@ -764,26 +1005,40 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
     implemented and tested for reference (`test_funding_can_liquidate_when_it_is_debited_from_the_margin`,
     `test_long_hold_through_persistent_positive_funding_is_liquidated_not_negative`) but is not the configured
     behaviour. `config/backtest.yaml` and `docs/architecture.md` §9 reflect this as final, not provisional.
-14. **Stage 5's ML filter step (architecture §13 step 4) and macro-event blackout (risk rule 2) are both
-    genuinely absent, not stubbed** — the decision engine has no probability gate and the risk engine has no
-    calendar check. Both are explicitly later stages (6 and 8) per the architecture; nothing today pretends to
-    gate on a probability or a blackout window that doesn't exist.
+14. ~~Stage 5's ML filter step (architecture §13 step 4)~~ — **resolved: implemented in Stage 6** as
+    `arven.ml.filter.MetaFilter`, wired optionally into `Stage5Pipeline` (see "Stage 6" above). The macro-event
+    blackout (risk rule 2) **remains genuinely absent, not stubbed** — the risk engine still has no calendar
+    check; it is explicitly Stage 8.
 15. **Stage 5's regime/strategy/risk parameters are architecture-derived defaults, not fitted or searched**
     (CLAUDE.md: "do not optimize parameters"). The real development-period result (−20.3% over 3.5 years, 111
     trades) is a measurement of the framework, not evidence the three unoptimized strategies have an edge —
     see "Stage 5" above for the per-regime breakdown.
+16. **Stage 6's LightGBM calibration underperforms on this dataset (0.630 raw → 0.788 calibrated log-loss)** —
+    reported honestly rather than tuned away; see "Stage 6" above for the traced cause (a single small,
+    isotonic-overfit calibration bin) and the resulting 0-trade backtest for that model family. A fix (fewer
+    bins, Platt fallback, more data) is a candidate for a later stage, not attempted here.
+17. **Stage 6's A/B and control backtests are each a single run over one fixed development-period slice**, not
+    a seeded distribution the way Stage 4's baselines are. The logistic MetaFilter's +8.6% result is reported
+    as single-run, suggestive evidence against its own controls (shuffled-label, matched-rate random filter),
+    not a validated edge — consistent with CLAUDE.md's rule against implying guaranteed profitability.
 
 ## What does NOT exist yet
 
-- ML (labels, meta-filter, calibration), macro/news ingestion, LLM, live/paper trading loop, dashboard.
+- Macro/news ingestion, LLM, live/paper trading loop, dashboard.
 - `MarketSnapshot` as a separate class (its job is done by `core.series.MarketInputs.available_until` and
   `data.reader`), and the `feature_sets` DuckDB table (replaced by `manifest.json`).
 - REST incremental updates (only bulk files are supported so far).
-- The macro-event blackout (risk rule 2) and the ML probability gate (decision step 4) — both explicitly
-  later stages (8 and 6), not implemented, not stubbed.
+- The macro-event blackout (risk rule 2) — explicitly Stage 8, not implemented, not stubbed. (The ML
+  probability gate, decision step 4, now exists — Stage 6.)
 - A 4th strategy (funding/positioning contrarian, architecture §13 item 4) — out of the explicit Stage 5 scope.
+- A formalised, saved Stage 6 diagnostics report (SHAP summary, calibration reliability diagram, per-regime/
+  per-strategy `P(success)` breakdown as a report artifact, mirroring `arven.reports.per_regime_breakdown`)
+  and a reusable `arven ml` A/B-comparison subcommand — the underlying metrics/SHAP/comparison all run today,
+  just via separate ad hoc invocations, not one saved artifact or command.
+- A Stage-6-specific sealed-test evaluation log (`arven.ml_runs` never reaches the test period at all yet, so
+  there is nothing to log — see open issue #8).
 - Git: branch `feat/historical-data`; commits `efb6677` (Stage 1+2), `4be9329` (docs), `6ac57d4` (Stage 3),
-  `8009719` (Stage 4), `a6da56b` (docs). Stage 5 is uncommitted.
+  `8009719` (Stage 4), `a6da56b` (docs), `2298e5a` (Stage 5). Stage 6 is uncommitted.
 
 ## Environment
 
@@ -792,6 +1047,8 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
   - Added in Stage 2: `duckdb 1.5.5`, plus the project itself installed editable (`pip install -e .`).
   - Added in Stage 3: `numpy 2.5.3` (the only new dependency; the install needed several retries because of connection resets).
   - Stage 4 and Stage 5 added no new dependencies.
+  - Added in Stage 6: `lightgbm 4.7.0` (pulled in `scipy 1.18.1`, `narwhals 2.26.0`); the install needed retries
+    (`--retries 15 --timeout 60`) because of the same connection-reset behaviour seen with `numpy` in Stage 3.
   - Not installed: pandas, pyarrow.
 - Pre-existing packages from the user: `openai`, `pydantic`, `httpx2`, `python-dotenv`.
 
@@ -825,3 +1082,12 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-09-29 | Stage 5 scope: rule-based regime (trend x vol + stress flag), 3 strategies (trend/momentum, breakout, mean-reversion — the 4th, funding contrarian, excluded), decision engine (regime gate + weighted vote, no ML filter), risk engine (8 ordered rules, no macro blackout) | approved |
 | 2026-09-29 | Regime/strategy/risk gating and reporting kept in 4 separate packages (`regime`, `strategies`, `decision`, `risk`) plus `reports.py` outside `decision` for post-hoc analysis; boundaries enforced by static AST tests | implemented (Stage 5) |
 | 2026-09-29 | No ML, no parameter optimization, no bypass of the Stage 4 engine — Stage 5 talks to Stage 4 only via `SignalProvider`/`Signal` | implemented (Stage 5) |
+| 2026-09-29 | Stage 5 review approved, committed `2298e5a` | approved (final) |
+| 2026-09-29 | Stage 6 D1: add LightGBM as the new dependency | approved |
+| 2026-09-29 | Stage 6 D2: `MetaFilter` sits after `DecisionEngine.decide()` and before `RiskEngine.apply()`, resolving the architecture's diagram-vs-steps ambiguity in favour of operating on the single consolidated candidate | approved |
+| 2026-09-29 | Stage 6 D3: dataset eligibility ignores portfolio-state risk rules only (position-open/daily-loss/drawdown/cooldown); all other risk rules still apply | approved |
+| 2026-09-29 | Stage 6 D4: `retrain_interval_months=3`, `embargo_hours=96`, `min_train_months=12` | approved |
+| 2026-09-29 | Stage 6 D5: fixed hyperparameter grid, ≤4 configurations per model family, no open-ended search | approved |
+| 2026-09-29 | Stage 6 D6: isotonic calibration, fitted per walk-forward fold on held-out rows | approved |
+| 2026-09-29 | Stage 6 D7: LightGBM uses all 60 causal Stage 3 columns; logistic regression uses only the 51 `required=True` Stage 3 columns (both + all 18 Stage 5 context columns) | approved |
+| 2026-09-29 | Stage 6 implemented: labels, dataset construction (real regime/strategies/decision/risk replay), purged/embargoed walk-forward, numpy logistic regression + LightGBM, isotonic calibration, model artifacts with full provenance, `MetaFilter`/`RandomFilter`, CLI, 1523 tests incl. 5 leakage-canary types and determinism; real development+validation data: 7572/7196 eligible, logistic model +8.6% vs −20.3% baseline with shuffled-label and matched-rate-random controls (single run, not a validated edge) | implemented (Stage 6), awaiting review |

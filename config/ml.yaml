@@ -1,0 +1,54 @@
+# ARVEN ML meta-filter configuration (Stage 6). docs/architecture.md section 11.
+#
+# The ML layer never predicts direction (Stage 5 strategies already do) and never sizes positions
+# (Stage 5 risk does). It predicts, for a single already-proposed Stage 5 decision, the probability that
+# its take-profit is hit before its stop-loss/time-limit, net of costs, and passes or vetoes on that
+# probability alone. See src/arven/ml/filter.py.
+
+version: v1
+
+labels:
+  # A label requires net PnL > 0 on a TP-first resolution (architecture: "net of costs => TP must exceed
+  # round-trip cost"), using the real Stage 4 cost model (arven.backtest.costs), not a re-derived one.
+  min_net_return_for_positive_label: 0.0
+
+dataset:
+  # A candidate is a dataset row only if it would survive Stage 5's non-portfolio-state risk rules
+  # (data-quality, volatility guard, funding guard, liquidation-distance). The four portfolio-state rules
+  # (position-open, daily-loss halt, drawdown halt, cooldown) are deliberately NOT applied when building
+  # the dataset (approved decision D3): a label evaluates one candidate's own merit, independent of any
+  # single backtest run's realized capital path.
+  apply_portfolio_state_risk_rules: false
+
+walk_forward:
+  retrain_interval_months: 3   # approved D4
+  embargo_hours: 96            # approved D4 (>= the longest strategy horizon, 3 days = 4320 min)
+  min_train_months: 12         # approved D4
+
+hyperparameters:
+  # Fixed, small, pre-declared grids (approved D5): each candidate is evaluated once across every walk-
+  # forward fold; nothing here is searched or optimized against outcomes.
+  logistic:
+    - {l2: 0.1}
+    - {l2: 1.0}
+    - {l2: 10.0}
+  lightgbm:
+    - {num_leaves: 7,  max_depth: 3, learning_rate: 0.05, min_data_in_leaf: 30, feature_fraction: 0.8, bagging_fraction: 0.8, lambda_l1: 0.0, lambda_l2: 1.0}
+    - {num_leaves: 15, max_depth: 4, learning_rate: 0.05, min_data_in_leaf: 50, feature_fraction: 0.8, bagging_fraction: 0.8, lambda_l1: 0.0, lambda_l2: 1.0}
+    - {num_leaves: 15, max_depth: 4, learning_rate: 0.03, min_data_in_leaf: 30, feature_fraction: 0.7, bagging_fraction: 0.7, lambda_l1: 1.0, lambda_l2: 1.0}
+    - {num_leaves: 31, max_depth: 5, learning_rate: 0.05, min_data_in_leaf: 50, feature_fraction: 0.8, bagging_fraction: 0.8, lambda_l1: 0.0, lambda_l2: 5.0}
+  n_estimators_max: 200       # LightGBM upper bound; real count controlled by early stopping
+  early_stopping_rounds: 20
+  selection_metric: log_loss   # mean across folds' own held-out blocks; never validation, never test
+
+calibration:
+  method: isotonic   # approved D6
+
+threshold:
+  # The candidate thresholds diagnostics are reported at; the one actually used by MetaFilter is chosen
+  # on the validation period only and recorded in the run manifest, never searched against test.
+  candidates: [0.50, 0.55, 0.60, 0.65, 0.70]
+  default: 0.55
+
+determinism:
+  lightgbm_deterministic: true   # arven.ml.model passes deterministic=True, force_row_wise=True, num_threads=1

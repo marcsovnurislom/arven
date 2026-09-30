@@ -322,9 +322,18 @@ def cmd_backtest_run(cfg: AppConfig, args: argparse.Namespace) -> int:
         from arven.core.strategies_config import load_strategies_config
         from arven.decision.pipeline import Stage5Pipeline
 
+        ml_filter = None
+        if getattr(args, "ml_model", None):
+            from arven.ml_runs import load_meta_filter
+
+            ml_filter = load_meta_filter(cfg, args.ml_model)
+        elif getattr(args, "random_filter_rate", None) is not None:
+            from arven.ml.filter import RandomFilter
+
+            ml_filter = RandomFilter(args.random_filter_rate, seed=cfg.project.random_seed)
         pipeline = Stage5Pipeline(
             load_regime_config(args.config_dir), load_strategies_config(args.config_dir),
-            load_risk_config(args.config_dir), bt,
+            load_risk_config(args.config_dir), bt, ml_filter=ml_filter,
         )
         provider = pipeline
     else:
@@ -397,6 +406,63 @@ def cmd_backtest_show(cfg: AppConfig, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ml_train(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from arven.core.ml_config import load_ml_config
+    from arven.core.regime_config import load_regime_config
+    from arven.core.risk_config import load_risk_config
+    from arven.core.strategies_config import load_strategies_config
+    from arven.core.backtest_config import load_backtest_config
+    from arven.ml_runs import InsufficientDataError, train_and_save
+
+    ml_cfg = load_ml_config(args.config_dir)
+    fcfg = load_features_config(args.config_dir)
+    bt = load_backtest_config(args.config_dir)
+    regime_cfg = load_regime_config(args.config_dir)
+    strategies_cfg = load_strategies_config(args.config_dir)
+    risk_cfg = load_risk_config(args.config_dir)
+    try:
+        out = train_and_save(
+            cfg, ml_cfg, fcfg, regime_cfg, strategies_cfg, risk_cfg, bt, args.model_family,
+            shuffle_labels_seed=args.shuffle_labels_seed,
+        )
+    except InsufficientDataError as e:
+        print(f"INSUFFICIENT DATA: {e}")
+        print(f"  candidates_total={e.n_candidates_total} ineligible_risk={e.n_ineligible_risk} "
+              f"ineligible_label={e.n_ineligible_label} eligible={e.n_eligible}")
+        return 1
+    print(f"model {out.model_id} -> {out.model_dir}")
+    m = out.manifest
+    print(f"  candidates_total={m['n_candidates_total']} ineligible_risk={m['n_ineligible_risk']} "
+          f"ineligible_label={m['n_ineligible_label']} train_rows={m['n_train_rows']} calibration_rows={m['n_calibration_rows']}")
+    print(f"  hyperparameters={m['hyperparameters']}")
+    print(f"  folds evaluated: {len(m['fold_summary'])}")
+    print(f"  validation metrics (raw): {m['metrics']['raw']}")
+    print(f"  validation metrics (calibrated): {m['metrics']['calibrated']}")
+    print(f"  threshold={m['threshold']}  model_artifact_hash={m['model_artifact_hash'][:16]}...")
+    for w in m["warnings"]:
+        print(f"  WARNING: {w}")
+    return 0
+
+
+def cmd_ml_verify(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from arven.ml.artifact import verify_artifact
+    from arven.ml_runs import models_dir
+
+    res = verify_artifact(models_dir(cfg) / args.model)
+    print(f"verify {args.model}: {'OK' if res['ok'] else 'FAILED'}  model_artifact_hash={res['model_artifact_hash'][:16]}...")
+    for p in res["problems"]:
+        print(f"  PROBLEM {p}")
+    return 0 if res["ok"] else 1
+
+
+def cmd_ml_show(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from arven.ml_runs import models_dir
+
+    m = json.loads((models_dir(cfg) / args.model / "manifest.json").read_text(encoding="utf-8"))
+    print(json.dumps(m, indent=2, sort_keys=True))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="arven", description="ARVEN data pipeline (research only, no execution)")
     parser.add_argument("--config-dir", default=None, help="configuration directory (default: <project>/config)")
@@ -443,6 +509,8 @@ def build_parser() -> argparse.ArgumentParser:
     q = with_window(bsub.add_parser("run", help="run one baseline provider on a period"))
     q.add_argument("--provider", choices=["no_trade", "buy_and_hold", "random_entry", "pipeline"], required=True)
     q.add_argument("--seed-index", type=int, default=0, help="random_entry spawn index")
+    q.add_argument("--ml-model", help="Stage 6 model id (data/models/<id>): if given, --provider pipeline runs with this MetaFilter enabled")
+    q.add_argument("--random-filter-rate", type=float, help="control (D20): --provider pipeline vetoes this fraction of candidates uniformly at random instead of using a model")
     q.set_defaults(func=cmd_backtest_run)
     q = with_window(bsub.add_parser("baselines", help="no-trade, buy-and-hold and the random-entry distribution, side by side"))
     q.add_argument("--seeds", type=int, default=None, help="override baselines.random_entry.n_seeds")
@@ -453,6 +521,19 @@ def build_parser() -> argparse.ArgumentParser:
     q = bsub.add_parser("show", help="print a stored run's metrics")
     q.add_argument("run")
     q.set_defaults(func=cmd_backtest_show)
+
+    p = sub.add_parser("ml", help="Stage 6 ML meta-filter: train, verify and inspect models")
+    msub = p.add_subparsers(dest="ml_command", required=True)
+    q = msub.add_parser("train", help="build the development+validation dataset, walk-forward select hyperparameters, fit and calibrate the final model")
+    q.add_argument("--model-family", choices=["logistic", "lightgbm"], required=True)
+    q.add_argument("--shuffle-labels-seed", type=int, help="shuffled-label control (D20): permute labels with this seed before training")
+    q.set_defaults(func=cmd_ml_train)
+    q = msub.add_parser("verify", help="recompute a model artifact's hash from its file")
+    q.add_argument("model")
+    q.set_defaults(func=cmd_ml_verify)
+    q = msub.add_parser("show", help="print a stored model's manifest")
+    q.add_argument("model")
+    q.set_defaults(func=cmd_ml_show)
     return parser
 
 

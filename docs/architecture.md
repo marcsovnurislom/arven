@@ -391,6 +391,28 @@ paper_trades(signal_id, entry_time, entry_price, exit_time, exit_price, pnl, exi
 
 ## 11. ML approach for the MVP
 
+> **As implemented in Stage 6** (`src/arven/ml/`, `src/arven/ml_runs.py`; details in `current_state.md`): the
+> MetaFilter sits between `DecisionEngine.decide()`'s output and `RiskEngine.apply()` — resolving the
+> diagram-vs-numbered-steps ambiguity in favour of "operates on the single consolidated candidate," matching
+> this section's "a given candidate trade" (singular) wording — never inside `decision/engine.py` itself,
+> which is unmodified. Labels use `min_net_return_for_positive_label = 0.0` (net of the same cost functions
+> Stage 4 uses), which already implies "TP must exceed round-trip cost" rather than needing a separate rule.
+> Feature set is the 60 causal Stage 3 columns + 18 Stage 5 context columns (regime one-hot, contributing-
+> strategy flags/strengths, score, confidence, stop/target/holding hints) = 78 total for LightGBM; logistic
+> regression restricts the Stage-3-sourced portion to the 51 `required=True` columns (context columns are
+> always finite, so are never restricted) = 69 total. Only isotonic calibration is implemented (Platt was not
+> needed). Walk-forward retrains every 3 months with a 96-hour embargo and a 12-month minimum training
+> window, expanding (never rolling). The dataset is built by replaying the real `RegimeDetector` /
+> strategies / `DecisionEngine` / `RiskEngine` with a fixed, always-flat `PortfolioSnapshot` at every
+> candidate, so eligibility reflects each candidate's own merit independently of one particular capital path
+> — not the sequential, one-position-at-a-time set a real backtest produces (7 572 raw candidates → 7 196
+> eligible on development+validation, vs 111 real Stage 5 trades over the same period). SHAP uses LightGBM's
+> native `pred_contrib=True` Tree-SHAP (no separate `shap` dependency). On real data, the trained logistic
+> model's calibrated validation log-loss (0.623) stayed close to its raw log-loss (0.634); LightGBM's
+> calibration instead made its held-out log-loss *worse* (0.630 raw → 0.788 calibrated) — a genuine, small
+> edge-bin isotonic-overfit failure mode, reported as a limitation rather than discarded. See
+> `current_state.md`'s "Stage 6" section for the full A/B and control results.
+
 **Role:** *meta-labelling* filter. Strategies propose direction; ML estimates the probability that a given
 candidate trade reaches its take-profit before its stop-loss (or time limit). Low probability ⇒ skip.
 This keeps ML a supporting module, reduces the prediction problem to a well-posed binary task, and allows a
@@ -451,8 +473,15 @@ Combined regime examples: `TREND_UP/NORMAL`, `RANGE/LOW`, `ANY/HIGH+STRESS`.
 > 1-3 below were built (explicit Stage 5 scope); #4 (funding/positioning contrarian) was not. Weights are
 > equal (1.0 each) and static — the "later, weights ∝ validated performance" refinement is not implemented
 > (would need Stage 6-level backtesting-of-weights, out of scope here). **Step 4, the ML filter, does not
-> exist and was skipped entirely** (Stage 6) — the pipeline goes straight from the conflict/threshold check
-> (steps 3 and 5) to the risk engine. "Weighted vote" is exactly `score = Σ weight_s × strength_s`, summed
+> exist and was skipped entirely** in Stage 5 — the pipeline went straight from the conflict/threshold check
+> (steps 3 and 5) to the risk engine. **Update (Stage 6): step 4 now exists**, as `arven.ml.filter.MetaFilter`,
+> wired into `Stage5Pipeline` through an optional `ml_filter: MLFilterProtocol | None = None` constructor
+> parameter (default `None`, so Stage 5's committed behaviour is unchanged when it is absent — verified
+> byte-identical by `tests/pipeline/test_stage5_no_ml_regression.py`). It sits after `DecisionEngine.decide()`
+> and before `RiskEngine.apply()`, and can only pass the `ProposedDecision` through unchanged or replace its
+> action with `NO_TRADE` — it never flips direction, resizes, changes risk parameters, or bypasses the risk
+> engine below it or the Stage 4 execution engine. See §11's Stage 6 note for the model/label/validation
+> details. "Weighted vote" is exactly `score = Σ weight_s × strength_s`, summed
 > separately per direction then subtracted — `direction_s` isn't a separate multiplicative term since
 > candidates of one direction are summed together first. Output additionally carries a weighted-average
 > stop/take-profit hint and the shortest of the winning candidates' holding caps, for the risk engine.
