@@ -1,24 +1,30 @@
 # ARVEN — Current state
 
-_Last updated: 2026-09-29 (Stage 6 implemented and validated, awaiting review)_
+_Last updated: 2026-10-01 (Stage 7 walk-forward evaluation implemented, validated, and run on real data)_
 
 ## Phase
 
-**Stage 6 (ML meta-filter) is implemented and validated; it awaits user review and is not committed.**
+**Stage 7 (walk-forward evaluation, WFO) is implemented, validated, and has been run on real
+development+validation data.** The roadmap was renumbered on 2026-10-01 to insert it between the ML
+meta-filter and the paper-signal loop (the former Stage 7 "Paper-signal loop" is now Stage 8; nothing about
+its scope changed — see `docs/roadmap.md`). See "Stage 7" below for the methodology and results; the headline
+finding is that **Stage 6's single-run +8.6% result does not replicate** under genuine walk-forward evaluation.
+- Stage 6 (ML meta-filter) is complete: implemented, validated, approved and committed (`e9b7c72`).
 - Stage 5 (regime, strategies, decision, risk) is complete: reviewed, approved and committed (`2298e5a`).
 - Stage 4 (backtester) is complete: reviewed, approved (including the final `liquidation_includes_funding =
   true` decision) and committed (`8009719`, docs correction `a6da56b`).
 - Stage 3 (features) is complete: reviewed, approved and committed (`6ac57d4`).
 - Stage 2 is complete: the full backfill 2020-01-01 → 2026-07-01 is ingested and verified (see below).
 - Split dates, `forward_start`, the DuckDB index/storage design and the 300 s OI availability delay are unchanged.
-  No Stage 0–5 behaviour changed: the only edit to an existing file that carries real logic is
-  `decision/pipeline.py` (adds an optional `ml_filter` parameter, default `None` — Stage 5's committed
-  behaviour is unchanged when absent, verified byte-identical by `tests/pipeline/test_stage5_no_ml_regression.py`);
-  `cli.py` gained additive `ml train`/`verify`/`show` subcommands and `--ml-model`/`--random-filter-rate`
-  options on `backtest run`; `pyproject.toml` gained the one new dependency, `lightgbm`.
+  Stage 7 changes no Stage 0–6 behaviour: `src/arven/wfo.py` and `src/arven/wfo_runs.py` are new, additive
+  modules that only *call* Stage 6's existing, unmodified primitives (`generate_folds`,
+  `purge_and_embargo_train_mask`, `validation_mask`, `run_walk_forward`, `select_threshold`, `fit_isotonic`)
+  and the real, unmodified `Stage5Pipeline`/`Backtester`; `cli.py` gained additive `wfo run`/`wfo show`
+  subcommands; no config schema, dependency, or existing-file logic changed.
 - Stage 1 + Stage 2 are committed on branch `feat/historical-data` (commit `efb6677`), followed by a docs commit
   (`4be9329`), the Stage 3 commit (`6ac57d4`), the Stage 4 commit (`8009719`), a docs-only correction
-  (`a6da56b`) and the Stage 5 commit (`2298e5a`). Stage 6 changes are in the working tree, uncommitted.
+  (`a6da56b`), the Stage 5 commit (`2298e5a`) and the Stage 6 commit (`e9b7c72`). Stage 7 is included in this
+  commit.
 
 ## Stage 3 — features (v1)
 
@@ -51,7 +57,7 @@ cached as `data/features/v1/features_1h.parquet` + `manifest.json`.
   input resets them. Consequence: `h4_ema_dist_200` needs 1 000 4h bars, so the first `feat_ready` row is
   **2020-06-15 16:00 UTC** (52 951 ready rows).
 - **Builds always start at the first stored bar.** Dropping early history changes recursive features slightly (tested and documented),
-  so the cache is the canonical form; a live loop must compute over the same history (Stage 7).
+  so the cache is the canonical form; a live loop must compute over the same history (Stage 8, renumbered 2026-10-01).
 - Nothing is interpolated or forward-filled. Values are NaN or finite, never ±inf.
 - Missing-data policy (settles former Stage 3 input decisions):
   - **OI**: latest snapshot with `available_at <= t`, used only if its timestamp is ≤ `open_interest.max_staleness_seconds`
@@ -279,9 +285,10 @@ ML filter, is Stage 6 and was **omitted**, not stubbed):
 
 **Risk engine** (`config/risk.yaml`, `src/arven/risk/engine.py`) — architecture section 14, an ordered
 pipeline of independent rules, each vetoing or reducing, never creating/flipping a direction; rule 2 (macro
-event blackout) is explicitly deferred there ("later stage" = Stage 8) and was not implemented:
+event blackout) is explicitly deferred there ("later stage" = Stage 9, renumbered 2026-10-01 — was Stage 8
+before the Stage 7 WFO insertion) and was not implemented:
 1. **Data-quality gate:** `feat_ready != 1` ⇒ veto `stale_or_incomplete_data`.
-2. *(deferred to Stage 8)*
+2. *(deferred to Stage 9)*
 3. **Volatility guard:** `regime.stress` ⇒ veto `extreme_volatility_stress` (config `veto_on_stress: true`);
    `HIGH` volatility ⇒ size ×0.5.
 4. **Funding guard:** entering the side that *pays* extreme funding (`direction × fund_z`) — ×0.5 at
@@ -381,7 +388,7 @@ not evidence either way about whether the framework has value, only about where 
 configuration's losses concentrated.
 
 **Known limitations, all deliberate MVP scope (not bugs)**
-- No ML filter (Stage 6) and no macro-event blackout (Stage 8) — architecture explicitly places both later.
+- No ML filter (Stage 6) and no macro-event blackout (Stage 9) — architecture explicitly places both later.
 - No parameter search of any kind was performed or is provided (CLAUDE.md rule; the config values are the
   architecture's own stated defaults, e.g. "risk 0.5-1%" → 0.75%, "max leverage e.g. 3×" → uses `backtest.yaml`'s 3×).
 - The regime volatility window (`window_hours: 8760`, "trailing 1-year") means the first ~1 year of the
@@ -600,6 +607,154 @@ Stage 6 working tree, `touched_test_set=false` on every training run and backtes
 - The A/B comparison above was produced by four separate `arven ml train`/`arven backtest run` invocations,
   not a single reusable `arven ml` subcommand — also left for a follow-up.
 
+## Stage 7 — walk-forward evaluation (WFO)
+
+**What was built:** `src/arven/wfo.py` (pure functions, no I/O) and `src/arven/wfo_runs.py` (the composition
+root, mirroring `runs.py`/`ml_runs.py`) answer the question Stage 6's own limitations section raised: *does
+the single-run +8.6% result hold up if measured independently, many times, across time?* WFO re-evaluates
+Stage 5 (baseline) and Stage 6 (MetaFilter) **causally, window by window**, over the real 17-window
+expanding-window schedule Stage 6 already uses — not a new calendar, not a new model, not a parameter search.
+`cli.py` gained two additive subcommands: `arven wfo run` (executes the full schedule, both model families)
+and `arven wfo show <run_id>` (prints a stored report). No existing Stage 0–6 file's logic changed.
+
+**Methodology**
+- **Schedule:** the exact, unmodified `arven.ml.splits.generate_folds(dev.start, val.end, min_train_months=12,
+  retrain_interval_months=3)` Stage 6 already uses — **17 windows**, expanding, over 2020-01-01 → 2025-01-01
+  (development ∪ validation only; the sealed test period, 2025-01-01 onward, is never resolved — see
+  "Leakage protection" below). `MINIMUM_WINDOWS = 12`: `run_stage7` raises `InsufficientWindowsError` rather
+  than silently reporting a distribution from too few windows (not hit on the real schedule: 17 ≥ 12).
+- **Causal hyperparameter selection (the central design point):** for evaluation window `N`,
+  `select_hyperparameters_causally` calls Stage 6's own `run_walk_forward` restricted to `folds[:N]` — every
+  fold *strictly before* `N`, never `folds[N]` itself. Window 0 has no preceding fold, so it falls back to
+  `hp_grid[0]` (`run_walk_forward`'s own existing empty-fold behaviour, not a new special case).
+- **Causal calibration/threshold selection:** `fit_window_model` fits the model on
+  `purge_and_embargo_train_mask(fold N)` **minus** a calibration block, then calibrates (isotonic, D6) and
+  selects a threshold (from the same 5 fixed candidates Stage 6 uses) on that calibration block — the union of
+  `validation_mask` over the **last `CALIBRATION_LOOKBACK_FOLDS = 4` folds strictly before `N`** (capped, not
+  padded, when fewer than 4 preceding folds exist). Training and calibration rows are disjoint by
+  construction. Requires `window_index >= 1`; returns `None` for window 0 and for any degenerate split
+  (fewer than 2 label classes on either side) — reported honestly via `ml_skip_reason`, never hidden.
+- **Why a 4-fold calibration lookback, not 1:** a single preceding fold (~150–250 rows) was found, during this
+  stage's own pre-commit audit, to be too small for stable isotonic calibration (PAVA collapses scores toward
+  the block's base rate, so almost nothing crosses even the most permissive threshold). Widening to 4 folds is
+  a purely statistical fix — same method (isotonic), same threshold candidates, still strictly prior to `N`.
+- **Corrected causal design, 2026-10-01 (superseded before any commit):** the first implementation selected
+  hyperparameters from **all 17 folds** (window `N`'s own held-out loss contributed to the hyperparameters
+  then evaluated on it) and calibrated/thresholded each window **on its own labels**. Both were found and
+  fixed during this stage's own development, before being run on real data or committed — see
+  `tests/wfo/test_wfo_causality.py` for the regression tests this directly enables (perturbing window `N`'s
+  own rows provably does not change its hyperparameters or its fitted model; perturbing the legitimate prior
+  calibration source provably *does* change them, proving the invariance tests are meaningful, not vacuous).
+- **Fold 10 (the one dev/validation-boundary-crossing window):** confirmed by test to be the *only* one of the
+  17 folds whose evaluation block straddles the 2023-07-01 development/validation config boundary. A single
+  `SplitGuard`-resolved `AllowedWindow` cannot cross a period boundary by design, and splitting this one window
+  into two separately-initialized sub-backtests was considered and rejected (it would require inventing an
+  equity-chaining rule the specification never asked for, for one edge case). Fold 10 is therefore **excluded
+  from backtesting only** — it stays in the schedule and still contributes to later windows' causal
+  hyperparameter-selection history, since that role needs no `SplitGuard` window. Net effect: **17 windows
+  generated, 16 backtested, 15 with any ML-vs-baseline comparison** (window 0 is baseline-only).
+- **Leakage protection:** `tests/leakage/test_wfo_leakage.py` mirrors the Stage 6 pattern exactly — a static
+  source scan proves the literal `BacktestPeriod.TEST` and `allow_sealed` never appear in `wfo.py`/
+  `wfo_runs.py`; `resolve_window_for_fold` is proven to return `None` (never resolve `TEST`) even for a fold
+  constructed to fall entirely inside the sealed period; a direct `SplitGuard.resolve(TEST)` call still raises
+  `SealedAccessError` (belt-and-suspenders, unmodified `SplitGuard`); and the real 17-fold schedule is proven
+  to never extend past `validation.end_ms` (the sealed period's start).
+- **Reuse, not reimplementation** (`tests/wfo/test_wfo_static_rules.py`): `wfo.py`/`wfo_runs.py` import
+  `generate_folds`, `purge_and_embargo_train_mask`, `validation_mask`, `select_threshold`, `fit_isotonic` and
+  `run_walk_forward` from their existing Stage 6 modules — none are redefined locally. Neither file imports
+  `arven.backtest.execution`/`accounting` or `duckdb` directly. `wfo_runs.py` imports and runs the real
+  `Stage5Pipeline`, never a copy. One-directional dependency: no Stage 3–6 package imports `arven.wfo`.
+- **Per-window variants:** each backtested window runs (a) the Stage-5-only baseline (no filter), and for each
+  model family — logistic and LightGBM — (b) the real causally-fit MetaFilter, (c) a shuffled-label control
+  (labels permuted independent of time; same causal fitting procedure, D20's existing technique), and (d) a
+  matched-rate `RandomFilter` control seeded to the real filter's own empirical reject rate for that window.
+- **Determinism:** schedule generation and per-window model fits are deterministic for fixed inputs (tested);
+  LightGBM reuses Stage 6's `deterministic=True, force_row_wise=True, num_threads=1` fixed-seed settings.
+
+**Validation**
+- **36 new tests**, all passing: `tests/wfo/` (32: schedule, static rules, causality/perturbation, determinism,
+  fit/calibration-lookback, backtest window resolution incl. the real fold-10 check and a regime-hysteresis-
+  reset-across-windows check) + `tests/leakage/test_wfo_leakage.py` (4).
+- **Full suite: 1565 passed, 13 skipped** (same opt-in real-data skips as before Stage 7; no regressions
+  anywhere in Stages 1–6), ≈7 minutes.
+- No implementation bug was found during review of the *committed* design (the causal-selection and
+  calibration-lookback issues above were found and fixed during this stage's own development, before the real
+  run or any commit — see the corrected-design note above).
+
+**Real development+validation data run** (`arven wfo run`, git `e9b7c72` + Stage 7 working tree,
+`touched_test_set=false`, seed 42, run `wfo-20261001T075132Z-50c98444`, 2m26s wall time, artifacts in
+`data/wfo/wfo-20261001T075132Z-50c98444/`):
+
+| | windows generated | backtested | boundary-excluded | with ML comparison |
+|---|---:|---:|---:|---:|
+| Schedule | 17 | 16 | 1 (fold 10) | 15 (window 0 is baseline-only) |
+
+*Trades (sum over backtested windows):*
+
+| Variant | Total trades | Mean/window |
+|---|---:|---:|
+| Baseline (Stage 5 only) | 1281 (16 windows) | 80.1 |
+| Logistic MetaFilter | 25 (15 windows) | 1.67 |
+| LightGBM MetaFilter | 29 (15 windows) | 1.93 |
+| Logistic shuffled-label control | 20 | 1.33 |
+| LightGBM shuffled-label control | 0 | 0 |
+| Logistic matched-rate random control | 47 | 3.13 |
+| LightGBM matched-rate random control | 72 | 4.80 |
+
+Both real filters reject ≈97–98% of candidates per window (consistent with Stage 6's single-run finding, now
+shown across 15 independent windows rather than one).
+
+*Performance (mean across backtested windows):*
+
+| Metric | Baseline (n=16) | Logistic ML (n=15) | LightGBM ML (n=15) |
+|---|---:|---:|---:|
+| total_return | **−11.22%** (range −3.1% to −20.5%, negative in **every** window) | −0.08% (median 0.0%) | −0.10% (median 0.0%) |
+| net_pnl (USDT, per-window fresh $10k) | −1121.96 | −7.98 | −9.81 |
+| max_drawdown | 13.8% | 0.76% | 0.72% |
+| sharpe | −3.54 | +0.49 (n=6 non-null) | −0.54 (n=7 non-null) |
+| win_rate | 32.6% | 43.2% (n=7) | 38.7% (n=7) |
+| raw ROC-AUC (classification, all 15 windows) | — | 0.42–0.55 | 0.44–0.60 |
+
+**Key finding: Stage 6's single-run "+9.0% / logistic MetaFilter, −20.3% baseline" result does not replicate
+under genuine walk-forward evaluation.** Two things are now shown with much stronger evidence than Stage 6's
+one continuous backtest could provide:
+1. **The unoptimized Stage 5 strategies have no edge, consistently**, not just in one 3.5-year run: the
+   baseline loses money in every one of the 16 independently-evaluated, independently-capitalized ~3-month
+   windows across 2021–2025. This also rules out the Stage 5/6 single-run result being an artifact of the
+   `max_drawdown_halt` circuit breaker getting stuck after 2020 (each WFO window starts with fresh portfolio
+   state, so there is no multi-year halt to get stuck in).
+2. **Neither MetaFilter shows real discriminative skill**: raw ROC-AUC sits in a tight ~0.42–0.60 band in
+   *every* window for *both* model families — indistinguishable from chance. This fully explains both the
+   ~98% rejection rate and why the filtered mean return is flat (≈0%) rather than positive.
+
+**Weaknesses and anomalies found (reported honestly, not tuned away)**
+- **LightGBM's isotonic calibration is unstable in most windows**, not just the single case Stage 6 flagged:
+  calibrated log-loss is *worse* than raw in several windows (e.g. window 7: 0.618→1.742; window 13:
+  0.639→2.684) — the same small-sample isotonic-overfit failure mode, now shown recurring across the majority
+  of the 15 causal windows rather than appearing once.
+- **The logistic shuffled-label control shows a spurious positive mean return** (+0.27%, +$408 total) purely
+  from sampling noise: only 4 of 15 windows produced any trades at all under the shuffled model, and one
+  window's 11 trades dominate the mean. This is far smaller and far less consistent than the baseline's
+  reliably negative signal, and the dedicated perturbation tests already prove the causal mechanism does not
+  leak — it is noted here so the number isn't misread as evidence of a leak when reviewing the raw report.
+- **Most per-variant distribution statistics (sharpe, profit_factor, win_rate) are built from only 4–7 of the
+  15 windows**, because most windows produce zero ML-filtered trades. The report records each metric's own `n`
+  (`arven.backtest.metrics.summarize_distribution`); these are not well-powered distributions and should not
+  be read as one when cited.
+- **Fold 10's exclusion removes one quarter (2023 H2) entirely** from the backtested evidence, baseline
+  included — a real, small, and intentional coverage gap (see "fold 10" above).
+- Window 0 (2021 Q1) has no ML comparison by construction (no preceding fold to calibrate on) — expected, not
+  a defect.
+
+**Known limitations, all deliberate MVP scope or honestly-reported findings (not bugs)**
+- This is a single real-data run with one fixed random seed, same as Stage 6's own A/B table — no repeated-
+  seed distribution across WFO runs exists (the within-run, across-window distribution above is a different,
+  complementary kind of evidence, not a substitute).
+- No saved report artifact beyond the one `report.json` per run yet; no dashboard/plot of the per-window
+  trajectory — `arven wfo show <run_id>` prints the stored JSON, nothing more polished, left for a follow-up.
+- The real run was only executed once (not re-run for a second determinism check on real data, though
+  `tests/wfo/test_wfo_determinism.py` and Stage 6's own determinism precedent cover this at the unit level).
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -790,6 +945,13 @@ src/arven/
     filter.py                    # MetaFilter (pass/veto only) and RandomFilter (matched-rate control)
   ml_runs.py                    # Stage 6 composition root (mirrors runs.py): dataset -> walk-forward -> final model -> saved artifact;
                                  #   never resolves BacktestPeriod.TEST (checked by test and by a static string scan)
+  wfo.py                         # Stage 7, pure functions, no I/O: causal (prior-folds-only) hyperparameter selection,
+                                  #   causal (last-4-prior-folds) calibration/threshold selection, fold-10 boundary resolution;
+                                  #   imports Stage 6's generate_folds/purge_and_embargo_train_mask/validation_mask/
+                                  #   run_walk_forward/select_threshold/fit_isotonic unmodified, never reimplements them
+  wfo_runs.py                    # Stage 7 composition root (mirrors runs.py/ml_runs.py): loads dev+val data, builds the
+                                  #   combined dataset once, drives the 17-window schedule, runs baseline/ml/shuffled/random
+                                  #   backtests per window via the real Stage5Pipeline/Backtester, writes report.json
 tests/
   conftest.py               # make_config fixture (isolated tmp data_dir)
   synthetic_market.py, leakage_harness.py   # deterministic synthetic bars/funding/OI; generic truncation + perturbation checks
@@ -804,6 +966,8 @@ tests/
                              #   test_backtest_leakage.py (Stage 4: FeatureView/clock, prefix invariance, perturbation, cheater vs random)
                              #   test_ml_leakage.py (Stage 6: all 5 canary types - future label, future feature, shuffling,
                              #   full-period normalisation, sealed-test contamination)
+                             #   test_wfo_leakage.py (Stage 7: static scan for BacktestPeriod.TEST/allow_sealed, fold-inside-test
+                             #   returns None, direct TEST resolve still raises SealedAccessError, real schedule stays in dev+val)
   stage5_helpers.py, pipeline_helpers.py    # Stage 5: exact-value FeatureView builder (real Stage 3 column names); synthetic-market-driven
                                              #   pipeline runner, truncate/garbage helpers for both the feature and 1m-market sides
   regime/, strategies/, decision/, risk/    # hand-computed unit tests per rule/branch, plus each package's own config-validation tests
@@ -814,13 +978,20 @@ tests/
                              #   test_model, test_calibration (PAVA), test_ml_metrics, test_dataset (regression vs a direct Stage5
                              #   replay), test_artifact (round trip, manifest completeness, hash verification/determinism), test_filter
                              #   (30-seed property test), test_ml_config, test_ml_static_rules (import boundaries), test_ml_real_data (opt-in)
+  wfo/                      # Stage 7: test_wfo_schedule (the real 17-window schedule, minimum-windows gate, partial-window
+                             #   flagging), test_wfo_causality (direct instrumentation + perturbation-invariance of causal
+                             #   hyperparameter/calibration selection), test_wfo_determinism, test_wfo_fit (purge/embargo-minus-
+                             #   calibration mask, degenerate-split handling, calibration-lookback capping), test_wfo_backtest
+                             #   (window resolution incl. the real fold-10 check, regime-hysteresis reset across windows),
+                             #   test_wfo_static_rules (import boundaries, no reimplementation of Stage 6 primitives)
   test_reports.py           # per-regime breakdown (hand-built fixtures)
 ```
-1523 tests (1510 passed, 13 skipped), all passing (`.venv/Scripts/python.exe -m pytest`, about 4m14s). Skipped by
-default: 13 opt-in real-data checks (7 from Stages 3-5 + 6 new Stage 6 ones). The `arven.ml`-doesn't-exist-yet
-static check counted as 1 of Stage 5's 8 skips is gone: `arven.ml` exists now, so that test runs for real (it's
-inside the always-on `test_ml_static_rules.py`/`test_ml_leakage.py`, not a skip). All 13 real-data checks pass
-together: `ARVEN_REAL_DATA_TESTS=1 .venv/Scripts/python.exe -m pytest tests/leakage/test_real_data.py
+Full suite: **1565 passed, 13 skipped** (`.venv/Scripts/python.exe -m pytest`, about 7 minutes), all passing.
+Stage 7 adds 36 new tests (`tests/wfo/`: 32, `tests/leakage/test_wfo_leakage.py`: 4); the 13 skips are unchanged
+opt-in real-data checks (7 from Stages 3-5 + 6 from Stage 6 — Stage 7 adds no new opt-in real-data test, since
+its real-data run is exercised directly via `arven wfo run`, documented in the "Stage 7" section above, rather
+than as a pytest-collected check). All 13 pass together:
+`ARVEN_REAL_DATA_TESTS=1 .venv/Scripts/python.exe -m pytest tests/leakage/test_real_data.py
 tests/pipeline/test_pipeline_real_data.py tests/ml/test_ml_real_data.py` (about 123 s; add
 `ARVEN_REAL_DATA_SAMPLES=200` for the fuller Stage 3 sample count).
 
@@ -868,12 +1039,16 @@ tests/pipeline/test_pipeline_real_data.py tests/ml/test_ml_real_data.py` (about 
 .venv/Scripts/python.exe -m arven backtest baselines --period development   # no_trade + buy_and_hold + random_entry, side by side, no ranking
 .venv/Scripts/python.exe -m arven backtest verify <run_id>                  # recompute hashes from the written files
 .venv/Scripts/python.exe -m arven backtest show <run_id>
+.venv/Scripts/python.exe -m arven wfo run                                   # Stage 7: full 17-window causal walk-forward schedule
+.venv/Scripts/python.exe -m arven wfo show <run_id>                         # print a stored WFO report.json
 ```
 `--provider pipeline` runs the full Stage 5 regime+strategies+decision+risk pipeline and additionally prints a
 per-regime breakdown after the usual metrics.
 `backtest run`/`baselines` take `--start`/`--end` (must lie inside `--period`, default the whole period),
 `--stress` (multiplies slippage by `costs.slippage.stress_multiplier`), and, for the sealed `test` period only,
 `--allow-sealed --reason "..."` (logged permanently before any data is read).
+`wfo run` takes no arguments — it always covers the full development+validation range with both model families
+and writes to `data/wfo/<run_id>/report.json`; it never touches the sealed test period (see "Stage 7" above).
 
 The data examples above use the 2024-01 → 2024-03 slice. Without `--start`/`--end`, commands use
 `data.history_start`/`history_end` (the full 2020-01 → 2026-07 period).
@@ -957,8 +1132,12 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 
 1. ~~Full backfill~~: done. ~~Stage 3 features~~: done and approved. ~~Stage 4 backtester~~: done and approved
    (including the final `liquidation_includes_funding=true` decision, #13 below). ~~Stage 5 pipeline~~: done and
-   approved, committed `2298e5a`. **Stage 6 ML meta-filter**: implemented and validated (1523 tests green, 13
-   opt-in real-data tests pass together); awaiting review.
+   approved, committed `2298e5a`. ~~Stage 6 ML meta-filter~~: done, approved and committed `e9b7c72`.
+   **Stage 7 walk-forward evaluation (WFO)**: implemented, validated (36 new tests, full suite 1565 passed/13
+   skipped) and run on real development+validation data — see "Stage 7" above. Headline finding: **Stage 6's
+   single-run +8.6% result does not replicate**; the baseline loses money in all 16 backtestable windows, and
+   neither the logistic nor the LightGBM MetaFilter shows a replicated predictive edge (raw ROC-AUC 0.42–0.60
+   throughout).
 2. **`forward_start = 2026-07-01` is already in the past** (unchanged as instructed). It needs relabelling before paper trading.
 3. ~~Contiguous splits with no embargo~~: **resolved by Stage 6's purged, embargoed expanding-window
    walk-forward** (`src/arven/ml/splits.py` — 96-hour embargo, purges any training row whose label horizon
@@ -990,7 +1169,7 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
    Lowering `warmup_factor` or dropping the 4h EMA200 is possible via `config/features.yaml`, at the price of a new feature version.
 10. ~~Feature cache manifest recorded the pre-commit git hash~~: resolved — rebuilt once after the Stage 3 commit; the content
     hash (`c06b09e7…`) was verified unchanged and the manifest now records `git_commit = 6ac57d47…`.
-11. `features build` always rebuilds the full history (about 7 s); there is no incremental update yet (Stage 7). If bars are
+11. `features build` always rebuilds the full history (about 7 s); there is no incremental update yet (Stage 8, renumbered 2026-10-01). If bars are
     re-ingested, rebuild: the manifest's `source_fingerprint` identifies the data a cache was built from.
 12. **Stage 4 assumptions not verified against Binance's live schedule:** `maintenance_margin_rate` (0.4%, single flat tier,
     no tiered schedule), `qty_step_btc` (0.001), `min_notional_usdt` (100). All are in `config/backtest.yaml`, clearly labelled,
@@ -1008,7 +1187,7 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 14. ~~Stage 5's ML filter step (architecture §13 step 4)~~ — **resolved: implemented in Stage 6** as
     `arven.ml.filter.MetaFilter`, wired optionally into `Stage5Pipeline` (see "Stage 6" above). The macro-event
     blackout (risk rule 2) **remains genuinely absent, not stubbed** — the risk engine still has no calendar
-    check; it is explicitly Stage 8.
+    check; it is explicitly Stage 9 (renumbered 2026-10-01 — was Stage 8 before the Stage 7 WFO insertion).
 15. **Stage 5's regime/strategy/risk parameters are architecture-derived defaults, not fitted or searched**
     (CLAUDE.md: "do not optimize parameters"). The real development-period result (−20.3% over 3.5 years, 111
     trades) is a measurement of the framework, not evidence the three unoptimized strategies have an edge —
@@ -1028,8 +1207,10 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 - `MarketSnapshot` as a separate class (its job is done by `core.series.MarketInputs.available_until` and
   `data.reader`), and the `feature_sets` DuckDB table (replaced by `manifest.json`).
 - REST incremental updates (only bulk files are supported so far).
-- The macro-event blackout (risk rule 2) — explicitly Stage 8, not implemented, not stubbed. (The ML
-  probability gate, decision step 4, now exists — Stage 6.)
+- The macro-event blackout (risk rule 2) — explicitly Stage 9 (renumbered 2026-10-01), not implemented, not
+  stubbed. (The ML probability gate, decision step 4, now exists — Stage 6.)
+- A saved, dedicated Stage 7 WFO report format beyond the one `report.json` per run, and any dashboard/plot of
+  per-window results over time — left for a follow-up (see "Stage 7" above).
 - A 4th strategy (funding/positioning contrarian, architecture §13 item 4) — out of the explicit Stage 5 scope.
 - A formalised, saved Stage 6 diagnostics report (SHAP summary, calibration reliability diagram, per-regime/
   per-strategy `P(success)` breakdown as a report artifact, mirroring `arven.reports.per_regime_breakdown`)
@@ -1038,7 +1219,8 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 - A Stage-6-specific sealed-test evaluation log (`arven.ml_runs` never reaches the test period at all yet, so
   there is nothing to log — see open issue #8).
 - Git: branch `feat/historical-data`; commits `efb6677` (Stage 1+2), `4be9329` (docs), `6ac57d4` (Stage 3),
-  `8009719` (Stage 4), `a6da56b` (docs), `2298e5a` (Stage 5). Stage 6 is uncommitted.
+  `8009719` (Stage 4), `a6da56b` (docs), `2298e5a` (Stage 5), `e9b7c72` (Stage 6). Stage 7 (WFO) is included in
+  this commit.
 
 ## Environment
 
@@ -1090,4 +1272,8 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-09-29 | Stage 6 D5: fixed hyperparameter grid, ≤4 configurations per model family, no open-ended search | approved |
 | 2026-09-29 | Stage 6 D6: isotonic calibration, fitted per walk-forward fold on held-out rows | approved |
 | 2026-09-29 | Stage 6 D7: LightGBM uses all 60 causal Stage 3 columns; logistic regression uses only the 51 `required=True` Stage 3 columns (both + all 18 Stage 5 context columns) | approved |
-| 2026-09-29 | Stage 6 implemented: labels, dataset construction (real regime/strategies/decision/risk replay), purged/embargoed walk-forward, numpy logistic regression + LightGBM, isotonic calibration, model artifacts with full provenance, `MetaFilter`/`RandomFilter`, CLI, 1523 tests incl. 5 leakage-canary types and determinism; real development+validation data: 7572/7196 eligible, logistic model +8.6% vs −20.3% baseline with shuffled-label and matched-rate-random controls (single run, not a validated edge) | implemented (Stage 6), awaiting review |
+| 2026-09-29 | Stage 6 implemented: labels, dataset construction (real regime/strategies/decision/risk replay), purged/embargoed walk-forward, numpy logistic regression + LightGBM, isotonic calibration, model artifacts with full provenance, `MetaFilter`/`RandomFilter`, CLI, 1523 tests incl. 5 leakage-canary types and determinism; real development+validation data: 7572/7196 eligible, logistic model +8.6% vs −20.3% baseline with shuffled-label and matched-rate-random controls (single run, not a validated edge) | implemented (Stage 6), approved, committed `e9b7c72` |
+| 2026-10-01 | Roadmap renumbered to insert Stage 7 (walk-forward evaluation, WFO) between the ML meta-filter and the paper-signal loop; the former Stage 7 "Paper-signal loop" and everything after it shift to Stage 8-11 unchanged in scope | approved |
+| 2026-10-01 | Stage 7 design: reuse Stage 6's `generate_folds` schedule unchanged (no separate Stage 7 calendar); hyperparameter selection for window `N` restricted to `folds[:N]`; calibration/threshold selection restricted to the union of the last 4 folds strictly before `N`; fold 10 (the one dev/validation-boundary-crossing window) excluded from backtesting only, kept in the schedule | approved (implemented) |
+| 2026-10-01 | Stage 7's own pre-commit audit found and fixed a causal-leakage bug in its first implementation (hyperparameters/calibration had been selected using all folds, including the window under evaluation) before any real-data run or commit | implemented (Stage 7) |
+| 2026-10-01 | Stage 7 real walk-forward result: Stage-5-only baseline negative in all 16 backtestable windows (mean total_return −11.2%); neither logistic nor LightGBM MetaFilter showed a replicated predictive edge (mean total_return ≈0%, raw ROC-AUC 0.42-0.60 in every window) — Stage 6's single-run +8.6% result does not replicate under genuine walk-forward evaluation | implemented (Stage 7), approved (final) |

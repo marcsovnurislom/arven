@@ -353,6 +353,23 @@ paper_trades(signal_id, entry_time, entry_price, exit_time, exit_price, pnl, exi
 - **Reproducibility:** each run writes `backtest_runs` row with config hash + git commit; `touched_test_set`
   flag makes every use of the sealed period visible.
 
+> **As implemented in Stage 7** (`src/arven/wfo.py`, `src/arven/wfo_runs.py`; roadmap renumbered 2026-10-01 to
+> insert this stage before the paper-signal loop; details in `current_state.md`): the walk-forward robustness
+> run above is a **causal, per-window re-evaluation** of Stage 6's existing 17-window expanding schedule
+> (`arven.ml.splits.generate_folds`, reused unchanged — no separate Stage 7 calendar). For evaluation window
+> `N`, hyperparameters are selected from Stage 6's own `run_walk_forward` restricted to folds strictly before
+> `N`, and calibration/threshold selection uses only the last 4 folds before `N` — window `N`'s own rows never
+> contribute to any decision later evaluated on it (perturbation-tested both ways: invariant to perturbing
+> window `N`, sensitive to perturbing the legitimate prior-fold calibration source). One fold (index 10)
+> straddles the development/validation config boundary and is excluded from backtesting only (no
+> `AllowedWindow` can cross a period boundary), while remaining in the schedule for its classification-only
+> role. The sealed test period is structurally unreachable (static source scan + `SplitGuard`-level test). The
+> real run over development+validation (16 backtestable windows, 15 with an ML comparison) found the
+> Stage-5-only baseline **negative in every single window** (mean total_return −11.2%, range −3.1% to −20.5%)
+> and **no replicated predictive edge** for either the logistic or LightGBM MetaFilter (raw ROC-AUC 0.42–0.60
+> in every window, mean total_return ≈0% for both, vs. Stage 6's single-run +8.6%) — confirming, with real
+> walk-forward evidence, the caution Stage 6's own single-run result was already reported under.
+
 ### Data periods (proposed, adjustable in `config/splits.yaml`)
 | Period | Use |
 |---|---|
@@ -510,7 +527,8 @@ Stacking (ML over all strategy outputs) is a later option once enough data exist
 
 > **As implemented in Stage 5** (`src/arven/risk/engine.py`, `config/risk.yaml`; details in
 > `current_state.md`): rule 2 (macro-event blackout) is not implemented — it was already marked "later
-> stage" here (Stage 8) before Stage 5 began. All other rules (1, 3-8) are implemented as an ordered
+> stage" here (Stage 9, renumbered 2026-10-01 — was Stage 8 before the Stage 7 WFO insertion) before Stage 5
+> began. All other rules (1, 3-8) are implemented as an ordered
 > veto/reduce chain; rule 7 (portfolio limits) is checked earliest in the actual code (position-already-open,
 > daily-loss, drawdown and cooldown are all cheap checks that make everything downstream moot if any holds),
 > not in numeric order — the numbering above is the architecture's, not the execution order. Leverage and

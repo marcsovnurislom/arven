@@ -1,6 +1,10 @@
 # ARVEN — Development roadmap
 
-Status: **approved as target plan** (2026-09-28). News, macro, LLM, Telegram, dashboard and paper trading come only after the quantitative core (Stages 2–6) works. Durations are rough estimates for one developer.
+Status: **approved as target plan** (2026-09-28). News, macro, LLM, Telegram, dashboard and paper trading come only after the quantitative core (Stages 2–7) works. Durations are rough estimates for one developer.
+
+**2026-10-01: Stage 7 (walk-forward evaluation) inserted between the ML meta-filter and the paper-signal loop.**
+The former Stage 7 "Paper-signal loop" and everything after it are renumbered 8–11 (unchanged in scope/content,
+only the number shifts) — this is a pure insertion, nothing about the paper-trading stage changed.
 Each stage ends with: passing tests, updated `docs/current_state.md`, and user approval before the next stage.
 
 | Stage | Name | Goal | Deliverables | Est. |
@@ -12,10 +16,11 @@ Each stage ends with: passing tests, updated `docs/current_state.md`, and user a
 | 4 | Backtester | Trustworthy evaluation engine | Clock, 1m execution model, fees/slippage/funding, portfolio, metrics, baselines (no-trade, buy&hold, random entry), hand-computed accounting tests, run logging | done: implemented, validated and approved (independent oracle on 300 seeds, ~30 hand-computed cases, leakage suite, real development-period baselines, deterministic run logging); `liquidation_includes_funding=true` confirmed as final |
 | 5 | Regime + strategies + decision + risk | Complete rule-based pipeline | Rule-based regime detector, 3 independent baseline strategies, decision engine (regime-gated vote), risk engine rules, first full backtests on development period, per-regime analysis | done: implemented and validated (regime detector with hysteresis; trend/momentum, breakout, mean-reversion strategies; decision engine; 8-rule risk engine; 1346 tests incl. leakage/determinism/accounting-integration; real development-period run with per-regime breakdown); awaiting user review |
 | 6 | ML meta-filter | Measurable ML contribution | Triple-barrier labels, purged/embargoed walk-forward, logistic baseline + LightGBM, calibration, SHAP, A/B vs strategies-only | done: implemented and validated (triple-barrier labels; purged/embargoed expanding-window walk-forward, 96h embargo; numpy logistic regression + LightGBM, ≤4-config grids; isotonic calibration; `MetaFilter` wired into `Stage5Pipeline` as an optional pass/veto stage; 1523 tests incl. 5 leakage-canary types, determinism, hand-computed labels; real development+validation data: 7572 candidates/7196 eligible, logistic +8.6% vs -20.3% Stage-5-only baseline with A/B controls); awaiting user review |
-| 7 | Paper-signal loop | Forward out-of-sample evidence | Incremental REST updates, bar-close scheduler, signal persistence, paper-trade tracker, CLI/Streamlit view | 1 week |
-| 8 | Macro & news | Event awareness | Macro calendar + risk blackout (first, no LLM); then news ingestion + LLM structuring into fixed schema; evaluated forward-only / post-cutoff | 1.5–2 weeks |
-| 9 | LLM explanations & chat | Usability | Explanation generator from structured signal payload; Q&A over stored data | 1 week |
-| 10 | Final evaluation & thesis | Honest results | Single sealed-test evaluation, robustness & cost stress tests, forward paper results, write-up | 2+ weeks |
+| 7 | Walk-forward evaluation (WFO) | Measure whether Stage 5/6 results hold up out-of-sample across time, not just on one development-period run | Causal (prior-folds-only) hyperparameter selection and calibration/threshold selection over the real 17-window expanding schedule (reused unchanged from Stage 6); per-window Stage-5-only / MetaFilter / shuffled-label / matched-rate-random backtests; sealed test period structurally unreachable | done: implemented and validated (36 new tests incl. causality/perturbation and sealed-test-isolation checks; full suite 1565 passed/13 skipped); real run on development+validation data — see `docs/current_state.md`'s "Stage 7" section for the full methodology and results |
+| 8 | Paper-signal loop | Forward out-of-sample evidence | Incremental REST updates, bar-close scheduler, signal persistence, paper-trade tracker, CLI/Streamlit view | 1 week |
+| 9 | Macro & news | Event awareness | Macro calendar + risk blackout (first, no LLM); then news ingestion + LLM structuring into fixed schema; evaluated forward-only / post-cutoff | 1.5–2 weeks |
+| 10 | LLM explanations & chat | Usability | Explanation generator from structured signal payload; Q&A over stored data | 1 week |
+| 11 | Final evaluation & thesis | Honest results | Single sealed-test evaluation, robustness & cost stress tests, forward paper results, write-up | 2+ weeks |
 
 ## First month (Stages 1–4, start of 5)
 

@@ -463,6 +463,49 @@ def cmd_ml_show(cfg: AppConfig, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_wfo_run(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from arven.core.backtest_config import load_backtest_config
+    from arven.core.ml_config import load_ml_config
+    from arven.core.regime_config import load_regime_config
+    from arven.core.risk_config import load_risk_config
+    from arven.core.strategies_config import load_strategies_config
+    from arven.wfo import InsufficientWindowsError
+    from arven.wfo_runs import run_stage7
+
+    ml_cfg = load_ml_config(args.config_dir)
+    fcfg = load_features_config(args.config_dir)
+    bt = load_backtest_config(args.config_dir)
+    regime_cfg = load_regime_config(args.config_dir)
+    strategies_cfg = load_strategies_config(args.config_dir)
+    risk_cfg = load_risk_config(args.config_dir)
+    try:
+        out = run_stage7(cfg, ml_cfg, fcfg, regime_cfg, strategies_cfg, risk_cfg, bt)
+    except InsufficientWindowsError as e:
+        print(f"INSUFFICIENT WINDOWS: {e}")
+        return 1
+    r = out.report
+    sched = r["schedule"]
+    print(f"wfo run {out.run_id} -> {out.run_dir}")
+    print(f"  windows generated={sched['n_windows_generated']} backtested={sched['n_windows_backtested']} "
+          f"boundary_excluded={sched['n_windows_boundary_excluded']} minimum={sched['minimum_windows']}")
+    for family in ("logistic", "lightgbm"):
+        print(f"  {family}: hyperparameters are selected per window (causally, from only prior folds) - see report.json")
+        for variant in ("ml", "shuffled", "random"):
+            d = r["distributions"][family][variant]["total_return"]
+            print(f"    {variant}: total_return n={d['n']} mean={d['mean']} p5={d['p5']} p50={d['p50']} p95={d['p95']}")
+    bd = r["distributions"]["baseline"]["total_return"]
+    print(f"  baseline: total_return n={bd['n']} mean={bd['mean']} p5={bd['p5']} p50={bd['p50']} p95={bd['p95']}")
+    return 0
+
+
+def cmd_wfo_show(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from arven.wfo_runs import wfo_dir
+
+    report = json.loads((wfo_dir(cfg) / args.run / "report.json").read_text(encoding="utf-8"))
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="arven", description="ARVEN data pipeline (research only, no execution)")
     parser.add_argument("--config-dir", default=None, help="configuration directory (default: <project>/config)")
@@ -534,6 +577,14 @@ def build_parser() -> argparse.ArgumentParser:
     q = msub.add_parser("show", help="print a stored model's manifest")
     q.add_argument("model")
     q.set_defaults(func=cmd_ml_show)
+
+    p = sub.add_parser("wfo", help="Stage 7: walk-forward robustness evaluation over development+validation only")
+    wsub = p.add_subparsers(dest="wfo_command", required=True)
+    q = wsub.add_parser("run", help="run the full walk-forward schedule (both model families, baseline + ml + shuffled + random controls per window)")
+    q.set_defaults(func=cmd_wfo_run)
+    q = wsub.add_parser("show", help="print a stored walk-forward report")
+    q.add_argument("run")
+    q.set_defaults(func=cmd_wfo_show)
     return parser
 
 
