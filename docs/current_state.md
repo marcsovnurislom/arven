@@ -1,30 +1,41 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-01 (Stage 7 walk-forward evaluation implemented, validated, and run on real data)_
+_Last updated: 2026-10-03 (Stage 8 paper-signal loop implemented, validated, and run on live data)_
 
 ## Phase
 
-**Stage 7 (walk-forward evaluation, WFO) is implemented, validated, and has been run on real
-development+validation data.** The roadmap was renumbered on 2026-10-01 to insert it between the ML
-meta-filter and the paper-signal loop (the former Stage 7 "Paper-signal loop" is now Stage 8; nothing about
-its scope changed — see `docs/roadmap.md`). See "Stage 7" below for the methodology and results; the headline
-finding is that **Stage 6's single-run +8.6% result does not replicate** under genuine walk-forward evaluation.
+**Stage 8 (the paper-signal loop) is implemented, validated, and has produced the project's first genuinely
+forward, out-of-sample result.** It needed almost no new execution/decision code — a new
+`BacktestPeriod.FORWARD` plus a REST data tail let the real, unmodified Stage 4/5/6 pipeline run itself on
+live data. See "Stage 8" below for the methodology, two real bugs found and fixed before the result was
+trusted, and the live result itself (baseline −14.9% over 94.4 days; the logistic MetaFilter flat at +0.06%
+on 2 trades) — consistent with Stage 7's finding that Stage 6's single-run +8.6% does not generalize.
+- Stage 7 (walk-forward evaluation, WFO) is complete: implemented, validated, approved and committed (see
+  below). Headline finding: Stage 6's single-run +8.6% result does not replicate under genuine walk-forward
+  evaluation — see "Stage 7" below.
 - Stage 6 (ML meta-filter) is complete: implemented, validated, approved and committed (`e9b7c72`).
 - Stage 5 (regime, strategies, decision, risk) is complete: reviewed, approved and committed (`2298e5a`).
 - Stage 4 (backtester) is complete: reviewed, approved (including the final `liquidation_includes_funding =
   true` decision) and committed (`8009719`, docs correction `a6da56b`).
 - Stage 3 (features) is complete: reviewed, approved and committed (`6ac57d4`).
 - Stage 2 is complete: the full backfill 2020-01-01 → 2026-07-01 is ingested and verified (see below).
-- Split dates, `forward_start`, the DuckDB index/storage design and the 300 s OI availability delay are unchanged.
-  Stage 7 changes no Stage 0–6 behaviour: `src/arven/wfo.py` and `src/arven/wfo_runs.py` are new, additive
+- Split dates, the DuckDB index/storage design and the 300 s OI availability delay are unchanged. Stage 8
+  changes no Stage 0-7 decision/execution logic: `src/arven/paper/` is new and additive, driving the real,
+  unmodified `Backtester`/`Stage5Pipeline` via `runs.execute_run` (the same function `arven backtest run`
+  uses); the only change to existing core code is one new `BacktestPeriod.FORWARD` member in
+  `core/splitguard.py` (implementing a period `docs/architecture.md`'s own "Data periods" table already
+  listed from the start, not a new design decision) plus one new config field
+  (`download.rest_base_url`, excluded from `config_hash()` like the rest of the `download` section).
+  `cli.py` gained additive `paper run`/`show`/`status` subcommands.
+- Stage 7 changes no Stage 0–6 behaviour: `src/arven/wfo.py` and `src/arven/wfo_runs.py` are new, additive
   modules that only *call* Stage 6's existing, unmodified primitives (`generate_folds`,
   `purge_and_embargo_train_mask`, `validation_mask`, `run_walk_forward`, `select_threshold`, `fit_isotonic`)
   and the real, unmodified `Stage5Pipeline`/`Backtester`; `cli.py` gained additive `wfo run`/`wfo show`
   subcommands; no config schema, dependency, or existing-file logic changed.
 - Stage 1 + Stage 2 are committed on branch `feat/historical-data` (commit `efb6677`), followed by a docs commit
   (`4be9329`), the Stage 3 commit (`6ac57d4`), the Stage 4 commit (`8009719`), a docs-only correction
-  (`a6da56b`), the Stage 5 commit (`2298e5a`) and the Stage 6 commit (`e9b7c72`). Stage 7 is included in this
-  commit.
+  (`a6da56b`), the Stage 5 commit (`2298e5a`), the Stage 6 commit (`e9b7c72`) and the Stage 7 commit
+  (`aa43c1b`). Stage 8 is included in this commit.
 
 ## Stage 3 — features (v1)
 
@@ -229,6 +240,9 @@ settlements, exits and a full order/fill/trade/equity ledger, with fees, slippag
   integration-test run to hang for several minutes). Stage 2's own ingestion never hits this, since it loads via
   `COPY … FROM` a file. Test helpers now use the same idiom (`bt_helpers.bulk_insert_1m/_funding`, `COPY FROM` a temp
   CSV): 5 000 rows in ≈0.09 s. Nothing in `src/` was affected; this is a test-infrastructure fix only.
+  **Update (Stage 8, 2026-10-03): this time it did affect `src/`** — `rest_ingestion.py`'s first implementation hit
+  the exact same pitfall (measured ~33 s per 1000-row REST page) and was fixed with the identical staged-bulk-load
+  idiom; see the "Stage 8" section above for the real run this was found on.
 
 ## Stage 5 — regime, strategies, decision, risk
 
@@ -755,6 +769,140 @@ one continuous backtest could provide:
 - The real run was only executed once (not re-run for a second determinism check on real data, though
   `tests/wfo/test_wfo_determinism.py` and Stage 6's own determinism precedent cover this at the unit level).
 
+## Stage 8 — the paper-signal loop
+
+**What was built:** `src/arven/paper/` (composition root), `src/arven/data/adapters/binance_rest.py` (a new
+public-REST client) and `src/arven/data/rest_ingestion.py` (the REST-tail counterpart of Stage 2's bulk
+loader), plus a new `BacktestPeriod.FORWARD` in `core/splitguard.py`. The headline design result: **no new
+execution or decision logic was needed anywhere** - two things already in place from earlier stages made
+this possible. `backtest.clock.Clock` was always a `Protocol`, documented since Stage 4 as "a live loop
+implements the same protocol with real time, so backtest and live share one code path". And
+`features.builder.build_features` was always documented (Stage 3) as serving "the live loop (one decision
+time, on inputs truncated with `MarketInputs.available_until`)". Stage 8 is therefore almost entirely data
+plumbing: it REST-updates the database and feeds the *unmodified* `Backtester`/`Stage5Pipeline` a new kind of
+period.
+
+**The forward period**
+- `BacktestPeriod.FORWARD` resolves `[splits.forward_start, end_ms)`, where `end_ms` is supplied explicitly
+  by the caller (there is no fixed upper bound to default to, unlike development/validation/test) - `SplitGuard`
+  itself still never reads the wall clock; only `arven.paper` ever computes "now" (one read per tick, via
+  `core.timeframes.last_closed_bar_open`, the same point-in-time rule Stage 2/3 already use for bar
+  availability). FORWARD is never sealed: there is no future beyond "now" to leak, so nothing here needs
+  acknowledgement or logging, and it cannot be used to reach backward into development/validation/test (a
+  range crossing into an earlier period is refused, exactly like every other period).
+- `docs/architecture.md`'s own "Data periods" table already listed "2026-07 -> onward: Forward paper-trading"
+  as a fourth row from the start - Stage 8 implements that row, not a new design decision.
+
+**REST-tail updates** (`data/adapters/binance_rest.py`, `data/rest_ingestion.py`)
+- Public Binance USDⓈ-M futures REST endpoints only (`/fapi/v1/klines`, `/fapi/v1/fundingRate`) - no API key,
+  no account/order endpoint is ever referenced (enforced by a static test; CLAUDE.md rule 12). `RestIngestor`
+  writes into the exact same `ohlcv_1m`/`funding_rates` tables the bulk pipeline uses (one market-data
+  history, not a separate "live" copy), continuing from whatever is already stored - it is a *tail* updater,
+  not a historical backfill tool (that remains `arven ingest`'s job).
+- **Open interest / top-trader / taker long-short ratios are not REST-updated** (Stage 8 scope decision):
+  these are the same optional, NaN-tolerant feature group Stage 3 already handles for any other data gap
+  (`oi_available`), so they simply go stale for the forward period rather than gaining new live-fetch code.
+- **A real performance bug was found and fixed before this was usable**: the first implementation wrote REST
+  pages with `con.executemany(...)` directly into `ohlcv_1m`/`funding_rates` (both PRIMARY-KEY-indexed) -
+  measured at ~33 seconds per 1000-row page (the exact "executemany into a PK ART index is pathologically
+  slow" pitfall this project's own test infrastructure had already hit and documented, see "Operational
+  notes" below). Catching up the real ~3-month data gap (see below) at that rate would have taken the better
+  part of an hour. Fixed by switching to the same staged bulk-load idiom `ingestion.py` already uses for bulk
+  files (CSV -> `read_csv` -> temp table -> one `INSERT OR REPLACE`): **0.045 s for the same 1000-row page**,
+  a ~740x speedup, verified by both a direct before/after benchmark and the real catch-up run below.
+
+**The composition root** (`paper/runs.py`, mirrors `runs.py`'s own role for Stage 4)
+- `run_paper_tick`: REST-tail klines/funding up to the latest fully-closed, available 1m bar -> resample just
+  the trailing window the new bars could affect (not the whole multi-year history) -> resolve the FORWARD
+  window -> build that window's feature rows **in memory** with the unmodified `build_features` (Stage 3's
+  persisted `data/features/<version>/` cache, and its documented content hash, is never touched - a second,
+  parallel live cache would have risked exactly the kind of drift the project's reproducibility story depends
+  on not having) -> run the real `Stage5Pipeline` through `runs.execute_run` **unchanged**, the identical
+  function `arven backtest run` itself calls -> write a run artifact (`data/paper/<run_id>/run.json` +
+  ledgers), indexed in its own `data/paper/runs.jsonl` (kept separate from `data/backtests/runs.jsonl` so
+  paper runs are never mixed into the Stage 4 backtest index).
+- **The "paper-trade tracker" is not new code**: every tick replays the *entire* forward history from
+  `forward_start` through "now" via Stage 4's own `Simulator` (inside `execute_run`), exactly like re-running
+  `arven backtest run --period forward` with a later end each time. This is simpler and safer than
+  incremental state checkpointing between ticks (no serialization format to get wrong, trivially
+  reproducible, and cheap at the scale a few months of 1m bars implies - the real run below took well under
+  a minute for the simulation itself).
+- **`arven paper run` is idempotent and catch-up capable** (its one design requirement): every invocation
+  resolves `[forward_start, now)` fresh and is safe to run from Task Scheduler/cron at any cadence, by hand,
+  or after a gap, without missing or double-processing a decision time - there is no per-tick state to
+  corrupt, only the growing market database.
+
+**CLI** (`cli.py`, additive only): `arven paper run [--ml-model <id> | --random-filter-rate <p>]`,
+`arven paper show <run_id>`, `arven paper status`. No dashboard/Streamlit view (architecture's own A9 answer:
+"CLI + persisted signal log first; optional Streamlit dashboard later").
+
+**Module separation, enforced mechanically** (`tests/paper/test_paper_static_rules.py`): no Stage 3-7 package
+imports `arven.paper` (one-directional dependency); `paper/runs.py` defines none of
+`Backtester`/`Simulator`/`Stage5Pipeline` itself and never imports `arven.backtest.execution`/`accounting`
+directly (it drives everything through the real `Backtester` via `runs.execute_run`); `binance_rest.py` and
+`rest_ingestion.py` never reference an API-key header, a signature parameter, or any order/account endpoint
+path.
+
+**A second real bug, found by the real run itself (not by any test), before the result below was trusted:**
+`update_market_data`'s first implementation resampled only a fixed 2-day lookback window after a REST tail,
+on the (wrong) assumption that a tick only ever adds about an hour of new 1m data. The real catch-up below
+added ~94 days in one call; the fixed lookback silently left all but the last 2 days of that range's derived
+5m/15m/1h/4h bars unbuilt. The real forward run's first result, with this bug still present, showed **0
+trades over 94.4 days** - surprising against Stage 7's baseline (32-106 trades per similarly-sized window in
+every one of 16 historical windows, never 0) and investigated rather than accepted: a direct query found only
+49 of the expected 2266 hourly bars existed for the period, and the rest were simply missing, starving every
+feature after them of data (`feat_ready` could never reach 1). Fixed by resampling from a small buffer before
+whatever 1m data already existed through the new data's end - the *entire* newly-tailed range, regardless of
+its size - and covered by a new regression test (`test_update_market_data_resamples_the_whole_new_range_not_
+just_a_fixed_lookback`) that seeds a small prior range, REST-tails nine more days (far past the old 2-day
+buffer) and asserts every one of those 216 hours gets a complete derived bar. The already-corrupted real
+database was repaired with the existing `arven resample` command before re-running.
+
+**Validation**
+- **32 new tests**: `tests/unit/test_binance_rest.py` (6, offline fake-opener response parsing/pagination),
+  `tests/unit/test_rest_ingestion.py` (7, DB upsert correctness, idempotency, alignment/drift validation,
+  continuation from an existing last-stored row), `tests/leakage/test_paper_leakage.py` (6, FORWARD never
+  resolves or falls back to TEST, cannot reach backward into earlier periods, the sealed-access log is never
+  touched), `tests/paper/test_paper_runs.py` (9, a full synthetic DB -> REST tail -> resample -> forward
+  window -> real `Stage5Pipeline` -> written artifact round trip, plus the resample-range regression test
+  above) and `tests/paper/test_paper_static_rules.py` (5, import-boundary and no-reimplementation checks).
+- `tests/backtest/test_splitguard_and_loading.py` gained 8 tests for the new FORWARD branch (default end
+  behaviour, explicit end required, refuses a start before `forward_start`, no upper bound, never sealed,
+  needs no log, still rejects non-hour-aligned bounds, `period_bounds` does not resolve it) and lost the one
+  pre-Stage-8 test that asserted FORWARD did *not* exist as a period (superseded, not just deleted - the new
+  tests assert the actual behaviour instead) - a net +7 in that existing file, +32 in new files, +39 overall.
+- **Full suite: 1605 passed, 13 skipped** (same opt-in real-data skips as before Stage 8; no regressions
+  anywhere in Stages 1-7), confirmed after both the `executemany` performance fix and the resample-range fix
+  above, and after repairing the real database.
+
+**Real run** (`arven paper run`, live Binance REST data, run 2026-10-03; forward_start = 2026-07-01, window
+`[2026-07-01, 2026-10-03T06:00)`, 94.4 days, `touched_test_set=false`):
+
+| provider | trades | total_return | max_drawdown | sharpe | win_rate | profit_factor |
+|---|---:|---:|---:|---:|---:|---:|
+| Stage 5 baseline (no filter) | 89 | −14.9% | 15.8% | −4.89 | 32.6% | 0.53 |
+| + logistic MetaFilter (`logistic-20260929T104905Z-50c98444`) | 2 | +0.06% | 1.1% | 0.10 | 50.0% | 1.07 |
+
+This is the **first genuinely forward, out-of-sample evidence** the project has produced (every other result
+so far is historical, however carefully split) - and it reproduces, on live data the model has never seen in
+any form, exactly the pattern found throughout Stage 5-7: the unoptimized baseline strategies lose money
+(consistent with all 16 of Stage 7's historical windows), and the logistic MetaFilter is flat-to-slightly-
+positive on very few trades (2, well under the 30-trade statistical-meaningfulness threshold the metrics
+module itself warns about) rather than reproducing Stage 6's single-run +8.6% - consistent with Stage 7's
+finding that that result does not generalize. This is one 94-day sample, not a validated result either way;
+it is reported as a first data point for the forward paper-trading record the thesis will keep accumulating.
+
+**Known limitations, all deliberate MVP scope (not bugs)**
+- Open interest and the top-trader/taker long-short ratios are not updated live (see above) - `oi_available`
+  correctly reflects this as staleness, exactly as the policy already specifies for any other gap.
+- No dashboard/Streamlit view yet - CLI only, per architecture's own stated ordering.
+- Every tick replays the full forward history rather than checkpointing incrementally - simple and safe now;
+  would need revisiting only if the forward period grows large enough (many years) for a full replay to
+  become slow, which is not the case at the scale paper trading runs at.
+- `arven paper run` must be invoked by something external (Task Scheduler, cron, or by hand) - Stage 8 does
+  not add a persistent background daemon (deliberately, per the D7 design discussion: a laptop that sleeps or
+  reboots would otherwise silently stop producing signals without the catch-up design being exercised).
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -897,10 +1045,13 @@ src/arven/
     checks.py                 # value-range invariants
   data/
     adapters/binance_bulk.py  # Binance bulk layout, SourceFile, plan_files, parse_checksum, has_header
+    adapters/binance_rest.py  # Stage 8: public REST klines/fundingRate fetch (no API key, no order endpoints)
     download.py               # Downloader: retries + exponential backoff with jitter, SHA-256 verify, .part + atomic rename
     storage/schema.py         # DuckDB DDL (authoritative schema)
     storage/db.py             # connect(), provenance record helpers, run ids, git commit lookup
     ingestion.py              # Ingestor: plan → download → normalise → upsert; one transaction per file; run log
+    rest_ingestion.py         # Stage 8: RestIngestor.tail() - REST-tail klines/funding into the same tables,
+                              #   staged bulk INSERT OR REPLACE (never row-by-row; see "Operational notes")
     resample.py               # 1m → 5m/15m/1h/4h (exact DECIMAL sums, is_complete flag)
     crosscheck.py             # derived bars vs Binance native klines (ohlcv_native)
     quality.py                # QualityChecker → quality_results, data_gaps
@@ -952,12 +1103,18 @@ src/arven/
   wfo_runs.py                    # Stage 7 composition root (mirrors runs.py/ml_runs.py): loads dev+val data, builds the
                                   #   combined dataset once, drives the 17-window schedule, runs baseline/ml/shuffled/random
                                   #   backtests per window via the real Stage5Pipeline/Backtester, writes report.json
+  paper/
+    runs.py                        # Stage 8 composition root: REST tail -> resample -> resolve BacktestPeriod.FORWARD ->
+                                    #   build forward-period features in memory -> runs.execute_run (unmodified) -> write
+                                    #   data/paper/<run_id>/ + its own runs.jsonl (kept separate from data/backtests/)
 tests/
   conftest.py               # make_config fixture (isolated tmp data_dir)
   synthetic_market.py, leakage_harness.py   # deterministic synthetic bars/funding/OI; generic truncation + perturbation checks
   bt_helpers.py, bt_scenarios.py            # Stage 4: tiny hand-made markets, scripted/random providers, the independent oracle engine,
                                              #   bulk_insert_1m/bulk_insert_funding (COPY-based; see "Operational notes")
   unit/                     # time, timeframes, types, config, binance_bulk, download, resample
+                             #   test_binance_rest.py, test_rest_ingestion.py (Stage 8, offline fake REST opener)
+  rest_helpers.py           # Stage 8: shared offline fake for Binance's public REST API (no sockets)
   integration/test_ingestion_pipeline.py   # local fake-Binance HTTP server: formats, resets, 404, checksum, rollback, idempotency, quality
   features/                 # indicators, series + as-of, bar features (warm-up, alignment, delay, gaps), funding/OI/time, config/registry/builder, cache
   backtest/                 # config/Signal/MarketData, costs/margin, hand-computed accounting (~30 cases), oracle (300 seeds), invariants,
@@ -984,10 +1141,18 @@ tests/
                              #   calibration mask, degenerate-split handling, calibration-lookback capping), test_wfo_backtest
                              #   (window resolution incl. the real fold-10 check, regime-hysteresis reset across windows),
                              #   test_wfo_static_rules (import boundaries, no reimplementation of Stage 6 primitives)
+  paper/                    # Stage 8: test_paper_runs (synthetic DB -> REST tail -> resample -> forward window ->
+                             #   real Stage5Pipeline -> written artifact; the resample-range regression test),
+                             #   test_paper_static_rules (import boundaries, no reimplementation of Backtester/Simulator)
   test_reports.py           # per-regime breakdown (hand-built fixtures)
 ```
-Full suite: **1565 passed, 13 skipped** (`.venv/Scripts/python.exe -m pytest`, about 7 minutes), all passing.
-Stage 7 adds 36 new tests (`tests/wfo/`: 32, `tests/leakage/test_wfo_leakage.py`: 4); the 13 skips are unchanged
+Full suite: **1605 passed, 13 skipped** (`.venv/Scripts/python.exe -m pytest`, about 7 minutes), all passing.
+Stage 8 adds 39 net new tests (32 in new files across `tests/unit/`, `tests/leakage/`, `tests/paper/`, plus a
+net +7 in the existing `tests/backtest/test_splitguard_and_loading.py` for the new FORWARD period); the 13
+skips are unchanged opt-in real-data checks — Stage 8 adds no new opt-in real-data test, since its real-data
+run is exercised directly via `arven paper run` (documented in the "Stage 8" section above) rather than as a
+pytest-collected check, the same choice Stage 7 made for `arven wfo run`.
+Stage 7 added 36 tests (`tests/wfo/`: 32, `tests/leakage/test_wfo_leakage.py`: 4); the 13 skips are unchanged
 opt-in real-data checks (7 from Stages 3-5 + 6 from Stage 6 — Stage 7 adds no new opt-in real-data test, since
 its real-data run is exercised directly via `arven wfo run`, documented in the "Stage 7" section above, rather
 than as a pytest-collected check). All 13 pass together:
@@ -1133,12 +1298,19 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 1. ~~Full backfill~~: done. ~~Stage 3 features~~: done and approved. ~~Stage 4 backtester~~: done and approved
    (including the final `liquidation_includes_funding=true` decision, #13 below). ~~Stage 5 pipeline~~: done and
    approved, committed `2298e5a`. ~~Stage 6 ML meta-filter~~: done, approved and committed `e9b7c72`.
-   **Stage 7 walk-forward evaluation (WFO)**: implemented, validated (36 new tests, full suite 1565 passed/13
-   skipped) and run on real development+validation data — see "Stage 7" above. Headline finding: **Stage 6's
-   single-run +8.6% result does not replicate**; the baseline loses money in all 16 backtestable windows, and
-   neither the logistic nor the LightGBM MetaFilter shows a replicated predictive edge (raw ROC-AUC 0.42–0.60
-   throughout).
-2. **`forward_start = 2026-07-01` is already in the past** (unchanged as instructed). It needs relabelling before paper trading.
+   ~~Stage 7 walk-forward evaluation (WFO)~~: done, approved and committed `aa43c1b`. Headline finding:
+   **Stage 6's single-run +8.6% result does not replicate**; the baseline loses money in all 16 backtestable
+   windows, and neither the logistic nor the LightGBM MetaFilter shows a replicated predictive edge (raw
+   ROC-AUC 0.42–0.60 throughout). **Stage 8 paper-signal loop**: implemented, validated (39 net new tests,
+   full suite 1605 passed/13 skipped) and run on live Binance data — see "Stage 8" above. First forward
+   result: baseline −14.9% over 94.4 days (consistent with every Stage 7 window), logistic MetaFilter flat at
+   +0.06% on 2 trades (consistent with Stage 7's non-replication finding, not a new positive result).
+2. ~~`forward_start = 2026-07-01` is already in the past~~: **resolved by Stage 8** — it needed no relabelling.
+   The gap between `history_end`/`forward_start` (2026-07-01) and the day Stage 8 actually ran (2026-10-03,
+   ~94 days) was simply backfilled via the new REST-tail path (the same public endpoints, just incremental)
+   before the first forward decision; `forward_start` itself stays exactly as originally configured, and the
+   forward period's own definition (`[forward_start, now)`, growing) makes any future gap between runs
+   self-healing the same way, by construction.
 3. ~~Contiguous splits with no embargo~~: **resolved by Stage 6's purged, embargoed expanding-window
    walk-forward** (`src/arven/ml/splits.py` — 96-hour embargo, purges any training row whose label horizon
    overlaps a validation block; 20-seed exhaustive property test). The underlying Stage 4/5 chronological
@@ -1169,7 +1341,9 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
    Lowering `warmup_factor` or dropping the 4h EMA200 is possible via `config/features.yaml`, at the price of a new feature version.
 10. ~~Feature cache manifest recorded the pre-commit git hash~~: resolved — rebuilt once after the Stage 3 commit; the content
     hash (`c06b09e7…`) was verified unchanged and the manifest now records `git_commit = 6ac57d47…`.
-11. `features build` always rebuilds the full history (about 7 s); there is no incremental update yet (Stage 8, renumbered 2026-10-01). If bars are
+11. `features build` always rebuilds the full history (about 7 s); there is still no incremental update to Stage 3's
+    persisted cache (not added by Stage 8 either — the paper loop builds its own forward-period features fresh in
+    memory each tick instead, see "Stage 8" above, deliberately leaving the canonical cache untouched). If bars are
     re-ingested, rebuild: the manifest's `source_fingerprint` identifies the data a cache was built from.
 12. **Stage 4 assumptions not verified against Binance's live schedule:** `maintenance_margin_rate` (0.4%, single flat tier,
     no tiered schedule), `qty_step_btc` (0.001), `min_notional_usdt` (100). All are in `config/backtest.yaml`, clearly labelled,
@@ -1203,10 +1377,11 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 
 ## What does NOT exist yet
 
-- Macro/news ingestion, LLM, live/paper trading loop, dashboard.
+- Macro/news ingestion, LLM, dashboard. (The paper-signal loop now exists — Stage 8.)
 - `MarketSnapshot` as a separate class (its job is done by `core.series.MarketInputs.available_until` and
   `data.reader`), and the `feature_sets` DuckDB table (replaced by `manifest.json`).
-- REST incremental updates (only bulk files are supported so far).
+- ~~REST incremental updates (only bulk files are supported so far)~~: implemented in Stage 8
+  (`data/adapters/binance_rest.py`, `data/rest_ingestion.py` — klines and funding only, see "Stage 8" above).
 - The macro-event blackout (risk rule 2) — explicitly Stage 9 (renumbered 2026-10-01), not implemented, not
   stubbed. (The ML probability gate, decision step 4, now exists — Stage 6.)
 - A saved, dedicated Stage 7 WFO report format beyond the one `report.json` per run, and any dashboard/plot of
@@ -1219,8 +1394,8 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 - A Stage-6-specific sealed-test evaluation log (`arven.ml_runs` never reaches the test period at all yet, so
   there is nothing to log — see open issue #8).
 - Git: branch `feat/historical-data`; commits `efb6677` (Stage 1+2), `4be9329` (docs), `6ac57d4` (Stage 3),
-  `8009719` (Stage 4), `a6da56b` (docs), `2298e5a` (Stage 5), `e9b7c72` (Stage 6). Stage 7 (WFO) is included in
-  this commit.
+  `8009719` (Stage 4), `a6da56b` (docs), `2298e5a` (Stage 5), `e9b7c72` (Stage 6), `aa43c1b` (Stage 7). Stage 8
+  (paper-signal loop) is included in this commit.
 
 ## Environment
 
@@ -1231,6 +1406,9 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
   - Stage 4 and Stage 5 added no new dependencies.
   - Added in Stage 6: `lightgbm 4.7.0` (pulled in `scipy 1.18.1`, `narwhals 2.26.0`); the install needed retries
     (`--retries 15 --timeout 60`) because of the same connection-reset behaviour seen with `numpy` in Stage 3.
+  - Stage 7 added no new dependencies.
+  - Stage 8 added no new dependencies: REST calls reuse `Downloader.fetch_bytes` (stdlib `urllib.request`),
+    exactly as the bulk downloader already does.
   - Not installed: pandas, pyarrow.
 - Pre-existing packages from the user: `openai`, `pydantic`, `httpx2`, `python-dotenv`.
 
@@ -1277,3 +1455,8 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-01 | Stage 7 design: reuse Stage 6's `generate_folds` schedule unchanged (no separate Stage 7 calendar); hyperparameter selection for window `N` restricted to `folds[:N]`; calibration/threshold selection restricted to the union of the last 4 folds strictly before `N`; fold 10 (the one dev/validation-boundary-crossing window) excluded from backtesting only, kept in the schedule | approved (implemented) |
 | 2026-10-01 | Stage 7's own pre-commit audit found and fixed a causal-leakage bug in its first implementation (hyperparameters/calibration had been selected using all folds, including the window under evaluation) before any real-data run or commit | implemented (Stage 7) |
 | 2026-10-01 | Stage 7 real walk-forward result: Stage-5-only baseline negative in all 16 backtestable windows (mean total_return −11.2%); neither logistic nor LightGBM MetaFilter showed a replicated predictive edge (mean total_return ≈0%, raw ROC-AUC 0.42-0.60 in every window) — Stage 6's single-run +8.6% result does not replicate under genuine walk-forward evaluation | implemented (Stage 7), approved (final) |
+| 2026-10-01 | Stage 7 review approved, committed `aa43c1b` | approved (final) |
+| 2026-10-03 | Stage 8 design: add `BacktestPeriod.FORWARD` (implements `architecture.md`'s own "Data periods" table, not a new decision) rather than inventing a parallel paper-trading data path; the live loop computes "now" itself (one wall-clock read per tick) and is the only new thing that ever does; the real `Backtester`/`Stage5Pipeline` is reused unmodified via `runs.execute_run`, never a bespoke paper-trade tracker | approved (implemented) |
+| 2026-10-03 | Stage 8 D2: REST-tail scope is klines + funding only; open interest and the top-trader/taker long-short ratios are not live-updated (optional, NaN-tolerant feature group already) | approved |
+| 2026-10-03 | Stage 8 found and fixed two real bugs before trusting its first real run: (1) `con.executemany` into the PK-indexed `ohlcv_1m`/`funding_rates` tables measured ~33s per 1000-row REST page (fixed with the same staged-bulk-load idiom `ingestion.py` already uses, ~740x speedup); (2) a fixed 2-day resample lookback silently left most of a large REST catch-up's derived bars unbuilt, producing a false "0 trades over 94 days" result that was investigated rather than accepted, and fixed with a regression test | implemented (Stage 8) |
+| 2026-10-03 | Stage 8 real forward run (live Binance data, forward_start=2026-07-01, 94.4 days): Stage-5-only baseline −14.9% (consistent with every Stage 7 historical window); logistic MetaFilter flat at +0.06% on 2 trades (consistent with Stage 7's non-replication finding) — the project's first genuinely forward, out-of-sample data point | implemented (Stage 8), approved (final) |

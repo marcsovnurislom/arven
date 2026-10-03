@@ -144,6 +144,51 @@ def test_loaders_return_only_rows_inside_the_window_and_log_the_ranges(tmp_path)
     assert not np.isin(vbars["time_ms"], bars["time_ms"]).any()
 
 
-def test_a_forward_period_does_not_exist_as_a_backtest_period():
-    assert {p.value for p in BacktestPeriod} == {"development", "validation", "test"}
+def test_forward_start_equals_test_end_in_the_real_config():
     assert to_ms(to_utc_datetime(APP.splits.forward_start)) == TEST_END
+
+
+def test_forward_resolves_from_forward_start_to_an_explicit_end(tmp_path):
+    g = guard(tmp_path)
+    end = TEST_END + 10 * HOUR
+    w = g.resolve(BacktestPeriod.FORWARD, end_ms=end)
+    assert (w.period, w.start_ms, w.end_ms, w.sealed) == (BacktestPeriod.FORWARD, TEST_END, end, False)
+    assert w.sealed_reason is None
+
+
+def test_forward_requires_an_explicit_end_there_is_nothing_to_default_to(tmp_path):
+    g = guard(tmp_path)
+    with pytest.raises(SplitViolation):
+        g.resolve(BacktestPeriod.FORWARD)
+
+
+def test_forward_refuses_a_start_before_forward_start(tmp_path):
+    g = guard(tmp_path)
+    with pytest.raises(SplitViolation):
+        g.resolve(BacktestPeriod.FORWARD, start_ms=TEST_END - HOUR, end_ms=TEST_END + HOUR)
+
+
+def test_forward_has_no_upper_bound_arbitrarily_far_ends_are_accepted(tmp_path):
+    g = guard(tmp_path)
+    far = TEST_END + 10_000 * HOUR
+    w = g.resolve(BacktestPeriod.FORWARD, end_ms=far)
+    assert w.end_ms == far
+
+
+def test_forward_is_never_sealed_and_needs_no_log(tmp_path):
+    g = guard(tmp_path, with_log=False)  # no sealed_log_path configured at all
+    w = g.resolve(BacktestPeriod.FORWARD, end_ms=TEST_END + HOUR)
+    assert not w.sealed
+    assert not (tmp_path / "sealed.jsonl").exists()
+
+
+def test_forward_still_rejects_non_hour_aligned_bounds(tmp_path):
+    g = guard(tmp_path)
+    with pytest.raises(SplitViolation):
+        g.resolve(BacktestPeriod.FORWARD, end_ms=TEST_END + HOUR + 1)
+
+
+def test_period_bounds_does_not_resolve_forward(tmp_path):
+    g = guard(tmp_path)
+    with pytest.raises(KeyError):
+        g.period_bounds(BacktestPeriod.FORWARD)

@@ -26,6 +26,7 @@ data:
 
 download:
   base_url: https://data.binance.vision
+  rest_base_url: https://fapi.binance.com   # Stage 8: live REST tail updates (klines, funding); public endpoints only
   timeout_seconds: 30
   max_attempts: 6
   backoff_initial_seconds: 1.0

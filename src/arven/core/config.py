@@ -100,6 +100,7 @@ class DataConfig(_StrictModel):
 
 class DownloadConfig(_StrictModel):
     base_url: str = Field(pattern=r"^https?://")
+    rest_base_url: str = Field(pattern=r"^https?://")  # Stage 8: live REST tail updates (klines, funding)
     timeout_seconds: float = Field(gt=0, le=600)
     max_attempts: int = Field(ge=1, le=20)
     backoff_initial_seconds: float = Field(ge=0)

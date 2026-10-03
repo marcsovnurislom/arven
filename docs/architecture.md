@@ -116,6 +116,26 @@ Driving loop:
 - **Live/paper:** a scheduler wakes at each 1h bar close (+ small delay), refreshes data, builds `MarketSnapshot(now)`,
   runs the identical pipeline, stores the signal. Later, a paper-trade tracker marks signals to market.
 
+> **As implemented in Stage 8** (`src/arven/paper/`, `src/arven/data/adapters/binance_rest.py`,
+> `src/arven/data/rest_ingestion.py`; details in `current_state.md`): the live/paper loop turned out to need
+> no new execution/decision code at all, because of two design facts already present from earlier stages -
+> `backtest.clock.Clock` was always a `Protocol` documented as "a live loop implements the same protocol with
+> real time", and `features.builder.build_features` was always documented as serving "the live loop (one
+> decision time, on inputs truncated with `MarketInputs.available_until`)". A new `BacktestPeriod.FORWARD`
+> (`core/splitguard.py`) resolves `[splits.forward_start, end_ms)`, where `end_ms` is the live loop's own
+> single wall-clock read (`SplitGuard` itself still never reads the clock); it is never sealed (there is no
+> future beyond "now" to leak). `arven paper run` then: (1) REST-tails new 1m klines and funding into the
+> same `ohlcv_1m`/`funding_rates` tables the bulk pipeline uses (public market-data endpoints only, no API
+> key - CLAUDE.md rule 12), (2) builds the forward period's feature rows in memory with the unmodified
+> `build_features` (not a second persisted cache - Stage 3's canonical `data/features/<version>/` artifact is
+> never touched), and (3) runs the real, unmodified `Backtester`/`Stage5Pipeline` over the forward window via
+> `runs.execute_run` - literally the same function `arven backtest run` uses, just pointed at a growing
+> period and a REST-updated database. The "paper-trade tracker" is therefore not new code: it is Stage 4's
+> own `Simulator`, replaying the *entire* forward history fresh on every tick (idempotent, catch-up capable,
+> cheap at the scale a few months of 1m bars implies). Open interest is not REST-updated (optional,
+> NaN-tolerant feature group, see `data/adapters/binance_rest.py`); a CLI/Streamlit view beyond
+> `arven paper run/show/status` is not built (CLI first, per A9 - matches the architecture's own ordering).
+
 ---
 
 ## 5. Directory structure (proposed)

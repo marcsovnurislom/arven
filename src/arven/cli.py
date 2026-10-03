@@ -506,6 +506,85 @@ def cmd_wfo_show(cfg: AppConfig, args: argparse.Namespace) -> int:
     return 0
 
 
+def _build_pipeline(cfg: AppConfig, args: argparse.Namespace, bt):
+    from arven.core.regime_config import load_regime_config
+    from arven.core.risk_config import load_risk_config
+    from arven.core.strategies_config import load_strategies_config
+    from arven.decision.pipeline import Stage5Pipeline
+
+    ml_filter = None
+    if getattr(args, "ml_model", None):
+        from arven.ml_runs import load_meta_filter
+
+        ml_filter = load_meta_filter(cfg, args.ml_model)
+    elif getattr(args, "random_filter_rate", None) is not None:
+        from arven.ml.filter import RandomFilter
+
+        ml_filter = RandomFilter(args.random_filter_rate, seed=cfg.project.random_seed)
+    return Stage5Pipeline(
+        load_regime_config(args.config_dir), load_strategies_config(args.config_dir),
+        load_risk_config(args.config_dir), bt, ml_filter=ml_filter,
+    )
+
+
+def cmd_paper_run(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from arven.core.backtest_config import load_backtest_config
+    from arven.paper.runs import run_paper_tick
+
+    bt, fcfg = load_backtest_config(args.config_dir), load_features_config(args.config_dir)
+    pipeline = _build_pipeline(cfg, args, bt)
+    outcome = run_paper_tick(cfg, fcfg, bt, pipeline)
+    rs = outcome.rest_summary
+    print(f"REST tail: klines +{rs.klines_written} (of {rs.klines_fetched} fetched)  "
+          f"funding +{rs.funding_written} (of {rs.funding_fetched} fetched)  pages={rs.pages}")
+    for err in rs.errors:
+        print(f"  REST ERROR {err}")
+    if outcome.window is None:
+        print("forward_start has not arrived yet relative to now; nothing to decide")
+        return 0 if rs.ok else 1
+    print(f"forward window [{outcome.window.start_ms}, {outcome.window.end_ms})")
+    if outcome.run is None:
+        print("no new decision time since the last tick")
+        return 0 if rs.ok else 1
+    out = outcome.run
+    print(f"run {out.run_id} -> {out.run_dir}")
+    _print_metrics(out.metrics)
+    print(f"  result_hash {out.result_hash}   git_dirty={out.manifest['git_dirty']}")
+    print("Simulated fills on real market data, same cost/execution model as `backtest run` - not a real "
+          "exchange account, not evidence of profitability (CLAUDE.md rule 6).")
+    return 0 if rs.ok else 1
+
+
+def cmd_paper_show(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from arven.paper.runs import paper_dir
+
+    manifest = json.loads((paper_dir(cfg) / args.run / "run.json").read_text(encoding="utf-8"))
+    _print_metrics(manifest["metrics"])
+    print(f"  result_hash {manifest['result_hash']}   window [{manifest['window_start_ms']}, {manifest['window_end_ms']})")
+    return 0
+
+
+def cmd_paper_status(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from arven.core.time import from_ms
+    from arven.paper.runs import latest_forward_window_end_ms, paper_dir
+
+    with open_readonly(cfg.data.database_path) as con:
+        last_1m = con.execute("SELECT max(open_time_ms) FROM ohlcv_1m WHERE symbol = ?", [cfg.market.symbol]).fetchone()[0]
+        last_funding = con.execute("SELECT max(funding_time_ms) FROM funding_rates WHERE symbol = ?", [cfg.market.symbol]).fetchone()[0]
+    print(f"forward_start {cfg.splits.forward_start.isoformat()}")
+    print(f"latest usable decision time (now): {from_ms(latest_forward_window_end_ms(cfg) - 3_600_000).isoformat()}")
+    print(f"latest stored 1m bar: {from_ms(last_1m).isoformat() if last_1m is not None else 'none'}")
+    print(f"latest stored funding: {from_ms(last_funding).isoformat() if last_funding is not None else 'none'}")
+    index = paper_dir(cfg) / "runs.jsonl"
+    if not index.exists():
+        print("no paper runs yet; run `arven paper run`")
+        return 0
+    last_line = index.read_text(encoding="utf-8").strip().splitlines()[-1]
+    entry = json.loads(last_line)
+    print(f"latest paper run: {entry['run_id']} ({entry['created_at']})  result_hash={entry['result_hash']}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="arven", description="ARVEN data pipeline (research only, no execution)")
     parser.add_argument("--config-dir", default=None, help="configuration directory (default: <project>/config)")
@@ -585,6 +664,17 @@ def build_parser() -> argparse.ArgumentParser:
     q = wsub.add_parser("show", help="print a stored walk-forward report")
     q.add_argument("run")
     q.set_defaults(func=cmd_wfo_show)
+
+    p = sub.add_parser("paper", help="Stage 8: the paper-signal loop (forward-only, simulated fills on live data)")
+    psub = p.add_subparsers(dest="paper_command", required=True)
+    q = psub.add_parser("run", help="REST-update market data, then decide+paper-trade every new forward decision time since the last run")
+    q.add_argument("--ml-model", help="Stage 6 model id (data/models/<id>): run the pipeline with this MetaFilter enabled")
+    q.add_argument("--random-filter-rate", type=float, help="control (D20): veto this fraction of candidates uniformly at random instead of using a model")
+    q.set_defaults(func=cmd_paper_run)
+    q = psub.add_parser("show", help="print a stored paper run's metrics")
+    q.add_argument("run")
+    q.set_defaults(func=cmd_paper_show)
+    psub.add_parser("status", help="latest ingested data and latest paper run").set_defaults(func=cmd_paper_status)
     return parser
 
 
