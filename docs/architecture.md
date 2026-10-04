@@ -546,10 +546,15 @@ Stacking (ML over all strategy outputs) is a later option once enough data exist
 ## 14. Risk-management architecture
 
 > **As implemented in Stage 5** (`src/arven/risk/engine.py`, `config/risk.yaml`; details in
-> `current_state.md`): rule 2 (macro-event blackout) is not implemented — it was already marked "later
-> stage" here (Stage 9, renumbered 2026-10-01 — was Stage 8 before the Stage 7 WFO insertion) before Stage 5
-> began. All other rules (1, 3-8) are implemented as an ordered
-> veto/reduce chain; rule 7 (portfolio limits) is checked earliest in the actual code (position-already-open,
+> `current_state.md`): all 8 rules are now implemented. Rule 2 (macro-event blackout) was deferred at Stage 5
+> time ("later stage" here, Stage 9) and implemented in **Stage 9a** (2026-10-05): a symmetric
+> `[scheduled - window, scheduled + window]` veto around every FOMC/CPI/NFP release in
+> `config/macro_events.csv` (`macro_blackout_window_hours` in `risk.yaml`, default 1.0h). Only the
+> *scheduled* time is used - never the eventual released value - so there is no look-ahead risk; see
+> `current_state.md`'s "Stage 9a" section. `RiskEngine`/`Stage5Pipeline` take the loaded calendar as an
+> optional, default-`()` constructor parameter (additive, byte-identical to every prior stage's committed
+> behaviour when omitted — the same pattern Stage 6 used for `ml_filter`). Rule 7 (portfolio limits) is
+> checked earliest among the *cost-driven* rules in the actual code (position-already-open,
 > daily-loss, drawdown and cooldown are all cheap checks that make everything downstream moot if any holds),
 > not in numeric order — the numbering above is the architecture's, not the execution order. Leverage and
 > the maintenance-margin rate are read from `config/backtest.yaml` (one source of truth with the backtester),
@@ -563,7 +568,8 @@ returns a final `Signal`. It can only **reduce size or veto** — never create o
 
 Pipeline of independent, individually testable rules (each returns pass / reduce / veto + reason):
 1. **Data-quality gate:** stale data, recent gap, missing funding/OI where required ⇒ veto.
-2. **Event blackout:** within a window around high-impact macro events (FOMC, CPI, NFP) ⇒ veto or reduce (later stage).
+2. **Event blackout:** within a window around high-impact macro events (FOMC, CPI, NFP) ⇒ veto (implemented
+   as veto-only in Stage 9a, not veto-or-reduce — see the "As implemented" note above).
 3. **Volatility guard:** extreme volatility regime ⇒ reduce or veto.
 4. **Funding guard:** entering in the direction that pays extreme funding ⇒ reduce/veto.
 5. **Stop & target:** stop = k × ATR from entry (from strategy hint, bounded by risk config); target from reward/risk ratio.

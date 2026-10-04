@@ -1,7 +1,8 @@
 """The risk engine: a fixed, ordered pipeline of independent veto/reduce rules.
 
-Each rule below is numbered to match ``docs/architecture.md`` section 14 (rule 2, the macro-event blackout,
-is explicitly deferred there — "later stage" — and is not implemented). Position sizing reuses
+Each rule below is numbered to match ``docs/architecture.md`` section 14. Rule 2 (the macro-event blackout)
+is implemented as of Stage 9a, using only the *scheduled* time of a calendar event (public knowledge well in
+advance - no look-ahead risk; see ``core.macro_config``'s module docstring). Position sizing reuses
 :func:`arven.backtest.margin.liquidation_price` (a pure function, not the execution engine) so the
 liquidation-distance formula has one source of truth with the backtester; nothing here calls into
 ``arven.backtest.engine``/``execution``/``accounting`` or bypasses the Stage 4 fill/accounting path.
@@ -20,12 +21,27 @@ from typing import Literal
 from arven.backtest.margin import liquidation_price
 from arven.backtest.provider import PortfolioSnapshot
 from arven.core.backtest_config import BacktestConfig
+from arven.core.macro_config import MacroEvent
 from arven.core.risk_config import RiskConfig
 from arven.core.signal import Signal
 from arven.core.types import Action
 from arven.decision.engine import ProposedDecision
 
 DAY_MS = 86_400_000
+HOUR_MS = 3_600_000
+
+
+def _active_blackout(t_ms: int, events: tuple[MacroEvent, ...], window_hours: float) -> MacroEvent | None:
+    """The event (if any) whose symmetric ``[scheduled - window, scheduled + window]`` blackout contains
+    ``t_ms``. ``events`` must be sorted by ``scheduled_at_ms`` (``load_macro_events`` already sorts); a
+    simple linear scan is fine at this calendar's size (a few hundred rows total)."""
+    window_ms = window_hours * HOUR_MS
+    for e in events:
+        if abs(t_ms - e.scheduled_at_ms) <= window_ms:
+            return e
+        if e.scheduled_at_ms > t_ms + window_ms:
+            break  # events are sorted: nothing further can be in range either
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,10 +59,11 @@ def _pass_through_reasons(proposed: ProposedDecision) -> RiskDecision:
 
 
 class RiskEngine:
-    def __init__(self, cfg: RiskConfig, bt_cfg: BacktestConfig) -> None:
+    def __init__(self, cfg: RiskConfig, bt_cfg: BacktestConfig, macro_events: tuple[MacroEvent, ...] = ()) -> None:
         self.cfg = cfg
         self.leverage = bt_cfg.leverage
         self.maintenance_margin_rate = bt_cfg.maintenance_margin_rate
+        self.macro_events = macro_events  # default (): no calendar loaded -> rule 2 never fires (additive, Stage 9a)
         self.reset()
 
     def reset(self) -> None:
@@ -106,6 +123,11 @@ class RiskEngine:
         # 1. data-quality gate
         if not (math.isfinite(feat_ready) and feat_ready == 1.0):
             return self._veto(t_ms, "stale_or_incomplete_data", feat_ready=feat_ready)
+
+        # 2. macro-event blackout (Stage 9a): scheduled time only, never the released value - see module docstring
+        blackout = _active_blackout(t_ms, self.macro_events, self.cfg.macro_blackout_window_hours)
+        if blackout is not None:
+            return self._veto(t_ms, "macro_event_blackout", event_type=blackout.event_type, scheduled_at_ms=blackout.scheduled_at_ms)
 
         # 7 (checked early: nothing downstream matters if any of these hold)
         if portfolio.side != 0 or portfolio.order_pending:

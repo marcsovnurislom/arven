@@ -507,6 +507,7 @@ def cmd_wfo_show(cfg: AppConfig, args: argparse.Namespace) -> int:
 
 
 def _build_pipeline(cfg: AppConfig, args: argparse.Namespace, bt):
+    from arven.core.macro_config import load_macro_events
     from arven.core.regime_config import load_regime_config
     from arven.core.risk_config import load_risk_config
     from arven.core.strategies_config import load_strategies_config
@@ -524,6 +525,7 @@ def _build_pipeline(cfg: AppConfig, args: argparse.Namespace, bt):
     return Stage5Pipeline(
         load_regime_config(args.config_dir), load_strategies_config(args.config_dir),
         load_risk_config(args.config_dir), bt, ml_filter=ml_filter,
+        macro_events=load_macro_events(args.config_dir),
     )
 
 

@@ -5,6 +5,7 @@ import pytest
 from arven.backtest.margin import liquidation_price
 from arven.backtest.provider import PortfolioSnapshot
 from arven.core.backtest_config import load_backtest_config
+from arven.core.macro_config import MacroEvent
 from arven.core.risk_config import load_risk_config
 from arven.core.types import Action
 from arven.decision.engine import ProposedDecision
@@ -55,6 +56,62 @@ def test_normal_case_produces_a_signal_with_expected_sizing():
 def test_data_quality_gate_vetoes_when_not_ready(feat_ready):
     signal, rd = engine().apply(proposal(), flat(), T0, feat_ready, 0.0)
     assert signal is None and rd.outcome == "veto" and rd.reason == "stale_or_incomplete_data"
+
+
+# --- 2. macro-event blackout (Stage 9a) ------------------------------------------------------------
+
+
+def _event(t_ms=T0, event_type="FOMC", note=""):
+    return MacroEvent(t_ms, event_type, note)
+
+
+def test_no_events_configured_never_vetoes():
+    signal, rd = RiskEngine(CFG, BT, macro_events=()).apply(proposal(), flat(), T0, 1.0, 0.0)
+    assert signal is not None and rd.outcome == "signal"
+
+
+def test_exactly_at_the_scheduled_time_vetoes():
+    signal, rd = RiskEngine(CFG, BT, macro_events=(_event(T0),)).apply(proposal(), flat(), T0, 1.0, 0.0)
+    assert signal is None and rd.outcome == "veto" and rd.reason == "macro_event_blackout"
+    assert rd.detail["event_type"] == "FOMC" and rd.detail["scheduled_at_ms"] == T0
+
+
+@pytest.mark.parametrize("delta", [-3600_000, -1, 0, 1, 3600_000])
+def test_inside_the_symmetric_window_vetoes(delta):
+    # CFG.macro_blackout_window_hours == 1.0 -> +/- 3_600_000 ms is exactly the boundary (inclusive)
+    event_t = T0 + 3600_000
+    signal, rd = RiskEngine(CFG, BT, macro_events=(_event(event_t),)).apply(proposal(t_ms=event_t + delta), flat(), event_t + delta, 1.0, 0.0)
+    assert signal is None and rd.outcome == "veto" and rd.reason == "macro_event_blackout"
+
+
+@pytest.mark.parametrize("delta", [-3600_001, 3600_001])
+def test_just_outside_the_symmetric_window_does_not_veto(delta):
+    event_t = T0 + 3600_000
+    signal, rd = RiskEngine(CFG, BT, macro_events=(_event(event_t),)).apply(proposal(t_ms=event_t + delta), flat(), event_t + delta, 1.0, 0.0)
+    assert signal is not None and rd.outcome == "signal"
+
+
+def test_only_the_nearest_relevant_event_matters_among_several():
+    events = (_event(T0 - 10 * HOUR, "CPI"), _event(T0, "FOMC"), _event(T0 + 10 * HOUR, "NFP"))
+    signal, rd = RiskEngine(CFG, BT, macro_events=events).apply(proposal(), flat(), T0, 1.0, 0.0)
+    assert signal is None and rd.detail["event_type"] == "FOMC"
+
+
+def test_blackout_is_checked_before_the_portfolio_state_rules_but_a_vetoed_decision_still_updates_state():
+    """Rule ordering: 1 (data quality) then 2 (blackout) then 7 (portfolio state) - a blackout veto must not
+    bypass the stateful circuit-breaker bookkeeping (_update_state is called unconditionally at the top of
+    apply, before any rule)."""
+    eng = RiskEngine(CFG, BT, macro_events=(_event(T0),))
+    signal, rd = eng.apply(proposal(), flat(equity=10_000.0), T0, 1.0, 0.0)
+    assert signal is None and rd.reason == "macro_event_blackout"
+    assert eng._peak_equity == 10_000.0  # state was still updated despite the veto
+
+
+def test_blackout_does_not_apply_to_a_no_trade_proposal():
+    signal, rd = RiskEngine(CFG, BT, macro_events=(_event(T0),)).apply(
+        proposal(Action.NO_TRADE, stop_pct=None, tp_pct=None), flat(), T0, 1.0, 0.0
+    )
+    assert signal is None and rd.outcome == "no_proposal"  # never even reaches rule 1 or 2
 
 
 # --- 7 (checked early): already-open position -----------------------------------------------------

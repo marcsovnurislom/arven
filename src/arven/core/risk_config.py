@@ -19,6 +19,8 @@ RISK_FILE = "risk.yaml"
 
 
 class RiskConfig(_StrictModel):
+    macro_blackout_window_hours: float = Field(gt=0)
+
     high_vol_size_multiplier: float = Field(gt=0, le=1.0)
     veto_on_stress: bool
 

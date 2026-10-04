@@ -25,6 +25,7 @@ from typing import Any, Protocol
 
 from arven.backtest.provider import DecisionContext, FeatureView, PrepareInfo
 from arven.core.backtest_config import BacktestConfig
+from arven.core.macro_config import MacroEvent
 from arven.core.regime_config import RegimeConfig
 from arven.core.risk_config import RiskConfig
 from arven.core.signal import Signal
@@ -68,25 +69,29 @@ class DecisionRecord:
 class Stage5Pipeline:
     def __init__(
         self, regime_cfg: RegimeConfig, strategies_cfg: StrategiesConfig, risk_cfg: RiskConfig, bt_cfg: BacktestConfig,
-        ml_filter: MLFilterProtocol | None = None,
+        ml_filter: MLFilterProtocol | None = None, macro_events: tuple[MacroEvent, ...] = (),
     ) -> None:
         self.regime_cfg, self.strategies_cfg, self.risk_cfg = regime_cfg, strategies_cfg, risk_cfg
         self.strategies = build_strategies(strategies_cfg)
         gates = {s.strategy_id: s.gate for s in self.strategies}
         d = strategies_cfg.decision
         self.decision_engine = DecisionEngine(d.weights, gates, d.decision_threshold, d.conflict_threshold)
-        self.risk_engine = RiskEngine(risk_cfg, bt_cfg)
+        self.risk_engine = RiskEngine(risk_cfg, bt_cfg, macro_events)
         self.regime_detector = RegimeDetector(regime_cfg)
         self.ml_filter = ml_filter
         self.history: list[DecisionRecord] = []
 
     def describe(self) -> dict[str, Any]:
+        from arven.core.macro_config import macro_events_hash
+
         d = {
             "name": PIPELINE_NAME,
             "strategy_ids": [s.strategy_id for s in self.strategies],
             "regime_config_hash": self.regime_cfg.config_hash(),
             "strategies_config_hash": self.strategies_cfg.config_hash(),
             "risk_config_hash": self.risk_cfg.config_hash(),
+            "macro_events_hash": macro_events_hash(self.risk_engine.macro_events),
+            "macro_events_count": len(self.risk_engine.macro_events),
         }
         if self.ml_filter is not None and hasattr(self.ml_filter, "describe"):
             d["ml_filter"] = self.ml_filter.describe()

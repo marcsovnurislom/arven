@@ -3,8 +3,10 @@
 # reason. Leverage and the maintenance-margin rate are NOT duplicated here: the risk engine is constructed
 # with config/backtest.yaml's values directly (single source of truth for those exchange-level parameters).
 
-# 2. Event blackout (macro calendar) is explicitly deferred in architecture.md ("later stage") — Stage 8. Not
-#    implemented here; no config for it.
+# 2. Event blackout (macro calendar). Implemented in Stage 9a: veto new entries within this many hours of a
+#    scheduled FOMC/CPI/NFP release (config/macro_events.csv — scheduled time only, never the released value,
+#    so there is no look-ahead risk). Symmetric window: a release at T blacks out [T - window, T + window].
+macro_blackout_window_hours: 1.0
 
 # 3. Volatility guard
 high_vol_size_multiplier: 0.5   # HIGH-volatility regime: multiply the sized notional_fraction by this

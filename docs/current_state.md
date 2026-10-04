@@ -1,15 +1,20 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-03 (Stage 8 paper-signal loop implemented, validated, and run on live data)_
+_Last updated: 2026-10-05 (Stage 9a macro calendar + risk-engine event blackout implemented and validated)_
 
 ## Phase
 
-**Stage 8 (the paper-signal loop) is implemented, validated, and has produced the project's first genuinely
-forward, out-of-sample result.** It needed almost no new execution/decision code — a new
-`BacktestPeriod.FORWARD` plus a REST data tail let the real, unmodified Stage 4/5/6 pipeline run itself on
-live data. See "Stage 8" below for the methodology, two real bugs found and fixed before the result was
-trusted, and the live result itself (baseline −14.9% over 94.4 days; the logistic MetaFilter flat at +0.06%
-on 2 trades) — consistent with Stage 7's finding that Stage 6's single-run +8.6% does not generalize.
+**Stage 9a (macro calendar + risk-engine event blackout) is implemented and validated.** The risk engine's
+8th rule (rule 2, deferred since Stage 5) now exists: a real, officially-sourced FOMC/CPI/NFP calendar
+(`config/macro_events.csv`) vetoes new entries within `macro_blackout_window_hours` (default 1.0h) of a
+scheduled release. Only the *scheduled* time is used, never the released value, so there is no look-ahead
+risk. Additive and byte-identical-when-absent, the same pattern Stage 6 used for `ml_filter` — every prior
+stage's committed result is unaffected. See "Stage 9a" below for the design, the real calendar's sourcing,
+and known limitations. Stage 9b (news + LLM) remains unstarted pending source/provider decisions.
+- Stage 8 (the paper-signal loop) is complete: implemented, validated, and produced the project's first
+  genuinely forward, out-of-sample result (baseline −14.9% over 94.4 days; the logistic MetaFilter flat at
+  +0.06% on 2 trades) — consistent with Stage 7's finding that Stage 6's single-run +8.6% does not
+  generalize. See "Stage 8" below.
 - Stage 7 (walk-forward evaluation, WFO) is complete: implemented, validated, approved and committed (see
   below). Headline finding: Stage 6's single-run +8.6% result does not replicate under genuine walk-forward
   evaluation — see "Stage 7" below.
@@ -19,10 +24,18 @@ on 2 trades) — consistent with Stage 7's finding that Stage 6's single-run +8.
   true` decision) and committed (`8009719`, docs correction `a6da56b`).
 - Stage 3 (features) is complete: reviewed, approved and committed (`6ac57d4`).
 - Stage 2 is complete: the full backfill 2020-01-01 → 2026-07-01 is ingested and verified (see below).
-- Split dates, the DuckDB index/storage design and the 300 s OI availability delay are unchanged. Stage 8
-  changes no Stage 0-7 decision/execution logic: `src/arven/paper/` is new and additive, driving the real,
-  unmodified `Backtester`/`Stage5Pipeline` via `runs.execute_run` (the same function `arven backtest run`
-  uses); the only change to existing core code is one new `BacktestPeriod.FORWARD` member in
+- Split dates, the DuckDB index/storage design and the 300 s OI availability delay are unchanged. Stage 9a
+  changes no Stage 0-8 decision/execution logic beyond adding the one new, optional, default-off rule 2:
+  `src/arven/core/macro_config.py` is new and additive (a CSV loader, no I/O beyond that); `RiskEngine` and
+  `Stage5Pipeline` both gained one new `macro_events: tuple[MacroEvent, ...] = ()` constructor parameter
+  (empty by default — byte-identical to every previously-committed result unless a caller opts in);
+  `config/risk.yaml` gained one new required field (`macro_blackout_window_hours`); `cli.py`'s shared
+  `_build_pipeline` helper now loads the real calendar by default for *new* `backtest run`/`paper run`
+  invocations only (`wfo_runs.py` deliberately left untouched, so Stage 7's committed results stay exactly
+  reproducible).
+- Stage 8 changes no Stage 0-7 decision/execution logic: `src/arven/paper/` is new and additive, driving the
+  real, unmodified `Backtester`/`Stage5Pipeline` via `runs.execute_run` (the same function `arven backtest
+  run` uses); the only change to existing core code is one new `BacktestPeriod.FORWARD` member in
   `core/splitguard.py` (implementing a period `docs/architecture.md`'s own "Data periods" table already
   listed from the start, not a new design decision) plus one new config field
   (`download.rest_base_url`, excluded from `config_hash()` like the rest of the `download` section).
@@ -34,8 +47,8 @@ on 2 trades) — consistent with Stage 7's finding that Stage 6's single-run +8.
   subcommands; no config schema, dependency, or existing-file logic changed.
 - Stage 1 + Stage 2 are committed on branch `feat/historical-data` (commit `efb6677`), followed by a docs commit
   (`4be9329`), the Stage 3 commit (`6ac57d4`), the Stage 4 commit (`8009719`), a docs-only correction
-  (`a6da56b`), the Stage 5 commit (`2298e5a`), the Stage 6 commit (`e9b7c72`) and the Stage 7 commit
-  (`aa43c1b`). Stage 8 is included in this commit.
+  (`a6da56b`), the Stage 5 commit (`2298e5a`), the Stage 6 commit (`e9b7c72`), the Stage 7 commit
+  (`aa43c1b`) and the Stage 8 commit (`f4f3787`). Stage 9a is included in this commit.
 
 ## Stage 3 — features (v1)
 
@@ -298,11 +311,12 @@ ML filter, is Stage 6 and was **omitted**, not stubbed):
   vetoing is entirely the risk engine's job.
 
 **Risk engine** (`config/risk.yaml`, `src/arven/risk/engine.py`) — architecture section 14, an ordered
-pipeline of independent rules, each vetoing or reducing, never creating/flipping a direction; rule 2 (macro
-event blackout) is explicitly deferred there ("later stage" = Stage 9, renumbered 2026-10-01 — was Stage 8
-before the Stage 7 WFO insertion) and was not implemented:
+pipeline of independent rules, each vetoing or reducing, never creating/flipping a direction. Rule 2 (macro
+event blackout) was deferred at Stage 5 time ("later stage" = Stage 9) and is now implemented — see "Stage
+9a" below for the full design; all 8 rules now exist:
 1. **Data-quality gate:** `feat_ready != 1` ⇒ veto `stale_or_incomplete_data`.
-2. *(deferred to Stage 9)*
+2. **Macro-event blackout** (Stage 9a): veto `macro_event_blackout` within `macro_blackout_window_hours`
+   (default 1.0h) of any scheduled FOMC/CPI/NFP release in `config/macro_events.csv` — see "Stage 9a" below.
 3. **Volatility guard:** `regime.stress` ⇒ veto `extreme_volatility_stress` (config `veto_on_stress: true`);
    `HIGH` volatility ⇒ size ×0.5.
 4. **Funding guard:** entering the side that *pays* extreme funding (`direction × fund_z`) — ×0.5 at
@@ -903,6 +917,93 @@ it is reported as a first data point for the forward paper-trading record the th
   not add a persistent background daemon (deliberately, per the D7 design discussion: a laptop that sleeps or
   reboots would otherwise silently stop producing signals without the catch-up design being exercised).
 
+**Operational note (2026-10-03):** an hourly Windows Scheduled Task named `ARVEN Paper Run` was registered on
+the development machine (`schtasks`/`Register-ScheduledTask`, not part of this repo or any commit) running
+`scripts/run_paper_tick.bat`, which `cd`s into the repo and runs `arven paper run`, appending output to
+`data/paper/scheduled_run.log` (git-ignored). This is the actual, currently-running source of the forward
+paper-trading record; `scripts/run_paper_tick.bat` itself *is* committed (a thin, reviewable wrapper), but
+registering the task against it is a one-time local machine-setup action, same category as creating the
+`.venv`.
+
+## Stage 9a — macro calendar + risk-engine event blackout
+
+**What was built:** `config/macro_events.csv` (a committed, researched calendar of real FOMC/CPI/NFP
+schedule dates — not synthetic, not scraped, sourced directly from `federalreserve.gov`'s FOMC calendar and
+`bls.gov`'s own release-schedule and news-release archive pages, 228 rows spanning 2020-01 through 2027-12,
+including the real emergency March 2020 FOMC actions and the real 2025 government-shutdown reschedules),
+`src/arven/core/macro_config.py` (the loader), and risk engine rule 2 in `src/arven/risk/engine.py`
+(previously the one explicitly-deferred rule of the 8; all 8 now exist).
+
+**Design**
+- **Only the *scheduled* release time is used, never the eventual released value** (no CPI print, no NFP
+  number, no FOMC decision outcome is stored or read anywhere). A release's scheduled time is public
+  knowledge announced months to a year in advance, so using it at any decision time — including for the
+  sealed test period or any historical backtest — carries no look-ahead risk, unlike a feature that would
+  need the actual number. `MacroEvent` is structurally limited to `(scheduled_at_ms, event_type, note)` — no
+  `actual`/`forecast` field exists to accidentally misuse (enforced by a dedicated test).
+- **ET->UTC conversion is computed directly from the fixed US DST rule** (2nd Sunday of March to 1st Sunday
+  of November, unchanged since 2007) rather than via `zoneinfo`: this machine's Python has no system IANA
+  timezone database (Windows ships none by default), and the `tzdata` PyPI package would be a new dependency
+  for a problem with exactly two, legally fixed rules — cheaper and equally correct to compute directly
+  (verified against hand-picked boundary dates in both directions, `tests/unit/test_macro_config.py`).
+- **Symmetric blackout window**: a release scheduled at `T` vetoes new entries for `t ∈ [T - window, T +
+  window]`; `macro_blackout_window_hours` (`config/risk.yaml`, default **1.0h**) is the only new risk
+  parameter. Veto-only (no "reduce" variant) — a deliberate Stage 9a scope simplification; architecture.md's
+  sketch allows either, Stage 9a implements the simpler one.
+- **Rule 2 sits between rule 1 (data-quality gate) and rule 7's early portfolio-state checks** in the actual
+  execution order inside `RiskEngine.apply()` — both 1 and 2 are "is this decision time even usable at all"
+  gates, checked before the cost-driven rule-7 block, matching the existing (non-numeric) execution order's
+  own logic.
+- **Additive, byte-identical-when-absent** (the same pattern Stage 6 used for `ml_filter`): `RiskEngine` and
+  `Stage5Pipeline` both take `macro_events: tuple[MacroEvent, ...] = ()` as an optional constructor
+  parameter. An empty tuple (the default) means rule 2 never fires — every existing caller, test, and
+  previously-committed result (Stage 5, 6, 7's WFO, Stage 8's already-run paper ticks) is completely
+  unaffected unless it explicitly opts in. `cli.py`'s shared `_build_pipeline` helper (used by both
+  `arven backtest run --provider pipeline` and `arven paper run`) now loads the real calendar by default, so
+  **new** runs of either command get the blackout; `wfo_runs.py` was deliberately left untouched (still
+  passes no `macro_events`), so Stage 7's committed walk-forward results stay exactly reproducible.
+
+**Module separation, enforced mechanically**: `core/macro_config.py` never imports `duckdb`, `arven.data`,
+`arven.backtest`, or `arven.features` (a CSV-reading config loader, same tier as `risk_config.py`); the
+existing Stage 5 import-boundary tests (`tests/pipeline/test_stage5_static_rules.py`) already forbid `risk`
+from importing `arven.data`/`arven.features`/`duckdb`/the execution engine, and continue to pass unchanged
+with the new `arven.core.macro_config` import added (not in that forbidden list — `core` is a shared,
+lower-tier package every stage already depends on).
+
+**Validation**
+- **33 new tests**: `tests/unit/test_macro_config.py` (18: DST offset hand-computed against the fixed rule in
+  both directions, real-calendar sort/dedup/coverage, hash determinism, the no-actual-field structural
+  guarantee, an import-boundary check), `tests/leakage/test_macro_leakage.py` (3: the blackout decision is a
+  pure function of `(t, calendar)` with no data input to leak, the loader takes no market/decision-time
+  parameter at all), and 12 new cases added to `tests/risk/test_risk_engine.py` (exactly-at-the-scheduled-
+  time, the symmetric window's boundary in both directions — both inclusive and just-outside, which event
+  wins when several are nearby, blackout is checked before but does not skip the stateful circuit-breaker
+  bookkeeping, a `NO_TRADE` proposal never reaches rule 2 at all, and the empty-calendar no-op case).
+- **Full suite: 1638 passed, 13 skipped** (same opt-in real-data skips as always; no regressions anywhere in
+  Stages 1-8 — confirmed both before wiring the new parameter through `cli.py`/`Stage5Pipeline`/`RiskEngine`
+  and after, since the default `macro_events=()` keeps every existing test's behaviour byte-identical).
+
+**Known limitations, all deliberate MVP scope (not bugs)**
+- **Veto only, no "reduce"** — architecture.md's sketch allows either; Stage 9a implements the simpler of the
+  two, consistent with "do not optimise/over-build beyond what's asked."
+- **The calendar is a committed, point-in-time snapshot of a real, officially-sourced schedule, not a live
+  feed** — it needs a manual update (appending rows to `config/macro_events.csv`) to extend past 2027-12 or
+  to catch a late reschedule the official sources hadn't published yet when this was compiled (2026-10-05).
+  This mirrors how the rest of the project already treats static, slow-changing reference facts (e.g.
+  `qty_step_btc`/`min_notional_usdt` in `backtest.yaml`, open issue #12) — a known, documented freshness
+  limit, not a silent gap.
+- **One real-world gap found and documented, not hidden**: the 2025 US government shutdown (Oct-Nov 2025)
+  cancelled the October-2025-reference-month CPI and Employment Situation releases entirely (confirmed from
+  BLS's own shutdown-reschedule notice) — there is correctly no calendar row for that cancelled release
+  (nothing to black out), and the surrounding reschedules (CPI delayed to Oct 24 and Dec 18; NFP delayed to
+  Nov 20 and Dec 16) are each recorded at their *actual* (not originally-scheduled) date, since that is what
+  the market actually reacted to in real time.
+- Only FOMC/CPI/NFP are in scope (architecture's own named examples) - a wider macro calendar (GDP, PCE,
+  ISM, etc.) was not requested and is not built.
+- Stage 9b (news ingestion + LLM structuring into a fixed schema) remains unstarted - it needs explicit
+  decisions on a news source (budget/licensing) and an LLM provider before it can even be designed, per
+  `architecture.md`'s own open questions A7/A8.
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -1027,14 +1128,18 @@ config/
   backtest.yaml              # Stage 4: initial equity, leverage, margin/liquidation, lot rules, latency, metric conventions, baseline params (own hash)
   regime.yaml                # Stage 5: trend/vol/stress thresholds, volatility window, dwell bars (own hash)
   strategies.yaml            # Stage 5: decision weights/thresholds + each of the 3 strategies' parameters and regime gates (own hash)
-  risk.yaml                  # Stage 5: the 8 risk rules' thresholds/limits (own hash; leverage/mmr read from backtest.yaml, not duplicated)
+  risk.yaml                  # Stage 5/9a: the 8 risk rules' thresholds/limits incl. macro_blackout_window_hours (own hash; leverage/mmr read from backtest.yaml, not duplicated)
   ml.yaml                    # Stage 6: labels, dataset, walk-forward (D4), hyperparameter grids (D5), calibration (D6), threshold, determinism (own hash)
+  macro_events.csv           # Stage 9a: real FOMC/CPI/NFP schedule 2020-01..2027-12 (228 rows), sourced from
+                              #   federalreserve.gov and bls.gov; scheduled time only, never the released value
 src/arven/
   __main__.py, cli.py       # python -m arven {ingest|resample|crosscheck|quality|export|status|features ...|backtest ...}
   core/                     # time.py, timeframes.py, types.py, config.py (Stage 1); series.py (columnar BarSeries/FundingSeries/OpenInterestSeries/MarketInputs
                             #   with available_until + regularized), features_config.py (Stage 3)
                             # signal.py (Signal: the decision->backtest contract), backtest_config.py, splitguard.py (Stage 4)
                             # regime_config.py, strategies_config.py, risk_config.py (Stage 5); ml_config.py (Stage 6)
+                            # macro_config.py (Stage 9a): MacroEvent, load_macro_events (CSV -> sorted, UTC-ms
+                            #   events; fixed-rule DST conversion, no zoneinfo/tzdata dependency), macro_events_hash
   features/                 # Stage 3, pure numpy (no I/O, no DB, no later-stage imports; enforced by tests)
     indicators.py             # causal primitives: shift, rolling sum/mean/std/max/min, EMA, Wilder RMA, ATR, RSI, ADX, MACD, Bollinger, Donchian, Parkinson
     asof.py                   # backward as-of join on available_at with staleness limit
@@ -1080,8 +1185,10 @@ src/arven/
   decision/
     engine.py                   # DecisionEngine: regime gate -> weighted vote -> conflict/threshold -> ProposedDecision (no portfolio access)
     pipeline.py                  # Stage5Pipeline: implements SignalProvider, wires regime+strategies+decision+risk; DecisionRecord history
-  risk/engine.py               # RiskEngine: the 8 ordered rules, stateful circuit breakers (daily loss/drawdown/cooldown); imports only
-                                #   arven.backtest.provider (types) and arven.backtest.margin (one pure function), never engine/execution/accounting
+  risk/engine.py               # RiskEngine: all 8 rules now implemented (rule 2, macro blackout, added Stage 9a),
+                                #   stateful circuit breakers (daily loss/drawdown/cooldown); imports only
+                                #   arven.backtest.provider (types), arven.backtest.margin (one pure function) and
+                                #   arven.core.macro_config (MacroEvent type), never engine/execution/accounting
   reports.py                   # Stage 5, deliberately outside arven.decision: per_regime_breakdown (post-hoc only, one-directional dependency)
   ml/                          # Stage 6, imports the real regime/strategies/decision/risk (never a copy) + pure Stage 4 cost functions;
                                 #   never the execution/accounting engine or duckdb directly (enforced by tests)
@@ -1107,6 +1214,10 @@ src/arven/
     runs.py                        # Stage 8 composition root: REST tail -> resample -> resolve BacktestPeriod.FORWARD ->
                                     #   build forward-period features in memory -> runs.execute_run (unmodified) -> write
                                     #   data/paper/<run_id>/ + its own runs.jsonl (kept separate from data/backtests/)
+scripts/
+  run_paper_tick.bat              # Stage 8 ops: cd's into the repo, runs `arven paper run`, appends to
+                                   #   data/paper/scheduled_run.log; invoked hourly by a Windows Scheduled Task
+                                   #   ("ARVEN Paper Run", registered on the dev machine, not part of any commit)
 tests/
   conftest.py               # make_config fixture (isolated tmp data_dir)
   synthetic_market.py, leakage_harness.py   # deterministic synthetic bars/funding/OI; generic truncation + perturbation checks
@@ -1114,6 +1225,8 @@ tests/
                                              #   bulk_insert_1m/bulk_insert_funding (COPY-based; see "Operational notes")
   unit/                     # time, timeframes, types, config, binance_bulk, download, resample
                              #   test_binance_rest.py, test_rest_ingestion.py (Stage 8, offline fake REST opener)
+                             #   test_macro_config.py (Stage 9a: DST offset hand-computed both directions, real-
+                             #   calendar sort/dedup/coverage, hash determinism, no-actual-field guarantee)
   rest_helpers.py           # Stage 8: shared offline fake for Binance's public REST API (no sockets)
   integration/test_ingestion_pipeline.py   # local fake-Binance HTTP server: formats, resets, 404, checksum, rollback, idempotency, quality
   features/                 # indicators, series + as-of, bar features (warm-up, alignment, delay, gaps), funding/OI/time, config/registry/builder, cache
@@ -1125,9 +1238,15 @@ tests/
                              #   full-period normalisation, sealed-test contamination)
                              #   test_wfo_leakage.py (Stage 7: static scan for BacktestPeriod.TEST/allow_sealed, fold-inside-test
                              #   returns None, direct TEST resolve still raises SealedAccessError, real schedule stays in dev+val)
+                             #   test_paper_leakage.py (Stage 8: FORWARD never resolves/falls back to TEST, no backward reach)
+                             #   test_macro_leakage.py (Stage 9a: the blackout decision is a pure function of (t, calendar)
+                             #   with no data input to leak; the loader takes no market/decision-time parameter at all)
   stage5_helpers.py, pipeline_helpers.py    # Stage 5: exact-value FeatureView builder (real Stage 3 column names); synthetic-market-driven
                                              #   pipeline runner, truncate/garbage helpers for both the feature and 1m-market sides
   regime/, strategies/, decision/, risk/    # hand-computed unit tests per rule/branch, plus each package's own config-validation tests
+                                             #   (risk/test_risk_engine.py gained 12 Stage 9a cases: the blackout
+                                             #   window's boundary in both directions, which event wins, state still
+                                             #   updates under a veto, NO_TRADE never reaches rule 2, empty-calendar no-op)
   pipeline/                 # test_pipeline_wiring, test_stage5_static_rules, test_leakage, test_determinism,
                              #   test_backtest_integration (accounting invariants via the real engine), test_pipeline_real_data (opt-in)
                              #   test_stage5_no_ml_regression.py (Stage 6: Stage5Pipeline with ml_filter=None is byte-identical)
@@ -1146,8 +1265,12 @@ tests/
                              #   test_paper_static_rules (import boundaries, no reimplementation of Backtester/Simulator)
   test_reports.py           # per-regime breakdown (hand-built fixtures)
 ```
-Full suite: **1605 passed, 13 skipped** (`.venv/Scripts/python.exe -m pytest`, about 7 minutes), all passing.
-Stage 8 adds 39 net new tests (32 in new files across `tests/unit/`, `tests/leakage/`, `tests/paper/`, plus a
+Full suite: **1638 passed, 13 skipped** (`.venv/Scripts/python.exe -m pytest`, about 7 minutes), all passing.
+Stage 9a adds 33 net new tests (21 in two new files — `tests/unit/test_macro_config.py`: 18,
+`tests/leakage/test_macro_leakage.py`: 3 — plus 12 new cases added to the existing
+`tests/risk/test_risk_engine.py`); no opt-in real-data test was added (the mechanism's only "real data" is
+the committed `config/macro_events.csv`, already exercised directly by `test_macro_config.py`).
+Stage 8 added 39 net new tests (32 in new files across `tests/unit/`, `tests/leakage/`, `tests/paper/`, plus a
 net +7 in the existing `tests/backtest/test_splitguard_and_loading.py` for the new FORWARD period); the 13
 skips are unchanged opt-in real-data checks — Stage 8 adds no new opt-in real-data test, since its real-data
 run is exercised directly via `arven paper run` (documented in the "Stage 8" section above) rather than as a
@@ -1301,10 +1424,11 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
    ~~Stage 7 walk-forward evaluation (WFO)~~: done, approved and committed `aa43c1b`. Headline finding:
    **Stage 6's single-run +8.6% result does not replicate**; the baseline loses money in all 16 backtestable
    windows, and neither the logistic nor the LightGBM MetaFilter shows a replicated predictive edge (raw
-   ROC-AUC 0.42–0.60 throughout). **Stage 8 paper-signal loop**: implemented, validated (39 net new tests,
-   full suite 1605 passed/13 skipped) and run on live Binance data — see "Stage 8" above. First forward
-   result: baseline −14.9% over 94.4 days (consistent with every Stage 7 window), logistic MetaFilter flat at
-   +0.06% on 2 trades (consistent with Stage 7's non-replication finding, not a new positive result).
+   ROC-AUC 0.42–0.60 throughout). ~~Stage 8 paper-signal loop~~: done, approved and committed `f4f3787`. First
+   forward result: baseline −14.9% over 94.4 days (consistent with every Stage 7 window), logistic MetaFilter
+   flat at +0.06% on 2 trades (consistent with Stage 7's non-replication finding, not a new positive result).
+   **Stage 9a macro calendar + risk blackout**: implemented, validated (33 net new tests, full suite 1638
+   passed/13 skipped) — see "Stage 9a" above. All 8 risk engine rules now exist.
 2. ~~`forward_start = 2026-07-01` is already in the past~~: **resolved by Stage 8** — it needed no relabelling.
    The gap between `history_end`/`forward_start` (2026-07-01) and the day Stage 8 actually ran (2026-10-03,
    ~94 days) was simply backfilled via the new REST-tail path (the same public endpoints, just incremental)
@@ -1377,13 +1501,15 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 
 ## What does NOT exist yet
 
-- Macro/news ingestion, LLM, dashboard. (The paper-signal loop now exists — Stage 8.)
+- News ingestion + LLM structuring (Stage 9b), dashboard. (The paper-signal loop now exists — Stage 8; the
+  macro calendar + risk blackout, Stage 9a, now exists too — see below.)
 - `MarketSnapshot` as a separate class (its job is done by `core.series.MarketInputs.available_until` and
   `data.reader`), and the `feature_sets` DuckDB table (replaced by `manifest.json`).
 - ~~REST incremental updates (only bulk files are supported so far)~~: implemented in Stage 8
   (`data/adapters/binance_rest.py`, `data/rest_ingestion.py` — klines and funding only, see "Stage 8" above).
-- The macro-event blackout (risk rule 2) — explicitly Stage 9 (renumbered 2026-10-01), not implemented, not
-  stubbed. (The ML probability gate, decision step 4, now exists — Stage 6.)
+- ~~The macro-event blackout (risk rule 2)~~: implemented in Stage 9a (`config/macro_events.csv`,
+  `core/macro_config.py`, `risk/engine.py` rule 2) — see "Stage 9a" below. (The ML probability gate, decision
+  step 4, exists since Stage 6.)
 - A saved, dedicated Stage 7 WFO report format beyond the one `report.json` per run, and any dashboard/plot of
   per-window results over time — left for a follow-up (see "Stage 7" above).
 - A 4th strategy (funding/positioning contrarian, architecture §13 item 4) — out of the explicit Stage 5 scope.
@@ -1394,8 +1520,8 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 - A Stage-6-specific sealed-test evaluation log (`arven.ml_runs` never reaches the test period at all yet, so
   there is nothing to log — see open issue #8).
 - Git: branch `feat/historical-data`; commits `efb6677` (Stage 1+2), `4be9329` (docs), `6ac57d4` (Stage 3),
-  `8009719` (Stage 4), `a6da56b` (docs), `2298e5a` (Stage 5), `e9b7c72` (Stage 6), `aa43c1b` (Stage 7). Stage 8
-  (paper-signal loop) is included in this commit.
+  `8009719` (Stage 4), `a6da56b` (docs), `2298e5a` (Stage 5), `e9b7c72` (Stage 6), `aa43c1b` (Stage 7),
+  `f4f3787` (Stage 8). Stage 9a (macro calendar + risk blackout) is included in this commit.
 
 ## Environment
 
@@ -1409,6 +1535,9 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
   - Stage 7 added no new dependencies.
   - Stage 8 added no new dependencies: REST calls reuse `Downloader.fetch_bytes` (stdlib `urllib.request`),
     exactly as the bulk downloader already does.
+  - Stage 9a added no new dependencies: considered `tzdata` (for `zoneinfo`) and deliberately did not add it —
+    this machine's Python has no system IANA timezone database, and a fixed two-rule legal calendar (US DST)
+    is cheap and correct to compute directly in stdlib instead (`core/macro_config.py`).
   - Not installed: pandas, pyarrow.
 - Pre-existing packages from the user: `openai`, `pydantic`, `httpx2`, `python-dotenv`.
 
@@ -1460,3 +1589,9 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-03 | Stage 8 D2: REST-tail scope is klines + funding only; open interest and the top-trader/taker long-short ratios are not live-updated (optional, NaN-tolerant feature group already) | approved |
 | 2026-10-03 | Stage 8 found and fixed two real bugs before trusting its first real run: (1) `con.executemany` into the PK-indexed `ohlcv_1m`/`funding_rates` tables measured ~33s per 1000-row REST page (fixed with the same staged-bulk-load idiom `ingestion.py` already uses, ~740x speedup); (2) a fixed 2-day resample lookback silently left most of a large REST catch-up's derived bars unbuilt, producing a false "0 trades over 94 days" result that was investigated rather than accepted, and fixed with a regression test | implemented (Stage 8) |
 | 2026-10-03 | Stage 8 real forward run (live Binance data, forward_start=2026-07-01, 94.4 days): Stage-5-only baseline −14.9% (consistent with every Stage 7 historical window); logistic MetaFilter flat at +0.06% on 2 trades (consistent with Stage 7's non-replication finding) — the project's first genuinely forward, out-of-sample data point | implemented (Stage 8), approved (final) |
+| 2026-10-05 | Stage 8 review approved, committed `f4f3787` | approved (final) |
+| 2026-10-05 | Stage 9a scope (D1-D4): macro calendar covers FOMC/CPI/NFP only, sourced from official federalreserve.gov/bls.gov calendars (no scraping, no paid API); blackout window is symmetric and configurable (`macro_blackout_window_hours`, default 1.0h); rule 2 sits right after rule 1 (data-quality gate), before rule 7's portfolio-state checks; veto-only (no "reduce" variant) | approved |
+| 2026-10-05 | `RiskEngine`/`Stage5Pipeline` gain one new `macro_events: tuple[MacroEvent, ...] = ()` constructor parameter, additive and byte-identical-when-absent (the same pattern Stage 6 used for `ml_filter`) - every previously-committed result (Stages 5-7, Stage 8's already-run paper ticks) stays exactly reproducible; `wfo_runs.py` deliberately left unchanged (still passes no macro_events) | approved (implemented) |
+| 2026-10-05 | ET->UTC conversion for the calendar is computed from the fixed US DST rule directly (2nd Sunday of March .. 1st Sunday of November) rather than via `zoneinfo`, after discovering this Windows machine has no system IANA timezone database and the `tzdata` PyPI package would be a new dependency for a problem with exactly two fixed legal rules | implemented (Stage 9a) |
+| 2026-10-05 | `config/macro_events.csv` compiled from real sources (228 rows, 2020-01..2027-12): FOMC dates from federalreserve.gov's own calendar page (incl. the real March 2020 emergency actions); CPI/NFP dates from bls.gov's archived news-release pages and schedule-of-releases pages (incl. the real 2025 government-shutdown reschedules and the one genuinely cancelled October-2025-reference-month release) | implemented (Stage 9a) |
+| 2026-10-05 | Stage 9a review approved; full suite 1638 passed/13 skipped, no regressions in Stages 1-8 | approved (final) |
