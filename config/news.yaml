@@ -1,0 +1,11 @@
+# ARVEN Stage 9b news/LLM configuration. architecture.md section 15 / CLAUDE.md rule 9: the LLM only ever
+# structures a headline into the fixed schema in src/arven/news/schema.py - it never computes a trading
+# decision, indicator, price, size or PnL.
+
+feeds:
+  coindesk: https://www.coindesk.com/arc/outboundfeeds/rss/
+  cointelegraph: https://cointelegraph.com/rss
+
+llm_model: claude-haiku-4-5-20251001   # cheap/fast model, appropriate for a short classification task
+max_items_per_tick: 10                 # hard cap on LLM calls per `arven news run` - cost control
+max_tokens: 512

@@ -168,13 +168,14 @@ arven/
 │   ├── regime/                   # regime classifier(s)
 │   ├── strategies/               # base interface + independent strategies
 │   ├── ml/                       # labels, datasets, splits (purged WF), models, calibration, eval
-│   ├── news/                     # (later) news/macro ingestion, LLM structuring, event features
+│   ├── news/                     # RSS ingestion + LLM structuring (Stage 9b); macro calendar lives in
+│   │                              #   core/macro_config.py + config/macro_events.csv instead (Stage 9a)
 │   ├── decision/                 # aggregation of strategies + ML + regime → proposed action
 │   ├── risk/                     # sizing, stops, limits, veto rules
 │   ├── backtest/                 # event loop, execution & cost model, portfolio, metrics, reports
 │   ├── signals/                  # Signal model, persistence, explanation payload
-│   ├── live/                     # (later) paper-signal scheduler
-│   ├── llm/                      # (later) provider interface, prompts, explanation/chat
+│   ├── paper/                    # the paper-signal loop (Stage 8) - named `paper/`, not `live/`
+│   ├── llm/                      # Anthropic client (Stage 9b); provider-agnostic interface, explanation/chat not yet built
 │   └── cli.py                    # entry points: ingest, backtest, train, signal
 ├── tests/
 │   ├── unit/                     # per-module tests
@@ -279,13 +280,20 @@ ingestion_runs(run_id PK, source, dataset, start, end, rows, status, started_at,
 data_gaps(symbol, dataset, gap_start, gap_end, detected_at, resolution)
 ```
 
-### News & macro (later stages)
+### News & macro
+> **As implemented** (Stage 9a for `macro_events`, Stage 9b for `news_items`/`news_events`;
+> `src/arven/data/storage/schema.py`, `schema_version` 2): `news_items` has no `body_hash` (title + url is
+> enough to deduplicate - `news_id = sha256(source, url)`) and `news_events`'s `relevance` field is named
+> `asset_relevance` (matching `news/schema.py`'s `NewsEvent`); both match the sketch otherwise, including
+> the primary key. **`macro_events` as a DuckDB table does not exist** - Stage 9a's calendar turned out not
+> to need one: a scheduled release date is a fixed historical fact with no point-in-time subtlety (public
+> knowledge announced months in advance), so it lives in a plain committed `config/macro_events.csv`
+> instead, with no `actual`/`forecast`/`actual_available_at` columns at all (Stage 9a never uses the
+> released value, only the schedule - see section 14's rule 2 note).
 ```
-news_items(news_id PK, source, url, title, body_hash, published_at, ingested_at, available_at)
-news_events(news_id, llm_model, prompt_version, event_type, direction_bias, relevance, severity,
+news_items(news_id PK, source, url, title, published_at, ingested_at, available_at)
+news_events(news_id, llm_model, prompt_version, event_type, asset_relevance, direction_bias, severity,
             confidence, processed_at, PRIMARY KEY(news_id, llm_model, prompt_version))
-macro_events(event_id PK, name, country, scheduled_time, importance, forecast, previous,
-             actual, actual_available_at)
 ```
 
 ### Research & outputs
@@ -422,6 +430,12 @@ paper_trades(signal_id, entry_time, entry_price, exit_time, exit_price, pnl, exi
 10. **Execution realism:** fill at the next bar, never at the signal bar's close.
 11. **LLM contamination rule:** LLM-derived news features are only evaluated historically on periods after the
     LLM's training cutoff, otherwise only in forward paper trading.
+    > **As implemented in Stage 9b** (`src/arven/news/`, `src/arven/llm/`; details in `current_state.md`):
+    > satisfied by construction rather than by a date check - the package never resolves a
+    > `BacktestPeriod` at all (no development/validation/test/forward concept exists in it), and only ever
+    > processes RSS items fetched at or after the moment it runs, so every item it structures is, by
+    > definition, published after "now" at ingestion time - there is no historical window it could even be
+    > pointed at.
 12. **Data revisions:** raw downloads are immutable; re-ingestion never overwrites without a logged run.
 
 ---
@@ -603,6 +617,18 @@ All limits in `config/risk.yaml`; every veto is recorded with its reason (valuab
 
 Rule: LLM outputs are **data**, stored and versioned; they pass through the same point-in-time layer and can only
 influence decisions through features or risk blackout flags that are separately validated.
+
+> **As implemented in Stage 9b** (`src/arven/news/`, `src/arven/llm/anthropic_client.py`; the news source
+> is RSS, not a paid aggregator - CryptoPanic's free API tier was discontinued in early 2026, discovered
+> during this stage's own design; details in `current_state.md`): news ingestion (CoinDesk, CoinTelegraph
+> RSS feeds, stdlib XML parsing, no new dependency for that part) and LLM structuring into the fixed schema
+> above are both implemented and unit-tested against fakes; **not yet exercised against the real Anthropic
+> API** (no API key was available in this session) and **not yet wired into any feature, risk flag, or
+> decision** - that integration is a deliberately separate, later decision. The LLM provider is Anthropic
+> (`claude-haiku-4-5-20251001` for this classification-sized task), called via a thin stdlib-HTTP client
+> rather than the official SDK (no new dependency), matching the same choice already made for Binance REST
+> in Stage 8. Deduplication/clustering and explanations/chat (the other two "useful" bullets above) are not
+> built - this stage covers news structuring only.
 
 ---
 

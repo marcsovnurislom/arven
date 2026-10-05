@@ -6,7 +6,7 @@ bar availability delay (applied when reading, so it is not stored). Funding and 
 explicit ``available_at_ms`` because their availability differs from their event time.
 """
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # 2 (Stage 9b): added news_items / news_events (informational only - nothing compares against it)
 
 DDL: tuple[str, ...] = (
     """
@@ -165,6 +165,35 @@ DDL: tuple[str, ...] = (
         gap_end_ms      BIGINT NOT NULL,      -- first present timestamp after the gap
         missing_count   BIGINT NOT NULL,
         detected_run_id VARCHAR NOT NULL
+    )
+    """,
+    # --- news (Stage 9b) -----------------------------------------------------------------------
+    """
+    CREATE TABLE IF NOT EXISTS news_items (
+        news_id          VARCHAR PRIMARY KEY,  -- sha256 of (source, url) - stable, content-independent
+        source            VARCHAR NOT NULL,     -- feed name, e.g. "coindesk", "cointelegraph"
+        url               VARCHAR NOT NULL,
+        title             VARCHAR NOT NULL,
+        published_at_ms   BIGINT NOT NULL,      -- the feed's own pubDate
+        ingested_at_ms    BIGINT NOT NULL,      -- when this process first fetched it
+        available_at_ms   BIGINT NOT NULL       -- max(published_at_ms, ingested_at_ms) - never earlier than ingestion
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS news_events (
+        news_id           VARCHAR NOT NULL,
+        llm_model         VARCHAR NOT NULL,
+        prompt_version    VARCHAR NOT NULL,
+        event_type        VARCHAR,              -- NULL if the LLM output failed schema validation
+        asset_relevance   VARCHAR,
+        direction_bias    VARCHAR,
+        severity          DOUBLE,
+        confidence        DOUBLE,
+        summary           VARCHAR,
+        raw_response      VARCHAR NOT NULL,     -- the LLM's raw text, kept even on validation failure
+        parse_error       VARCHAR,              -- NULL on success
+        processed_at_ms   BIGINT NOT NULL,
+        PRIMARY KEY (news_id, llm_model, prompt_version)
     )
     """,
 )

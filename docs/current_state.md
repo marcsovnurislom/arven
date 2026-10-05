@@ -1,16 +1,22 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-05 (Stage 9a macro calendar + risk-engine event blackout implemented and validated)_
+_Last updated: 2026-10-05 (Stage 9b news ingestion + LLM structuring implemented, not yet real-API-tested)_
 
 ## Phase
 
-**Stage 9a (macro calendar + risk-engine event blackout) is implemented and validated.** The risk engine's
-8th rule (rule 2, deferred since Stage 5) now exists: a real, officially-sourced FOMC/CPI/NFP calendar
-(`config/macro_events.csv`) vetoes new entries within `macro_blackout_window_hours` (default 1.0h) of a
-scheduled release. Only the *scheduled* time is used, never the released value, so there is no look-ahead
-risk. Additive and byte-identical-when-absent, the same pattern Stage 6 used for `ml_filter` — every prior
-stage's committed result is unaffected. See "Stage 9a" below for the design, the real calendar's sourcing,
-and known limitations. Stage 9b (news + LLM) remains unstarted pending source/provider decisions.
+**Stage 9b (news ingestion + LLM structuring) is implemented and unit-tested against fakes, but has not
+yet made a real call to the Anthropic API** (no API key was available in this session) **and is not wired
+into any feature, risk rule, or decision** (deliberately out of scope - a separate, later integration
+decision). The news source is RSS (CoinDesk, CoinTelegraph), not CryptoPanic's API as first discussed —
+its free tier was discontinued in early 2026, discovered while designing this stage. Forward-only by
+construction: the package has no `BacktestPeriod` concept at all, so there is no historical window an LLM's
+training-knowledge cutoff could contaminate. See "Stage 9b" below for the design, the CryptoPanic finding,
+and what real validation still needs to happen.
+- Stage 9a (macro calendar + risk-engine event blackout) is complete: implemented, validated, approved and
+  committed (`b67afd0`). The risk engine's 8th rule (rule 2, deferred since Stage 5) now exists: a real,
+  officially-sourced FOMC/CPI/NFP calendar vetoes new entries within `macro_blackout_window_hours` (default
+  1.0h) of a scheduled release, using only the *scheduled* time, never the released value. See "Stage 9a"
+  below.
 - Stage 8 (the paper-signal loop) is complete: implemented, validated, and produced the project's first
   genuinely forward, out-of-sample result (baseline −14.9% over 94.4 days; the logistic MetaFilter flat at
   +0.06% on 2 trades) — consistent with Stage 7's finding that Stage 6's single-run +8.6% does not
@@ -24,8 +30,15 @@ and known limitations. Stage 9b (news + LLM) remains unstarted pending source/pr
   true` decision) and committed (`8009719`, docs correction `a6da56b`).
 - Stage 3 (features) is complete: reviewed, approved and committed (`6ac57d4`).
 - Stage 2 is complete: the full backfill 2020-01-01 → 2026-07-01 is ingested and verified (see below).
-- Split dates, the DuckDB index/storage design and the 300 s OI availability delay are unchanged. Stage 9a
-  changes no Stage 0-8 decision/execution logic beyond adding the one new, optional, default-off rule 2:
+- Split dates, the DuckDB index/storage design and the 300 s OI availability delay are unchanged. Stage 9b
+  adds two new, self-contained packages (`src/arven/news/`, `src/arven/llm/`) and two new DB tables
+  (`news_items`, `news_events`, `schema_version` bumped to 2, purely additive DDL) - it changes no existing
+  file's logic at all and is not called from anywhere else in the codebase yet (enforced by a static test);
+  one new declared dependency, `python-dotenv` (already present in this venv, now explicit in
+  `pyproject.toml`), for reading `ANTHROPIC_API_KEY` from a local `.env`. `cli.py` gained additive `news
+  run`/`show` subcommands only - deliberately **not** added to the existing hourly Windows Scheduled Task,
+  so no LLM API cost is incurred without an explicit, separate invocation.
+- Stage 9a changes no Stage 0-8 decision/execution logic beyond adding the one new, optional, default-off rule 2:
   `src/arven/core/macro_config.py` is new and additive (a CSV loader, no I/O beyond that); `RiskEngine` and
   `Stage5Pipeline` both gained one new `macro_events: tuple[MacroEvent, ...] = ()` constructor parameter
   (empty by default — byte-identical to every previously-committed result unless a caller opts in);
@@ -48,7 +61,8 @@ and known limitations. Stage 9b (news + LLM) remains unstarted pending source/pr
 - Stage 1 + Stage 2 are committed on branch `feat/historical-data` (commit `efb6677`), followed by a docs commit
   (`4be9329`), the Stage 3 commit (`6ac57d4`), the Stage 4 commit (`8009719`), a docs-only correction
   (`a6da56b`), the Stage 5 commit (`2298e5a`), the Stage 6 commit (`e9b7c72`), the Stage 7 commit
-  (`aa43c1b`) and the Stage 8 commit (`f4f3787`). Stage 9a is included in this commit.
+  (`aa43c1b`), the Stage 8 commit (`f4f3787`) and the Stage 9a commit (`b67afd0`). Stage 9b is included in
+  this commit.
 
 ## Stage 3 — features (v1)
 
@@ -1000,9 +1014,98 @@ lower-tier package every stage already depends on).
   the market actually reacted to in real time.
 - Only FOMC/CPI/NFP are in scope (architecture's own named examples) - a wider macro calendar (GDP, PCE,
   ISM, etc.) was not requested and is not built.
-- Stage 9b (news ingestion + LLM structuring into a fixed schema) remains unstarted - it needs explicit
-  decisions on a news source (budget/licensing) and an LLM provider before it can even be designed, per
-  `architecture.md`'s own open questions A7/A8.
+
+## Stage 9b — news ingestion + LLM structuring
+
+**What was built:** `src/arven/news/` (RSS fetch/parse, the fixed structured-output schema, the
+fetch→store→structure composition root) and `src/arven/llm/anthropic_client.py` (a thin, dependency-free
+Anthropic Messages API client). Two new DuckDB tables, `news_items` and `news_events`
+(`data/storage/schema.py`, `schema_version` bumped to 2 — purely additive DDL, no existing table touched).
+CLI: `arven news run`, `arven news show`.
+
+**A real-world correction found while designing this stage:** the original plan (per the D-decisions
+discussion) was CryptoPanic's API for news. Researching its actual current terms found that CryptoPanic
+discontinued its free API tier in early 2026 — the cheapest plan is now $50/week. Reported back before
+building anything against it; the news source was switched to free RSS feeds (CoinDesk, CoinTelegraph —
+both verified live and fetchable during this stage's own development) instead, at the cost of noisier,
+less structured input than CryptoPanic's purpose-built JSON API would have given.
+
+**Design**
+- **Forward-only by construction, not by a date check.** `src/arven/news/__init__.py`'s own module
+  docstring states the rule; mechanically, the entire `news` package never imports `BacktestPeriod` or
+  `SplitGuard` (enforced by a static test) and has no period/window parameter anywhere in its functions. It
+  only ever processes RSS items that exist in the feed *at the moment it is run* — there is no code path
+  that could point it at a historical date range, so the architecture's rule 11 (LLM training-cutoff
+  contamination) is satisfied structurally rather than needing an explicit guard to get right every time.
+- **The LLM only ever structures text into the fixed schema** (`news/schema.py`'s `NewsEvent`: `event_type`,
+  `asset_relevance`, `direction_bias`, `severity` [0,1], `confidence` [0,1], `summary` [≤280 chars]) — never
+  a trading decision, indicator, price, size, or PnL (CLAUDE.md rule 9). `extra="forbid"` on the pydantic
+  model means an LLM response with any extra field is rejected, not silently accepted with unused data.
+- **A malformed or non-JSON LLM response is recorded, not discarded or retried indefinitely**:
+  `news.schema.parse_llm_response` raises a typed `NewsEventParseError` (tolerating markdown code fences,
+  since models sometimes add them despite being told not to), and the composition root stores the raw
+  response text plus the parse error in `news_events` with `event_type IS NULL` — an honest, inspectable
+  failure record, matching the project's "report don't hide" culture elsewhere (e.g. Stage 6's LightGBM
+  calibration finding).
+- **Cost control is a config value, not a runtime guess**: `max_items_per_tick` (`config/news.yaml`,
+  default 10) hard-caps how many LLM calls one `arven news run` invocation makes, regardless of how many
+  new RSS items arrived; the remainder simply wait for the next invocation (oldest-first, by `published_at`).
+- **Idempotent, like every other tick-based command in this project**: items are deduplicated by
+  `news_id = sha256(source, url)`; a `(news_id, llm_model, prompt_version)` row is never re-created once it
+  exists, so changing the model or the prompt naturally produces new, comparable rows alongside the old
+  ones rather than overwriting history.
+- **No new HTTP-client dependency**: the Anthropic Messages API is a single JSON POST with two headers
+  (`x-api-key`, `anthropic-version`) — called via stdlib `urllib.request` directly, the same choice already
+  made for Binance REST in Stage 8, rather than adding the official `anthropic` SDK. The only genuinely new
+  dependency is `python-dotenv` (for reading `ANTHROPIC_API_KEY` from a local `.env`) — already present in
+  this project's `.venv` as a "pre-existing package," now made an explicit, declared dependency in
+  `pyproject.toml` rather than an undeclared accident.
+- **RSS, not a feed-parsing library**: stdlib `xml.etree.ElementTree` plus `email.utils.parsedate_to_datetime`
+  (RFC-822 `pubDate` parsing) are sufficient for RSS 2.0's `<item><title>/<link>/<pubDate>` shape; an item
+  missing any of the three required fields, or with an unparseable `pubDate`, is skipped, never guessed.
+
+**Module separation, enforced mechanically** (`tests/news/test_news_static_rules.py`): `news`/`llm` never
+import `decision`/`risk`/`strategies`/`regime`/`backtest`; no package in `regime`/`strategies`/`risk`/
+`decision`/`features`/`ml`/`backtest`/`paper` imports `news`/`llm` (one-directional — nothing reads
+structured news output yet, by design); `news` never imports `SplitGuard` or references `BacktestPeriod`;
+`llm/anthropic_client.py` never references an order/account endpoint.
+
+**Validation**
+- **40 new tests**: `tests/llm/test_anthropic_client.py` (6: response parsing, retry on 5xx, no retry on
+  401/403, the no-silent-default missing-API-key guarantee, multi-block text concatenation),
+  `tests/news/test_rss.py` (6: real-shaped RSS fixtures, stable content-independent `news_id`, missing-field
+  and unparseable-date skipping, timezone-offset conversion), `tests/news/test_schema.py` (12: valid/invalid
+  LLM output, markdown-fence tolerance, every schema-violation case raising rather than coercing),
+  `tests/news/test_runs.py` (5: fetch→store→structure end to end against fakes, idempotent re-run, the
+  cost-control cap, malformed-response recording, `available_at` never earlier than ingestion),
+  `tests/news/test_news_static_rules.py` (4, listed above), `tests/news/test_news_config.py` (7:
+  hash stability/sensitivity, invalid-config rejection - same pattern as `test_risk_config.py`).
+- **Full suite: 1678 passed, 13 skipped** (same opt-in real-data skips as always; no regressions anywhere
+  in Stages 1-9a).
+- **Not yet validated against the real Anthropic API** — no `ANTHROPIC_API_KEY` was available in this
+  session. Everything above is tested against scripted fake HTTP responses only (mirroring exactly how
+  Stage 8's REST adapter was tested before its own first real run). This is an explicit, acknowledged gap,
+  not an oversight: the user chose to proceed without a real smoke test for now.
+
+**Known limitations, all deliberate MVP scope or honestly-reported findings (not bugs)**
+- **No real LLM call has been made.** The structured-output schema, the retry logic, and the cost cap are
+  all exercised only against scripted responses. A real call could behave differently in ways fakes cannot
+  catch (e.g. the model's actual tendency to follow the JSON-only instruction) — `parse_llm_response`'s
+  honest-failure-recording design exists specifically because this was anticipated, but it has not been
+  observed on a real response yet.
+- **RSS instead of CryptoPanic**: noisier and less structured than a purpose-built news API would have been
+  (no built-in sentiment/importance tagging, no currency filter) — the LLM structuring step exists
+  precisely to compensate for this, but was itself not validated against real output (see above).
+- **Not wired into any feature, risk rule, or decision** — structuring is the entire scope of this stage;
+  deciding how (or whether) a `NewsEvent` should influence anything downstream is a separate, later
+  integration decision, deliberately not made here.
+- **Not added to the hourly Windows Scheduled Task** — `arven news run` must be invoked manually (or
+  scheduled separately by the user) so that LLM API costs are never incurred without an explicit decision
+  to do so.
+- Only two RSS sources (CoinDesk, CoinTelegraph) — both confirmed live during development; more could be
+  added to `config/news.yaml`'s `feeds` map with no code change.
+- `news_events`'s `summary` field is capped at 280 characters (a deliberate bound, not a found limitation)
+  to keep stored rows small and because this stage has no downstream consumer that would need more.
 
 ## Full backfill results (per yearly chunk)
 
@@ -1132,6 +1235,8 @@ config/
   ml.yaml                    # Stage 6: labels, dataset, walk-forward (D4), hyperparameter grids (D5), calibration (D6), threshold, determinism (own hash)
   macro_events.csv           # Stage 9a: real FOMC/CPI/NFP schedule 2020-01..2027-12 (228 rows), sourced from
                               #   federalreserve.gov and bls.gov; scheduled time only, never the released value
+  news.yaml                  # Stage 9b: RSS feed URLs, LLM model (claude-haiku-4-5-20251001), max_items_per_tick
+                              #   (cost control), max_tokens (own hash)
 src/arven/
   __main__.py, cli.py       # python -m arven {ingest|resample|crosscheck|quality|export|status|features ...|backtest ...}
   core/                     # time.py, timeframes.py, types.py, config.py (Stage 1); series.py (columnar BarSeries/FundingSeries/OpenInterestSeries/MarketInputs
@@ -1140,6 +1245,7 @@ src/arven/
                             # regime_config.py, strategies_config.py, risk_config.py (Stage 5); ml_config.py (Stage 6)
                             # macro_config.py (Stage 9a): MacroEvent, load_macro_events (CSV -> sorted, UTC-ms
                             #   events; fixed-rule DST conversion, no zoneinfo/tzdata dependency), macro_events_hash
+                            # news_config.py (Stage 9b): NewsConfig (feeds, llm_model, max_items_per_tick, own hash)
   features/                 # Stage 3, pure numpy (no I/O, no DB, no later-stage imports; enforced by tests)
     indicators.py             # causal primitives: shift, rolling sum/mean/std/max/min, EMA, Wilder RMA, ATR, RSI, ADX, MACD, Bollinger, Donchian, Parkinson
     asof.py                   # backward as-of join on available_at with staleness limit
@@ -1152,7 +1258,8 @@ src/arven/
     adapters/binance_bulk.py  # Binance bulk layout, SourceFile, plan_files, parse_checksum, has_header
     adapters/binance_rest.py  # Stage 8: public REST klines/fundingRate fetch (no API key, no order endpoints)
     download.py               # Downloader: retries + exponential backoff with jitter, SHA-256 verify, .part + atomic rename
-    storage/schema.py         # DuckDB DDL (authoritative schema)
+    storage/schema.py         # DuckDB DDL (authoritative schema); schema_version 2 (Stage 9b: + news_items/news_events,
+                              #   purely additive, no existing table changed)
     storage/db.py             # connect(), provenance record helpers, run ids, git commit lookup
     ingestion.py              # Ingestor: plan → download → normalise → upsert; one transaction per file; run log
     rest_ingestion.py         # Stage 8: RestIngestor.tail() - REST-tail klines/funding into the same tables,
@@ -1214,6 +1321,16 @@ src/arven/
     runs.py                        # Stage 8 composition root: REST tail -> resample -> resolve BacktestPeriod.FORWARD ->
                                     #   build forward-period features in memory -> runs.execute_run (unmodified) -> write
                                     #   data/paper/<run_id>/ + its own runs.jsonl (kept separate from data/backtests/)
+  news/                           # Stage 9b, forward-only by construction (no BacktestPeriod concept at all)
+    rss.py                          # fetch (via data.download.Downloader) + parse RSS 2.0 (stdlib xml.etree)
+    schema.py                       # NewsEvent (the fixed structured-output schema, extra="forbid"), the
+                                     #   system prompt, parse_llm_response (tolerates markdown fences, never coerces)
+    structure.py                    # structure_item: one LLM call + schema validation -> StructuredResult
+    runs.py                         # composition root: fetch -> dedup-store (news_items) -> structure up to
+                                     #   max_items_per_tick unstructured items (news_events); all DB I/O
+  llm/
+    anthropic_client.py             # thin stdlib-HTTP Messages API client (no SDK dependency); ANTHROPIC_API_KEY
+                                     #   from env/.env via python-dotenv; never imports decision/risk/strategies/backtest
 scripts/
   run_paper_tick.bat              # Stage 8 ops: cd's into the repo, runs `arven paper run`, appends to
                                    #   data/paper/scheduled_run.log; invoked hourly by a Windows Scheduled Task
@@ -1263,9 +1380,19 @@ tests/
   paper/                    # Stage 8: test_paper_runs (synthetic DB -> REST tail -> resample -> forward window ->
                              #   real Stage5Pipeline -> written artifact; the resample-range regression test),
                              #   test_paper_static_rules (import boundaries, no reimplementation of Backtester/Simulator)
+  llm/test_anthropic_client.py    # Stage 9b: response parsing, retry on 5xx, no retry on 401/403, the
+                                   #   no-silent-default missing-API-key guarantee - offline (scripted opener)
+  news/                      # Stage 9b: test_rss (real-shaped RSS fixtures, missing-field/unparseable-date
+                             #   skipping, timezone conversion), test_schema (valid/invalid LLM output,
+                             #   markdown-fence tolerance), test_runs (fetch->store->structure end to end
+                             #   against fakes, idempotency, cost-control cap, malformed-response recording),
+                             #   test_news_config, test_news_static_rules (import boundaries, forward-only
+                             #   by construction - never imports SplitGuard/BacktestPeriod)
   test_reports.py           # per-regime breakdown (hand-built fixtures)
 ```
-Full suite: **1638 passed, 13 skipped** (`.venv/Scripts/python.exe -m pytest`, about 7 minutes), all passing.
+Full suite: **1678 passed, 13 skipped** (`.venv/Scripts/python.exe -m pytest`, about 8 minutes), all passing.
+Stage 9b adds 40 new tests (`tests/llm/`: 6, `tests/news/`: 34 across 5 files); no opt-in real-data test was
+added since there has been no real Anthropic API call yet (see "Stage 9b" above for why).
 Stage 9a adds 33 net new tests (21 in two new files — `tests/unit/test_macro_config.py`: 18,
 `tests/leakage/test_macro_leakage.py`: 3 — plus 12 new cases added to the existing
 `tests/risk/test_risk_engine.py`); no opt-in real-data test was added (the mechanism's only "real data" is
@@ -1427,8 +1554,12 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
    ROC-AUC 0.42–0.60 throughout). ~~Stage 8 paper-signal loop~~: done, approved and committed `f4f3787`. First
    forward result: baseline −14.9% over 94.4 days (consistent with every Stage 7 window), logistic MetaFilter
    flat at +0.06% on 2 trades (consistent with Stage 7's non-replication finding, not a new positive result).
-   **Stage 9a macro calendar + risk blackout**: implemented, validated (33 net new tests, full suite 1638
-   passed/13 skipped) — see "Stage 9a" above. All 8 risk engine rules now exist.
+   ~~Stage 9a macro calendar + risk blackout~~: done, approved and committed `b67afd0`. All 8 risk engine
+   rules now exist. **Stage 9b news ingestion + LLM structuring**: implemented and unit-tested against
+   fakes (40 new tests, full suite 1678 passed/13 skipped) — see "Stage 9b" above. News source is RSS, not
+   CryptoPanic (its free API tier was discontinued in early 2026, found during design). **Not yet validated
+   against the real Anthropic API** (no key available in-session) and **not wired into any decision/risk
+   logic** — both deliberate, acknowledged gaps, not oversights.
 2. ~~`forward_start = 2026-07-01` is already in the past~~: **resolved by Stage 8** — it needed no relabelling.
    The gap between `history_end`/`forward_start` (2026-07-01) and the day Stage 8 actually ran (2026-10-03,
    ~94 days) was simply backfilled via the new REST-tail path (the same public endpoints, just incremental)
@@ -1501,8 +1632,11 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 
 ## What does NOT exist yet
 
-- News ingestion + LLM structuring (Stage 9b), dashboard. (The paper-signal loop now exists — Stage 8; the
-  macro calendar + risk blackout, Stage 9a, now exists too — see below.)
+- Dashboard. (The paper-signal loop exists — Stage 8; the macro calendar + risk blackout, Stage 9a, and
+  news ingestion + LLM structuring, Stage 9b, both exist too — see below. Stage 9b is not yet validated
+  against the real Anthropic API and not wired into any decision/risk logic.)
+- Deduplication/clustering of near-duplicate news stories across sources, and explanations/chat over stored
+  data (architecture.md section 15's other two "useful" LLM bullets) — Stage 9b covers structuring only.
 - `MarketSnapshot` as a separate class (its job is done by `core.series.MarketInputs.available_until` and
   `data.reader`), and the `feature_sets` DuckDB table (replaced by `manifest.json`).
 - ~~REST incremental updates (only bulk files are supported so far)~~: implemented in Stage 8
@@ -1521,7 +1655,7 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
   there is nothing to log — see open issue #8).
 - Git: branch `feat/historical-data`; commits `efb6677` (Stage 1+2), `4be9329` (docs), `6ac57d4` (Stage 3),
   `8009719` (Stage 4), `a6da56b` (docs), `2298e5a` (Stage 5), `e9b7c72` (Stage 6), `aa43c1b` (Stage 7),
-  `f4f3787` (Stage 8). Stage 9a (macro calendar + risk blackout) is included in this commit.
+  `f4f3787` (Stage 8), `b67afd0` (Stage 9a). Stage 9b (news + LLM) is included in this commit.
 
 ## Environment
 
@@ -1538,6 +1672,10 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
   - Stage 9a added no new dependencies: considered `tzdata` (for `zoneinfo`) and deliberately did not add it —
     this machine's Python has no system IANA timezone database, and a fixed two-rule legal calendar (US DST)
     is cheap and correct to compute directly in stdlib instead (`core/macro_config.py`).
+  - Added in Stage 9b: `python-dotenv` (for reading `ANTHROPIC_API_KEY` from `.env`) - already present in
+    this venv as a "pre-existing package," now declared explicitly in `pyproject.toml`. No HTTP client
+    library (the Anthropic Messages API is called via stdlib `urllib.request`, same choice as Stage 8's
+    Binance REST client) and no RSS-parsing library (stdlib `xml.etree.ElementTree`).
   - Not installed: pandas, pyarrow.
 - Pre-existing packages from the user: `openai`, `pydantic`, `httpx2`, `python-dotenv`.
 
@@ -1595,3 +1733,8 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-05 | ET->UTC conversion for the calendar is computed from the fixed US DST rule directly (2nd Sunday of March .. 1st Sunday of November) rather than via `zoneinfo`, after discovering this Windows machine has no system IANA timezone database and the `tzdata` PyPI package would be a new dependency for a problem with exactly two fixed legal rules | implemented (Stage 9a) |
 | 2026-10-05 | `config/macro_events.csv` compiled from real sources (228 rows, 2020-01..2027-12): FOMC dates from federalreserve.gov's own calendar page (incl. the real March 2020 emergency actions); CPI/NFP dates from bls.gov's archived news-release pages and schedule-of-releases pages (incl. the real 2025 government-shutdown reschedules and the one genuinely cancelled October-2025-reference-month release) | implemented (Stage 9a) |
 | 2026-10-05 | Stage 9a review approved; full suite 1638 passed/13 skipped, no regressions in Stages 1-8 | approved (final) |
+| 2026-10-05 | Stage 9a review approved, committed `b67afd0` | approved (final) |
+| 2026-10-05 | News source corrected mid-design from CryptoPanic (chosen first) to free RSS feeds (CoinDesk, CoinTelegraph), after discovering CryptoPanic discontinued its free API tier in early 2026 (cheapest paid plan $50/week) - reported back before building anything against the paid API | approved |
+| 2026-10-05 | LLM provider: Anthropic (`claude-haiku-4-5-20251001`), called via a thin stdlib-HTTP client rather than the official SDK - no new dependency, same choice already made for Binance REST in Stage 8 | approved |
+| 2026-10-05 | Stage 9b design: forward-only by construction (no `BacktestPeriod` concept anywhere in the `news` package, rather than a date check) satisfies architecture.md's rule 11 (LLM training-cutoff contamination); the LLM only ever structures a headline into the fixed `NewsEvent` schema (`extra="forbid"`), never a trading decision; `max_items_per_tick` hard-caps LLM calls per tick for cost control; not wired into any feature/risk/decision - a separate, later integration decision | approved (implemented) |
+| 2026-10-05 | Stage 9b implemented and unit-tested against fakes only (40 new tests); user chose to proceed without a real Anthropic API smoke test for now (no API key provided in-session) - acknowledged, documented gap, not a silent omission | approved (final) |

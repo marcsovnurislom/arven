@@ -587,6 +587,47 @@ def cmd_paper_status(cfg: AppConfig, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_news_run(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from arven.core.news_config import load_news_config
+    from arven.news.runs import run_news_tick
+
+    news_cfg = load_news_config(args.config_dir)
+    with connect(cfg.data.database_path) as con:
+        summary = run_news_tick(cfg, news_cfg, con)
+    print(f"news tick: fetched={summary.items_fetched} new={summary.items_new} "
+          f"structured={summary.items_structured} parse_failed={summary.items_parse_failed} "
+          f"tokens(in/out)={summary.input_tokens}/{summary.output_tokens}")
+    for err in summary.errors:
+        print(f"  ERROR {err}")
+    print("Structuring only, per CLAUDE.md rule 9 - not wired into any trading decision (see docs/current_state.md's \"Stage 9b\" section).")
+    return 0 if summary.ok else 1
+
+
+def cmd_news_show(cfg: AppConfig, args: argparse.Namespace) -> int:
+    with open_readonly(cfg.data.database_path) as con:
+        rows = con.execute(
+            """
+            SELECT n.published_at_ms, n.source, n.title, e.event_type, e.asset_relevance, e.direction_bias,
+                   e.severity, e.confidence, e.summary, e.parse_error
+            FROM news_items n LEFT JOIN news_events e ON e.news_id = n.news_id
+            ORDER BY n.published_at_ms DESC LIMIT ?
+            """,
+            [args.limit],
+        ).fetchall()
+    for published_ms, source, title, event_type, relevance, bias, severity, confidence, summary, parse_error in rows:
+        from arven.core.time import from_ms
+
+        print(f"[{from_ms(published_ms).isoformat()}] ({source}) {title}")
+        if parse_error:
+            print(f"    UNSTRUCTURED: {parse_error}")
+        elif event_type is not None:
+            print(f"    {event_type} / {relevance} / {bias}  severity={severity:.2f} confidence={confidence:.2f}")
+            print(f"    {summary}")
+        else:
+            print("    (not yet structured)")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="arven", description="ARVEN data pipeline (research only, no execution)")
     parser.add_argument("--config-dir", default=None, help="configuration directory (default: <project>/config)")
@@ -677,6 +718,13 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("run")
     q.set_defaults(func=cmd_paper_show)
     psub.add_parser("status", help="latest ingested data and latest paper run").set_defaults(func=cmd_paper_status)
+
+    p = sub.add_parser("news", help="Stage 9b: RSS ingestion + LLM structuring into a fixed schema (never a trading decision)")
+    nsub = p.add_subparsers(dest="news_command", required=True)
+    nsub.add_parser("run", help="fetch new RSS items, structure up to max_items_per_tick of them via the LLM").set_defaults(func=cmd_news_run)
+    q = nsub.add_parser("show", help="print recent news items and their structured events, if any")
+    q.add_argument("--limit", type=int, default=20)
+    q.set_defaults(func=cmd_news_show)
     return parser
 
 
