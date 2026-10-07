@@ -1,6 +1,6 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-07 (Signal-product build-out Phase 3: event-driven backtest loop on top of Stage 4 execution)_
+_Last updated: 2026-10-08 (Signal-product build-out Phase 4: signal object v2, R/TP-ladder paper tracker, signal store, grading gate)_
 
 ## Phase
 
@@ -8,14 +8,16 @@ _Last updated: 2026-10-07 (Signal-product build-out Phase 3: event-driven backte
 separate build-out described in `docs/ARVEN_MASTER_PROMPT.md` - a multi-timeframe event-driven engine, a
 new strategy, Telegram alerts and a web dashboard, aimed at a usable signal product rather than only the
 diploma - tracked as its own phase sequence (see "Signal-product build-out" below), kept strictly additive
-so the Stages 0-10 pipeline and its golden `result_hash 3eca0a70...` keep reproducing unchanged. **Phases 1-3
-of that build-out (`arven.engine`: `StrategySpec`, `BarCloseEvent`, `EventClock`/`SimulatedEventClock`; generic
-per-timeframe feature tables and `MultiTFView` with their truncation/perturbation leakage suite;
-`arven.backtest.event_engine.EventBacktester`, the event-driven backtest loop on top of the unchanged Stage 4
-execution layer, proven `result_hash`-identical to the legacy `Backtester` for the 1h Stage 5 pipeline) are
-implemented and tested** - see "Signal-product build-out" below; next is Phase 4 (Signal object v2, paper
-tracker in R, signal store, grading gate). Stage 11 (the sealed-test final
-evaluation) remains untouched, by design (master-prompt phase 12, owner-gated, exactly once).
+so the Stages 0-10 pipeline and its golden `result_hash 3eca0a70...` keep reproducing unchanged. **Phases 1-4
+of that build-out are implemented and tested**: `arven.engine` (`StrategySpec`, `BarCloseEvent`,
+`EventClock`/`SimulatedEventClock`; per-timeframe feature tables and `MultiTFView` with their
+truncation/perturbation leakage suite; the `EngineSignal`/TP-ladder/grading types);
+`arven.backtest.event_engine.EventBacktester` (the event-driven backtest loop on the unchanged Stage 4
+execution layer, proven `result_hash`-identical to the legacy `Backtester` for the 1h Stage 5 pipeline);
+`arven.backtest.paper_tracker` (resolves a signal's TP ladder/stop forward on 1m bars, net of fees/
+slippage, in R-multiples) - see "Signal-product build-out" below; next is Phase 5 (always-on runtime).
+Stage 11 (the sealed-test final evaluation) remains untouched, by design (master-prompt phase 12,
+owner-gated, exactly once).
 - Stage 10 (LLM explanations/Q&A + the Streamlit dashboard) is complete: implemented, unit-tested, and the
   dashboard itself was smoke-tested against this machine's real local data; the explain/Q&A LLM calls have
   not yet been made against the real Anthropic API (same acknowledged gap as Stage 9b - no API key was
@@ -1405,6 +1407,77 @@ Phase 1/2 file are byte-for-byte as before.
   object v2, paper tracker in R, signal store and grading gate (Phase 4); `docs/architecture.md` has not yet
   been updated for the build-out (the master prompt's definition of done schedules that).
 
+**Phase 4 — signal object v2, R/TP-ladder paper tracker, signal store, grading gate (done, 2026-10-08).**
+Six new files, five in `arven.engine` (pure types, no dependency on `arven.backtest`) and one new module in
+`arven.backtest` (reuses the Stage 4 fee/slippage model, same `backtest -> engine` dependency direction
+Phase 3 established - `tests/backtest/test_paper_tracker_static_rules.py`). Nothing in Stages 1-10 or
+Phases 1-3 was modified except one existing Phase-3 test, corrected below.
+- **`EngineSignal`** (`engine/signal.py`, section 5.3): `signal_id` (sha256 of the signal's own canonical
+  content, computed in `__post_init__`, never supplied), `symbol`/`side`/`strategy_id`+`version`/`grade`/
+  `event_time_ms`/`entry_reference`/`stop`/`tp_ladder`/`risk_fraction`/`confidence`/`regime`/`reasons`/
+  `risk_checks`/`versions`/`max_holding_minutes`. **Additive, not a replacement**: `core.signal.Signal` (the
+  legacy decision-engine output `Backtester`/`EventBacktester` consume) is untouched - `EngineSignal` is a
+  separate, richer object built *from* a decision, for display/forward-tracking, never fed back into Stage
+  4 execution. `TPLevel.from_r_multiple(r, fraction, entry=, stop=, side=)` derives each rung's price from a
+  planned R-multiple (never supplied independently, so price and `r_multiple` can never disagree); a ladder
+  is validated nearest-rung-first, fractions summing to at most 1.0 (less than 1.0 is allowed - the
+  remainder may run with a trailing/no stop). `r_plan` is a property reading the ladder's own `r_multiple`s
+  (not a second stored copy - one source of truth). `SignalUpdate`/`SignalUpdateKind` (`engine/signal_events.py`):
+  append-only (`TP_HIT`/`STOP_MOVED`/`CLOSED`/`CANCELLED`) - the signal itself never changes after
+  construction; its history is this event sequence instead.
+- **The grading gate** (`engine/grading.py`, section 1.3): `Grade.EXPERIMENTAL`/`VALIDATED`/`SUSPENDED`
+  computed by a pure function of a caller-assembled `TrackRecord` - majority-positive walk-forward windows,
+  >=100 simulated trades, beats all three baselines, survives cost stress, >=30 forward trades with
+  non-negative net expectancy (all six, not a majority) for `VALIDATED`; a rolling-30-trade expectancy below
+  -0.3R or a drawdown above 8R forces `SUSPENDED` **even over an otherwise-qualifying record** (CLAUDE.md
+  rule 6: the owner must never be able to mistake a degraded strategy for a currently-trustworthy one).
+  Deliberately does not read any real Stage 7/8 artifact itself - wiring a real strategy's real history into
+  a `TrackRecord` is later-phase integration work.
+- **`resolve_legs`** (`engine/ladder.py`): the hard, hand-computed Phase 4 gate. Pure summation over already-
+  resolved `ClosedLeg`s (fraction, actual fill price, fee, reason) - mirrors
+  `arven.backtest.accounting`'s existing single-exit convention exactly (`risk = |entry - stop|`,
+  `r_multiple = net_pnl / risk`, generalised to many legs: a ladder that fills every rung exactly at its
+  planned price blends to `sum(fraction_i * r_multiple_i)` before fees - verified by hand for a 3-rung
+  ladder, a partial-then-breakeven-stop case, a short, and a fees-reduce-R case).
+- **`track_signal`** (`backtest/paper_tracker.py`): walks 1m bars forward from an already-resolved entry
+  fill (the real fill - with its own latency/slippage - is given, not recomputed here) to produce the
+  `ClosedLeg` sequence `resolve_legs` needs. Reuses `backtest.costs` (`taker_fee_rate`/`slippage_fraction`/
+  `adverse_price`) directly for every leg's fill. **Intrabar rules** (hand-tested): a stop always beats a
+  take-profit in the same bar (mirrors `execution.py`'s documented rule exactly); **at most one rung (or the
+  stop) resolves per bar**, even if a single bar's range technically reaches two rungs at once - a
+  deliberate, conservative choice (never assume an intra-minute order the 1m data cannot distinguish,
+  the same spirit as CLAUDE.md's "assume the worse outcome", applied here as "assume the slower outcome").
+  An optional `move_stop_to_breakeven_after_first_tp` flag moves the stop to the entry fill price once the
+  first rung fills (emitting a `STOP_MOVED` update); risk for the final R-multiple always uses the
+  *original* stop, never the moved one (R measures against the original plan). `max_holding_minutes`, if
+  set, closes the remainder at the deadline bar's open (`TIME_STOP`). Returns `resolution=None` (not an
+  error) when the given market data runs out before anything ever triggers - a legitimate "still open"
+  outcome, not a misconfiguration.
+  - **Deliberate scope cut, documented not hidden**: funding is not modelled here (CLAUDE.md rule 4 asks
+    every *backtest* to model it; this is a forward tracker for one signal's own typically-hours-long life,
+    and Phase 4's gate is specifically the R/TP-ladder math - fees and slippage are the costs that scale
+    with every leg and had to be proven correct first). Left for later if a real signal's holding time makes
+    it material.
+- **`signal_store`** (`engine/signal_store.py`): the same append-only JSONL-index idiom already used
+  throughout this project (`arven.paper.runs`'s `runs.jsonl`/`decisions.jsonl`, not a new DuckDB schema) -
+  `<root>/<strategy_id>/signals.jsonl` and `.../updates.jsonl`. `read_signals` recomputes and checks every
+  stored `signal_id` against its own content on the way back out, refusing a tampered/corrupted row rather
+  than silently trusting it.
+- **A pre-existing Phase 3 test was corrected, not weakened**: `test_event_engine_static_rules.py`'s
+  "legacy backtest modules never import the engine" check had only ever excluded `event_engine.py` by name;
+  Phase 4 added a second, equally legitimate new module (`paper_tracker.py`) that also needs to import from
+  `arven.engine`, so the check now excludes both new modules by name while still forbidding every *other*
+  `arven.backtest` file (`execution.py`, `clock.py`, ...) from importing either.
+- **Counts**: 78 new tests (16 `test_ladder.py` + 10 `test_paper_tracker.py` + 16 `test_signal.py` + 3
+  `test_signal_events.py` + 7 `test_signal_store.py` + 14 `test_grading.py` + 7 `test_paper_tracker_static_rules.py`,
+  plus the pre-existing engine static-rules tests already covering the new `engine/*.py` files with no change
+  needed). Full suite: **2014 passed, 13 skipped** (1936 + 78; no regressions; golden regression green).
+- **Not yet built / deliberately left for later phases**: wiring any of this into a real running strategy,
+  `arven.paper`, Telegram or the web app (Phase 5 is the always-on runtime; Phase 6 is Telegram; Phase 8 is
+  the web app); a real `TrackRecord` assembled from actual Stage 7/8 artifacts; funding in the paper tracker
+  (see above); enforcing a maximum number of open signals per strategy or the global net-exposure cap across
+  *tracked* (not just backtested) positions.
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -2063,3 +2136,7 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-07 | Master-prompt Phase 3 design: the event-driven backtest loop (`EventBacktester`) lives in `arven.backtest.event_engine` and imports *from* `arven.engine` (clock/events only), so the Phase 1/2 rule "`arven.engine` never imports `arven.backtest`" holds verbatim; it reuses the Stage 4 `Simulator` unchanged with exactly the legacy call sequence, returns the legacy `BacktestResult`, never imports `Backtester` or `arven.backtest.clock`, and no legacy module imports it (new static test) | approved (implemented) |
 | 2026-10-07 | Phase 3 loop semantics: providers keyed by trigger timeframe, decide only on their own timeframe's events; events of unregistered timeframes skipped entirely (no simulator call); same-instant dispatch follows the Phase 1 coarsest-first rule; one account / one net position (a second entry is rejected `position_open`); strict clock validation (monotonic, inside the window, exactly the window's decision times per registered timeframe) - a naively-built `SimulatedEventClock(start, end)`, which is shifted one bar late, is refused, and `WindowEventClock` builds the correct window clock | approved (implemented) |
 | 2026-10-07 | Master-prompt Phase 3 implemented and validated: identical `result_hash` (table by table) between legacy `Backtester` and `EventBacktester` with an H1-only clock for the real `Stage5Pipeline` on seeds 0/5/9/17/22 (all with real trades) under real, zero and 2x-stress costs, plus scripted all-branches and all-`None` runs; 48 new tests (+2 auto-parametrised), full suite 1936 passed/13 skipped, no regressions | implemented (Phase 3) |
+| 2026-10-08 | Master-prompt Phase 4 design: `EngineSignal`/`TPLevel`/`SignalUpdate`/`Grade`/`TrackRecord`/`resolve_legs` (pure types, `arven.engine`) are additive to `core.signal.Signal`, never replacing or feeding back into it; `resolve_legs`'s R-multiple convention mirrors `arven.backtest.accounting` exactly (`risk = |entry-stop|`, `r_multiple = net/risk`, generalised to many legs); `paper_tracker.py` lives in `arven.backtest` (not `arven.engine`), the same `backtest -> engine` dependency direction Phase 3 established, so it can reuse `backtest.costs` directly; funding is deliberately not modelled in the paper tracker (documented scope cut, not an oversight) | approved (implemented) |
+| 2026-10-08 | Phase 4 intrabar rule for the TP ladder: a stop always beats a take-profit in the same bar (mirrors `execution.py`'s documented rule exactly); at most one rung resolves per bar even if a bar's range technically reaches two at once - the same "assume the worse/slower outcome when the 1m data can't distinguish order" spirit as CLAUDE.md rule 4 | approved (implemented) |
+| 2026-10-08 | Corrected a Phase 3 test rather than weakening it: `test_event_engine_static_rules.py`'s "legacy backtest modules never import the engine" check had hard-coded an exclusion for only `event_engine.py`; extended to also exclude the new, equally legitimate `paper_tracker.py`, while still forbidding every other `arven.backtest` file from importing either | implemented (Phase 4) |
+| 2026-10-08 | Master-prompt Phase 4 implemented and validated: 78 new tests across `engine/signal.py`, `signal_events.py`, `grading.py`, `ladder.py`, `signal_store.py` and `backtest/paper_tracker.py` (incl. hand-computed R-multiple and TP-ladder cases, the same-bar stop-beats-TP tie rule, one-rung-per-bar, break-even-stop, time-stop, and a tampered-signal-store rejection); full suite 2014 passed/13 skipped, no regressions, golden regression green | implemented (Phase 4), approved (final) |

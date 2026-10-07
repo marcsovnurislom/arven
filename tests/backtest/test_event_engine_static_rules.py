@@ -14,6 +14,13 @@ exactly as it was (``tests/engine/test_engine_static_rules.py``). What this file
   ``test_backtest_static_rules.py``);
 - no legacy ``arven.backtest`` module, and no later-stage package, imports the loop or ``arven.engine`` - the
   legacy 1h path (and the golden ``result_hash``) cannot be influenced by the new code.
+
+Phase 4 note: ``arven.backtest.paper_tracker`` (the signal-ladder paper tracker) resolves the same tension
+the same way - it also lives in ``arven.backtest`` and imports *from* ``arven.engine`` (its own
+``test_paper_tracker_static_rules.py`` pins its precise vocabulary). ``test_legacy_backtest_modules_never_
+import_the_engine_or_the_loop`` below therefore excludes both new modules, not just this one, by name - any
+*other* file in ``arven.backtest`` (``execution.py``, ``engine.py``, ``clock.py``, ``provider.py``, ...)
+still may not import ``arven.engine`` or either new module.
 """
 
 import ast
@@ -21,6 +28,8 @@ from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "arven"
 LOOP = SRC / "backtest" / "event_engine.py"
+TRACKER = SRC / "backtest" / "paper_tracker.py"
+NEW_MODULES = (LOOP, TRACKER)
 
 
 def _import_nodes(path: Path):
@@ -62,9 +71,14 @@ def test_loop_never_imports_the_decision_stack():
 
 def test_legacy_backtest_modules_never_import_the_engine_or_the_loop():
     for path in sorted((SRC / "backtest").glob("*.py")):
-        if path == LOOP:
+        if path in NEW_MODULES:
             continue
-        bad = [m for m, n in _import_nodes(path) if m.startswith(("arven.engine", "arven.backtest.event_engine")) or (m == "arven.backtest" and n == "event_engine")]
+        bad = [
+            m
+            for m, n in _import_nodes(path)
+            if m.startswith(("arven.engine", "arven.backtest.event_engine", "arven.backtest.paper_tracker"))
+            or (m == "arven.backtest" and n in ("event_engine", "paper_tracker"))
+        ]
         assert not bad, f"{path.name}: {bad}"
 
 
