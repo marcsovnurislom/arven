@@ -1,6 +1,6 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-08 (Signal-product build-out Phase 6: Telegram alerts, bot commands, outbox - no real token/chat id supplied yet)_
+_Last updated: 2026-10-08 (Signal-product build-out Phase 7a: strategy S4 "Impulse-Retest" spec + causal detection math, hand-tested; wiring/evaluation is Phase 7b, not yet done)_
 
 ## Phase
 
@@ -21,8 +21,13 @@ loop around the existing, unmodified `run_paper_tick`); `arven.telegram` + `arve
 build-out" below for what was and was not validated. **Phase 5's own gate (a 48-hour soak on live public
 data) remains deliberately not run** (owner's choice, recorded below) **and Phase 6's "owner supplies
 token for a live test" step has not happened either** - no real `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_IDS`
-have been provided in any session so far; everything is validated offline, against fakes. Next is Phase 7
-(strategy S4 - Impulse-Retest). Stage 11 (the sealed-test final evaluation) remains untouched, by design
+have been provided in any session so far; everything is validated offline, against fakes. **Phase 7
+(strategy S4 "Impulse-Retest") is split into 7a/7b, the same way Stage 9 was split into 9a/9b**: 7a (the
+formal spec, `docs/strategy_impulse_retest.md`, and the causal swing/impulse/zone/trendline/trigger/target
+detection math, hand-tested in isolation) is done; 7b (wiring S4 into a real `SignalProvider`/`EngineSignal`,
+the development backtest, windowed robustness, baselines, cost stress, per-regime-like breakdown, and
+forward paper) is the explicit next step, not yet started. Stage 11 (the sealed-test final evaluation)
+remains untouched, by design
 (master-prompt phase 12, owner-gated, exactly once).
 - Stage 10 (LLM explanations/Q&A + the Streamlit dashboard) is complete: implemented, unit-tested, and the
   dashboard itself was smoke-tested against this machine's real local data; the explain/Q&A LLM calls have
@@ -1617,6 +1622,60 @@ Nothing in Stages 1-10 or Phases 1-4 was modified.
   yet); a `--daemon` mode for `arven telegram send`/`commands` analogous to `arven paper runtime` (both are
   one-shot CLI ticks today, meant to be scheduled the same way Stage 8's `arven paper run` originally was).
 
+**Phase 7a — strategy S4 "Impulse-Retest": spec + causal detection math (done, 2026-10-08; 7b - wiring +
+evaluation - is next, not yet started).** `docs/strategy_impulse_retest.md` (written *before* any code, per
+the master prompt's own explicit requirement) and one new file, `src/arven/engine/strategy_s4.py` - pure
+computation, no `arven.backtest` dependency (the engine module-boundary rule holds for this file too; a
+`SignalProvider` adapter that *would* need `arven.backtest` is explicitly deferred to 7b, mirroring the
+Phase 3/4 `backtest -> engine` pattern). Nothing in Stages 1-10 or Phases 1-6 was touched.
+- **Every parameter is pre-registered in the spec, not fitted**: swing confirmation lag `K=2` (2-bar
+  fractals), impulse size `>= 3x ATR(14)`, base-candle `>= 1x ATR(14)`, stop buffer `0.25x ATR(14)`, Fibonacci
+  retracement band `0.5-0.618` (given verbatim by the master prompt), extension targets `1.0/1.414/1.618`
+  with close fractions `50%/30%/20%`. The spec's own §11 is an append-only log of every variant ever tried
+  (multiple-testing disclosure) - it currently has exactly one row, this first version, nothing evaluated
+  yet.
+- **What `context_tfs=(4h,)` concretely means was underspecified by the master prompt text itself**
+  (it only says "context", not a rule) - made concrete and documented in spec §1.1: a setup is only taken
+  when its direction agrees with the 4h `ema_slope_50` sign, reusing Phase 2's own already-computed
+  per-timeframe feature (`engine.features`) via a single `MultiTFView` row lookup, rather than inventing a
+  second trend computation. This is the *only* place this strategy touches `MultiTFView` - swing/impulse/
+  zone/trendline/trigger (spec §§2-7) operate on raw, causally-truncated `BarSeries` history instead
+  (`BarSeries.available_until(t)` already gives exactly "what was known at t" - truncate first, then
+  compute, the same idiom Stage 3's own feature code relies on - `MultiTFView` is for a single as-of
+  *row*, not the full history a swing/impulse search needs).
+- **Deliberate methodology choice, documented not hidden** (spec §10): the backtest/WFO/baselines/stress
+  evaluation (7b) will use S4's nearest target (TP1) and its stop only, through the unchanged Stage 4
+  execution model - exactly like every other strategy's existing single-exit backtest. The full multi-rung
+  ladder (TP1/TP2/TP3) is evaluated on the forward/paper leg instead, via the Phase 4 `paper_tracker` that
+  already resolves a ladder one rung at a time in order (which is also exactly the "TP2 unlocks only after
+  TP1" rule - not separate logic, a consequence of how the tracker already works). No change to Stage 4's
+  execution layer was made or is planned for this.
+- **A real sign-error bug found by the hand-computed tests themselves, before anything else used this
+  code**: `build_decision`'s first draft computed `r_multiple = side * (fib * size) / risk`, which gives a
+  *negative* R for a short's profit target (since `side * (price - entry) = side * (side * fib * size) =
+  fib * size` always - `side` cancels via `side**2 == 1`, so multiplying by it once is wrong both ways).
+  Fixed to `r_multiple = (fib * size) / risk` (no `side` factor at all); the long case was unaffected
+  (`side=1` made the bug invisible there), which is exactly why the explicit short-side hand-computed test
+  mattered.
+- **Counts**: 27 new tests (`tests/engine/test_strategy_s4.py`): `confirmed_swings` (clean swings, strict-
+  inequality/plateau rejection, `k` validation, NaN-adjacency, and a dedicated **truncation/leakage test**
+  per CLAUDE.md's "mandatory for every feature" rule - a swing confirmed within a truncated prefix must
+  exactly match the same swing computed on the full array); `find_last_impulse` (qualifying/too-small,
+  not-yet-confirmed, skipping a same-kind-adjacent pair to find an older qualifying leg, both directions,
+  no-swings); `confluence_zone` (full/partial overlap fraction, too-small base candle, non-overlapping
+  bands, start-at-index-0); `counter_trend_trendline` (last-two-pivots, not-yet-confirmed, ignores pivots
+  before the impulse); `find_trigger` (break-then-hold, never-breaks, short side, never-triggers-in-range);
+  `build_decision` (stop/target prices and R-multiples by hand for both sides, confidence clamping). Full
+  suite: **2120 passed, 13 skipped** (2093 + 27; no regressions; golden regression green).
+- **Not yet built (7b, explicitly next)**: a `SignalProvider` adapter (`arven.backtest.strategy_s4_provider`,
+  mirroring the Phase 3/4 `backtest -> engine` dependency direction) converting an `ImpulseRetestDecision`
+  into both a legacy `core.signal.Signal` (for the backtest, §10) and a full `EngineSignal` (for paper/
+  live, with the complete ladder); the development backtest itself (via `EventBacktester`, S4 registered
+  under `Timeframe.M15`); the windowed robustness check, baselines, cost stress, the S4-specific per-
+  regime-like breakdown (spec §9 - cannot reuse `arven.regime`, the engine boundary rule holds); wiring a
+  real forward/paper run; a `TrackRecord` and the grade the gate (`engine.grading`) would assign from any
+  of the above.
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -2288,3 +2347,8 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-08 | A real bug found while hand-smoke-testing the new CLI (not by the unit tests): `arven telegram commands` crashed with a raw traceback when `TELEGRAM_BOT_TOKEN` was unset, because `run_telegram_commands_tick`'s `get_updates` call - unlike every entry in `run_telegram_send_tick`'s own loop - was not wrapped in a try/except; `arven telegram send` only avoided the same crash because its default `dry_run: true` short-circuits first. Fixed at the source, with a regression test, not papered over at the CLI layer | implemented (Phase 6) |
 | 2026-10-08 | A second, self-inflicted static-test false positive (the "no order/account endpoint" check for `telegram/client.py` also forbade the substring "binance", copied carelessly from an unrelated check, and tripped on the client's own accurate docstring prose) was fixed by dropping the irrelevant word from the check | implemented (Phase 6) |
 | 2026-10-08 | Master-prompt Phase 6 implemented and validated offline: 56 new tests (`tests/telegram/`: client retry/429/auth, outbox dedupe/failure-cap, message formatting, commands incl. real heartbeat/signal-store wiring, both composition roots end-to-end against a scripted fake Bot API); full suite 2093 passed/13 skipped, no regressions, golden regression green. **The phase's "owner supplies token for a live test" step has not happened** - no real `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_IDS` provided in any session so far; `arven telegram test` is ready to confirm it once they are | implemented (Phase 6), live test pending owner |
+| 2026-10-08 | Master-prompt Phase 7 split into 7a/7b (the same precedent as Stage 9a/9b): 7a is the formal spec (`docs/strategy_impulse_retest.md`, written before any code) plus the causal swing/impulse/zone/trendline/trigger/target detection math, hand-tested in isolation; 7b (wiring into a real `SignalProvider`/`EngineSignal`, the development backtest, windowed robustness, baselines, stress, per-regime-like breakdown, forward paper) is the deliberate next step, not started in this pass | approved |
+| 2026-10-08 | S4 spec decisions: every threshold pre-registered before any evaluation (swing lag K=2, impulse >=3x ATR14, base candle >=1x ATR14, stop buffer 0.25x ATR14, Fib zone 0.5-0.618 per the master prompt's own text, extensions 1.0/1.414/1.618 with 50/30/20% close fractions); the master prompt's own underspecified "context 4h" role was made concrete (direction must agree with 4h `ema_slope_50`'s sign, reusing Phase 2's own feature via one `MultiTFView` row lookup) rather than invented ad hoc during implementation | approved (implemented) |
+| 2026-10-08 | S4 evaluation methodology decision (spec §10): the backtest/WFO/baselines/stress evaluation in 7b will use S4's nearest target (TP1) and its stop only, through the unchanged Stage 4 execution model - the full TP ladder is evaluated on the forward/paper leg via the Phase 4 `paper_tracker` instead, so no change to the shared execution layer is needed for this strategy | approved |
+| 2026-10-08 | A real sign-error bug was found by S4's own hand-computed tests before any other code used it: `build_decision`'s R-multiple formula applied `side` once instead of letting it cancel (`side**2 == 1`), giving a negative R for a short's profit target; the long-side test alone could not have caught this (`side=1` hid it) - fixed, with the short-side case as its own dedicated test | implemented (Phase 7a) |
+| 2026-10-08 | Master-prompt Phase 7a implemented and validated: 27 new tests (`tests/engine/test_strategy_s4.py`, incl. a dedicated truncation/leakage test for `confirmed_swings` per CLAUDE.md's "mandatory for every feature" rule); full suite 2120 passed/13 skipped, no regressions, golden regression green | implemented (Phase 7a), approved (final) |
