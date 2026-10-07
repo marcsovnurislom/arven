@@ -557,6 +557,74 @@ def cmd_paper_run(cfg: AppConfig, args: argparse.Namespace) -> int:
     return 0 if rs.ok else 1
 
 
+def cmd_paper_runtime(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Phase 5 (ARVEN_MASTER_PROMPT.md): one long-running process instead of an externally-scheduled
+    `paper run` per tick. Ctrl+C stops it before/after the current tick (every tick is already a complete,
+    atomic unit - `run_paper_tick` writes nothing partial - so this is safe even though it is not a
+    mid-tick-graceful signal handler; Windows' asyncio loop does not support those anyway). A --stop-file
+    is the portable alternative for stopping it from a script or Task Scheduler action."""
+    import asyncio
+    from pathlib import Path
+
+    from arven.core.backtest_config import load_backtest_config
+    from arven.paper.runtime import run_forever
+
+    bt, fcfg = load_backtest_config(args.config_dir), load_features_config(args.config_dir)
+    root = cfg.data.data_dir / "paper"
+    heartbeat_path, log_path = root / "heartbeat.json", root / "runtime.jsonl"
+    stop_file = Path(args.stop_file) if args.stop_file else None
+
+    async def main() -> None:
+        stop_event = asyncio.Event()
+
+        async def watch_stop_file() -> None:
+            while not stop_event.is_set():
+                if stop_file is not None and stop_file.exists():
+                    print(f"stop file {stop_file} found - stopping (graceful shutdown).")
+                    stop_event.set()
+                    return
+                await asyncio.sleep(1.0)
+
+        watcher = asyncio.create_task(watch_stop_file()) if stop_file is not None else None
+        try:
+            await run_forever(
+                cfg, fcfg, bt, lambda: _build_pipeline(cfg, args, bt),
+                heartbeat_path=heartbeat_path, log_path=log_path, poll_seconds=args.poll_seconds,
+                stop_event=stop_event,
+            )
+        finally:
+            if watcher is not None:
+                watcher.cancel()
+
+    print(f"ARVEN paper runtime starting: polling every {args.poll_seconds}s. Heartbeat: {heartbeat_path}  "
+          f"Log: {log_path}  Ctrl+C to stop" + (f", or create {stop_file}." if stop_file else "."))
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("stopped (Ctrl+C).")
+    return 0
+
+
+def cmd_paper_heartbeat(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from arven.core.time import from_ms, to_ms, utc_now
+    from arven.paper.runtime import is_stale, read_heartbeat
+
+    path = cfg.data.data_dir / "paper" / "heartbeat.json"
+    hb = read_heartbeat(path)
+    if hb is None:
+        print(f"no heartbeat file at {path} - the runtime has never ticked, or was never started")
+        return 1
+    now_ms = to_ms(utc_now())
+    age_s = (now_ms - hb["checked_at_ms"]) / 1000
+    stale = is_stale(hb, now_ms, max_age_ms=120_000)  # 2x the default --poll-seconds, a reasonable default
+    print(f"status={hb['status']}  checked {age_s:.0f}s ago  last_tick={from_ms(hb['last_tick_ms']).isoformat() if hb['last_tick_ms'] else 'never'}")
+    if hb["detail"]:
+        print(f"  detail: {hb['detail']}")
+    if stale:
+        print("STALE: the runtime has not checked in recently - it may have crashed or been stopped.")
+    return 1 if stale or hb["status"] == "error" else 0
+
+
 def cmd_paper_show(cfg: AppConfig, args: argparse.Namespace) -> int:
     from arven.paper.runs import paper_dir
 
@@ -769,6 +837,13 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("run")
     q.set_defaults(func=cmd_paper_show)
     psub.add_parser("status", help="latest ingested data and latest paper run").set_defaults(func=cmd_paper_status)
+    q = psub.add_parser("runtime", help="Phase 5: one long-running process polling for new decision times, instead of an externally-scheduled `paper run`")
+    q.add_argument("--poll-seconds", type=float, default=15.0, help="how often to check for a new decision time (default 15s)")
+    q.add_argument("--stop-file", help="create this file to request a graceful stop (checked once a second); Ctrl+C also works")
+    q.add_argument("--ml-model", help="Stage 6 model id (data/models/<id>): run the pipeline with this MetaFilter enabled")
+    q.add_argument("--random-filter-rate", type=float, help="control (D20): veto this fraction of candidates uniformly at random instead of using a model")
+    q.set_defaults(func=cmd_paper_runtime)
+    psub.add_parser("heartbeat", help="print the always-on runtime's last heartbeat (status/age); non-zero exit if stale or missing").set_defaults(func=cmd_paper_heartbeat)
 
     p = sub.add_parser("news", help="Stage 9b: RSS ingestion + LLM structuring into a fixed schema (never a trading decision)")
     nsub = p.add_subparsers(dest="news_command", required=True)

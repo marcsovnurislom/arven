@@ -1,6 +1,6 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-08 (Signal-product build-out Phase 4: signal object v2, R/TP-ladder paper tracker, signal store, grading gate)_
+_Last updated: 2026-10-08 (Signal-product build-out Phase 5: always-on paper runtime, LiveEventClock - 48h soak test not yet run)_
 
 ## Phase
 
@@ -8,14 +8,19 @@ _Last updated: 2026-10-08 (Signal-product build-out Phase 4: signal object v2, R
 separate build-out described in `docs/ARVEN_MASTER_PROMPT.md` - a multi-timeframe event-driven engine, a
 new strategy, Telegram alerts and a web dashboard, aimed at a usable signal product rather than only the
 diploma - tracked as its own phase sequence (see "Signal-product build-out" below), kept strictly additive
-so the Stages 0-10 pipeline and its golden `result_hash 3eca0a70...` keep reproducing unchanged. **Phases 1-4
+so the Stages 0-10 pipeline and its golden `result_hash 3eca0a70...` keep reproducing unchanged. **Phases 1-5
 of that build-out are implemented and tested**: `arven.engine` (`StrategySpec`, `BarCloseEvent`,
-`EventClock`/`SimulatedEventClock`; per-timeframe feature tables and `MultiTFView` with their
-truncation/perturbation leakage suite; the `EngineSignal`/TP-ladder/grading types);
+`EventClock`/`SimulatedEventClock`/`LiveEventClock`; per-timeframe feature tables and `MultiTFView` with
+their truncation/perturbation leakage suite; the `EngineSignal`/TP-ladder/grading types);
 `arven.backtest.event_engine.EventBacktester` (the event-driven backtest loop on the unchanged Stage 4
 execution layer, proven `result_hash`-identical to the legacy `Backtester` for the 1h Stage 5 pipeline);
 `arven.backtest.paper_tracker` (resolves a signal's TP ladder/stop forward on 1m bars, net of fees/
-slippage, in R-multiples) - see "Signal-product build-out" below; next is Phase 5 (always-on runtime).
+slippage, in R-multiples); `arven.paper.runtime` + `arven paper runtime`/`heartbeat` (the always-on polling
+loop around the existing, unmodified `run_paper_tick`) - see "Signal-product build-out" below for what was
+and was not validated. **Phase 5's own gate (a 48-hour soak on live public data) has deliberately not been
+run yet** - it is a real-time, multi-day observation the owner must choose to start (see "Phase 5" below
+and `docs/RUNTIME_OPERATIONS.md`), not something any single session can complete synchronously. Next is
+Phase 6 (Telegram).
 Stage 11 (the sealed-test final evaluation) remains untouched, by design (master-prompt phase 12,
 owner-gated, exactly once).
 - Stage 10 (LLM explanations/Q&A + the Streamlit dashboard) is complete: implemented, unit-tested, and the
@@ -1478,6 +1483,73 @@ Phases 1-3 was modified except one existing Phase-3 test, corrected below.
   (see above); enforcing a maximum number of open signals per strategy or the global net-exposure cap across
   *tracked* (not just backtested) positions.
 
+**Phase 5 — always-on paper runtime, `LiveEventClock` (code done and unit-tested 2026-10-08; the phase's
+own 48h-soak gate deliberately not yet run - see "Known limitation" below).** Two new pieces: `LiveEventClock`
+(`engine/clock.py`, additive to Phase 1's `SimulatedEventClock`) and the polling loop itself
+(`arven.paper.runtime`, new package-internal module; `arven paper runtime`/`heartbeat` CLI commands).
+Nothing in Stages 1-10 or Phases 1-4 was modified.
+- **No new decision/execution logic.** Every tick calls the existing, already-idempotent,
+  already-catch-up-capable `arven.paper.runs.run_paper_tick` unchanged - REST-tail, resampling, the real
+  `Stage5Pipeline`/`Backtester`, and Stage 8's own staged-bulk-load DuckDB fix are all reused exactly as
+  built, not re-derived (section 5.2 asks to "avoid the known DuckDB trap" again - it was already avoided
+  in Stage 8's `data/rest_ingestion.py`).
+- **The one genuinely new piece of logic, and why it is necessary, not just an optimisation**:
+  `run_paper_tick` has no "nothing changed" short-circuit of its own - every call that reaches
+  `execute_run` writes a brand-new run artifact under `data/paper/`, even if the forward decision grid has
+  not advanced since the last call. Polling every 10-20s without a guard would therefore flood that
+  directory with hundreds of fully-duplicate artifacts per hour. `paper.runtime.run_once` adds exactly one
+  cheap, pure, no-I/O check (`latest_forward_window_end_ms` unchanged since the last tick => skip, report
+  `"idle"`) before doing any REST/DuckDB work - confirmed by a dedicated test that a second poll at the same
+  wall-clock time produces no new artifact, and a later poll (an hour on) does.
+- **"Persist the last processed event, restart-safe" is already true of `run_paper_tick` itself** (it
+  always replays `[forward_start, now)` fresh from the database, the source of truth), so no second,
+  redundant cursor file was added. What *is* new, purely for external monitoring: an atomically-written
+  (write-temp-then-rename) `data/paper/heartbeat.json` (`status`/`checked_at_ms`/`last_tick_ms`/`detail`)
+  and an append-only structured tick log, `data/paper/runtime.jsonl`. `is_stale(heartbeat, now, max_age)`
+  is the runtime's own analogue of CLAUDE.md rule 5 ("missing/stale data => NO_TRADE"), applied to
+  monitoring the *process* rather than any one data source; `arven paper heartbeat` exits non-zero when
+  stale or when the last status was `"error"`, for a Task Scheduler health-check trigger.
+- **One bad tick never kills the loop**: `run_once` never raises - a transient REST failure or any other
+  exception becomes `status="error"` with the exception recorded in `detail`, logged, and polling continues
+  on the next interval (hand-tested with an opener that always raises `OSError`).
+- **`LiveEventClock`** (`engine/clock.py`): the live counterpart of Phase 1's `SimulatedEventClock` (section
+  5.1's "a live implementation (bar confirmed closed + derived TF bars complete)"), built now for
+  architectural symmetry but **not yet consumed by the real paper loop** (which still uses its own
+  `latest_forward_window_end_ms`/1h-only detection, pre-dating Phase 1) - wiring it in is deferred until a
+  genuine multi-timeframe strategy exists to need it (Phase 7), the same "don't build it until something
+  needs it" discipline as `MultiTFView`'s own still-unused status. Restart-safe by construction rather than
+  a persisted cursor: the constructor takes `start_after_ms` (wherever the caller already durably recorded
+  its own progress) and every timeframe resumes independently from the boundary at-or-before that instant;
+  one `advance()` call drains every bar a timeframe missed while the process was down, oldest first, before
+  moving to the next timeframe (hand-tested: a wall-clock jump of 3 hours after being "down" emits all 3
+  missed 1h closes in order). One wall-clock read per `advance()` call, via an injectable `now_fn` (mirrors
+  `run_paper_tick`'s own injectable `now`), so tests fully control what time it believes it is.
+- **Graceful shutdown is cooperative, not signal-based**: Windows' asyncio event loop does not support
+  POSIX signal handlers, so `arven paper runtime` relies on a plain `KeyboardInterrupt` handler (Ctrl+C) and
+  an optional, portable `--stop-file` sentinel (checked once a second) instead - both documented in the new
+  `docs/RUNTIME_OPERATIONS.md`, which also carries the Windows Task Scheduler "restart on failure" recipe
+  and power-settings note section 5.2 asks for (a laptop set to sleep when plugged in, or with "closing the
+  lid" set to sleep, is not 24/7 regardless of what Task Scheduler does).
+- **Counts**: 23 new tests (9 `test_live_clock.py` + 14 `test_runtime.py`, offline throughout - fake REST
+  opener, injectable clocks, no real sleep: `run_forever`'s own tests run in well under a second using
+  `poll_seconds=0`/`asyncio.Event`). One pre-existing Phase 2 static-rules test
+  (`test_engine_has_no_lookahead_prone_idioms`, a regex scan for leakage-prone idioms across `engine/*.py`)
+  false-positived on the prose word "backfill" in a new `LiveEventClock` docstring describing real-time
+  catch-up (not a leakage pattern at all); fixed by rewording the docstring, not by touching the still-valid
+  check. Full suite: **2037 passed, 13 skipped** (2014 + 23; no regressions; golden regression green).
+- **Known limitation - not run, not hidden**: Phase 5's own gate in `docs/ARVEN_MASTER_PROMPT.md` is *"48 h
+  soak on live public data: no duplicate/skipped events, correct stale => NO_TRADE"*. That is a real-time,
+  multi-day observation against the real Binance API and a laptop that must stay powered/awake for two
+  days - not something any single interactive session can complete synchronously, and not started
+  unilaterally (launching an unattended, multi-day, always-on network process is exactly the kind of
+  resource commitment this project's own working agreement asks to confirm with the owner first). Everything
+  above was validated offline, against fakes, exactly like every other phase's unit tests - the soak itself
+  is a deliberate, acknowledged next step, not a silently-skipped requirement. `docs/RUNTIME_OPERATIONS.md`
+  has the recipe ready for whenever the owner chooses to start it.
+- **Not yet built / deliberately left for later phases**: wiring `LiveEventClock` into the actual paper
+  loop (deferred until a multi-timeframe strategy exists, Phase 7); Telegram alerts on top of the heartbeat/
+  log (Phase 6); any web visibility into runtime health beyond the CLI (Phase 8).
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -2140,3 +2212,7 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-08 | Phase 4 intrabar rule for the TP ladder: a stop always beats a take-profit in the same bar (mirrors `execution.py`'s documented rule exactly); at most one rung resolves per bar even if a bar's range technically reaches two at once - the same "assume the worse/slower outcome when the 1m data can't distinguish order" spirit as CLAUDE.md rule 4 | approved (implemented) |
 | 2026-10-08 | Corrected a Phase 3 test rather than weakening it: `test_event_engine_static_rules.py`'s "legacy backtest modules never import the engine" check had hard-coded an exclusion for only `event_engine.py`; extended to also exclude the new, equally legitimate `paper_tracker.py`, while still forbidding every other `arven.backtest` file from importing either | implemented (Phase 4) |
 | 2026-10-08 | Master-prompt Phase 4 implemented and validated: 78 new tests across `engine/signal.py`, `signal_events.py`, `grading.py`, `ladder.py`, `signal_store.py` and `backtest/paper_tracker.py` (incl. hand-computed R-multiple and TP-ladder cases, the same-bar stop-beats-TP tie rule, one-rung-per-bar, break-even-stop, time-stop, and a tampered-signal-store rejection); full suite 2014 passed/13 skipped, no regressions, golden regression green | implemented (Phase 4), approved (final) |
+| 2026-10-08 | Master-prompt Phase 5 design: the always-on loop wraps the existing, unmodified `run_paper_tick` (no new decision/execution logic) rather than re-deriving REST-tail/resample/decide; the one genuinely new piece of logic - skip a tick when `latest_forward_window_end_ms` has not advanced - is necessary, not optional, since `run_paper_tick` writes a new artifact on every call with no short-circuit of its own; no second persisted cursor is added since `run_paper_tick` is already fully self-resuming; graceful shutdown is cooperative (`KeyboardInterrupt` + a `--stop-file` sentinel), not signal-based, because Windows' asyncio loop does not support POSIX signal handlers | approved (implemented) |
+| 2026-10-08 | `LiveEventClock` (the live `EventClock` implementation deferred since Phase 1) is built now for architectural symmetry but deliberately not yet wired into the real paper loop - that wiring waits for a genuine multi-timeframe strategy to need it (Phase 7), the same discipline already applied to `MultiTFView` | approved (implemented) |
+| 2026-10-08 | A pre-existing Phase 2 leakage-idiom regex test false-positived on the prose word "backfill" in a new `LiveEventClock` docstring (describing legitimate real-time catch-up, not a leakage pattern); fixed by rewording the docstring rather than weakening the still-valid check | implemented (Phase 5) |
+| 2026-10-08 | Master-prompt Phase 5 code implemented and validated offline: 23 new tests (`engine/clock.py`'s `LiveEventClock`, `paper/runtime.py`'s polling loop/heartbeat/structured log, all against fakes/injectable clocks, no real sleep or network); full suite 2037 passed/13 skipped, no regressions, golden regression green. **The phase's own gate - a 48-hour soak on live public data - was deliberately not run**: a real-time, multi-day, unattended network process against a laptop that must stay powered is a resource commitment requiring the owner's own go-ahead, not something to start unilaterally; `docs/RUNTIME_OPERATIONS.md` has the Task Scheduler/power-settings recipe ready for whenever that is decided | implemented (Phase 5), soak test pending owner decision |
