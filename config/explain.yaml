@@ -1,0 +1,9 @@
+# ARVEN Stage 10 explanation/Q&A configuration. A more capable model than Stage 9b's news-structuring
+# Haiku is used here: explanation/Q&A is low-volume (user-triggered, not per-item), and benefits more from
+# nuance. CLAUDE.md rule 9 still applies - this model only ever writes prose from already-computed data.
+
+llm_model: claude-sonnet-5-5
+max_tokens_explain: 300
+max_tokens_qa: 500
+n_decisions_context: 20   # how many recent decisions to include when answering a question
+n_news_context: 10        # how many recent news items to include when answering a question

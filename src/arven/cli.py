@@ -628,6 +628,57 @@ def cmd_news_show(cfg: AppConfig, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_explain(cfg: AppConfig, args: argparse.Namespace) -> int:
+    import json
+
+    from arven.core.explain_config import load_explain_config
+    from arven.llm.explain import explain_decision
+
+    ecfg = load_explain_config(args.config_dir)
+    run_dir = cfg.data.data_dir / "paper" / args.run
+    decisions_path = run_dir / "decisions.jsonl"
+    if not decisions_path.exists():
+        print(f"no decisions.jsonl for run {args.run} (run `arven paper show {args.run}` to check the run exists)")
+        return 1
+    lines = decisions_path.read_text(encoding="utf-8").strip().splitlines()
+    index = args.index if args.index is not None else len(lines) - 1
+    if not (0 <= index < len(lines)):
+        print(f"index {index} out of range (0..{len(lines) - 1})")
+        return 1
+    summary = json.loads(lines[index])
+    print(f"Decision at t={summary['t_ms']} (index {index} of {len(lines)}):")
+    print(json.dumps(summary, indent=2, sort_keys=True))
+    print()
+    print("Explanation:")
+    print(explain_decision(summary, model=ecfg.llm_model, max_tokens=ecfg.max_tokens_explain))
+    return 0
+
+
+def cmd_ask(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from arven.core.explain_config import load_explain_config
+    from arven.llm.context import build_context
+    from arven.llm.qa import answer_question
+
+    ecfg = load_explain_config(args.config_dir)
+    context = build_context(cfg, n_decisions=ecfg.n_decisions_context, n_news=ecfg.n_news_context)
+    answer = answer_question(args.question, context, model=ecfg.llm_model, max_tokens=ecfg.max_tokens_qa)
+    print(answer)
+    print()
+    print("Research tool only - not financial advice (CLAUDE.md rule 6/9).")
+    return 0
+
+
+def cmd_dashboard(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Launch the Stage 10 Streamlit dashboard as a subprocess (there is no application code to run here
+    directly - ``streamlit run`` is its own process model, same relationship as e.g. ``pytest``)."""
+    import subprocess
+    from pathlib import Path
+
+    app_path = Path(__file__).resolve().parent / "dashboard" / "app.py"
+    cmd = [sys.executable, "-m", "streamlit", "run", str(app_path), "--server.headless", "true" if args.headless else "false"]
+    return subprocess.run(cmd, check=False).returncode
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="arven", description="ARVEN data pipeline (research only, no execution)")
     parser.add_argument("--config-dir", default=None, help="configuration directory (default: <project>/config)")
@@ -725,6 +776,19 @@ def build_parser() -> argparse.ArgumentParser:
     q = nsub.add_parser("show", help="print recent news items and their structured events, if any")
     q.add_argument("--limit", type=int, default=20)
     q.set_defaults(func=cmd_news_show)
+
+    q = sub.add_parser("explain", help="Stage 10: plain-language explanation of one decision from a paper run (never a new decision)")
+    q.add_argument("run", help="a paper run id (see `arven paper status`)")
+    q.add_argument("--index", type=int, default=None, help="which decision in the run (default: the last one)")
+    q.set_defaults(func=cmd_explain)
+
+    q = sub.add_parser("ask", help="Stage 10: ask a question about stored decisions/results/news (answers only from stored data, never new trading advice)")
+    q.add_argument("question")
+    q.set_defaults(func=cmd_ask)
+
+    q = sub.add_parser("dashboard", help="Stage 10: launch the read-only Streamlit dashboard (reports, signals, news, Q&A)")
+    q.add_argument("--headless", action="store_true", help="do not try to open a browser window automatically")
+    q.set_defaults(func=cmd_dashboard)
     return parser
 
 

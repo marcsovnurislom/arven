@@ -205,6 +205,25 @@ def test_run_paper_tick_runs_the_real_pipeline_and_writes_an_artifact(env):
     assert index[-1]["run_id"] == out.run_id
 
 
+def test_run_paper_tick_writes_decisions_jsonl_from_the_providers_own_history(env):
+    app, fcfg, bt = env
+    pipeline = make_pipeline(bt)
+    now = from_ms(T0 + 4 * DAY)
+    outcome = run_paper_tick(app, fcfg, bt, pipeline, now=now, downloader=fake_downloader(app))
+    decisions_path = outcome.run.run_dir / "decisions.jsonl"
+    assert decisions_path.exists()
+    lines = [json.loads(line) for line in decisions_path.read_text(encoding="utf-8").strip().splitlines()]
+    assert len(lines) == len(pipeline.history)
+    assert lines[0]["t_ms"] == pipeline.history[0].t_ms
+    assert lines[0]["proposed_action"] == "NO_TRADE"  # feat_ready never reaches 1 in this short history
+
+
+def test_run_paper_tick_writes_no_decisions_jsonl_for_a_provider_without_history(env):
+    app, fcfg, bt = env
+    outcome = run_paper_tick(app, fcfg, bt, NoTrade(), now=from_ms(T0 + 4 * DAY), downloader=fake_downloader(app))
+    assert not (outcome.run.run_dir / "decisions.jsonl").exists()
+
+
 def test_run_paper_tick_is_catch_up_capable_a_later_tick_extends_the_window(env):
     app, fcfg, bt = env
     first = run_paper_tick(app, fcfg, bt, NoTrade(), now=from_ms(T0 + 4 * DAY), downloader=fake_downloader(app))

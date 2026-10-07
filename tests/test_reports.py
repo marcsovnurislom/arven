@@ -7,8 +7,10 @@ from arven.backtest.types import EquityKind, EquityPoint, ExitReason, Trade
 from arven.core.types import Action
 from arven.decision.engine import ProposedDecision
 from arven.decision.pipeline import DecisionRecord
-from arven.reports import per_regime_breakdown, regime_at_entry
+from arven.reports import decision_summary, per_regime_breakdown, regime_at_entry
 from arven.regime.detector import Regime, TrendState, VolState
+from arven.risk.engine import RiskDecision
+from arven.strategies.base import CandidateSignal
 
 HOUR = 3_600_000
 UP = Regime(TrendState.UP, VolState.NORMAL, False, True)
@@ -75,3 +77,43 @@ def test_format_breakdown_lists_every_regime_and_mentions_unattributed():
     b = per_regime_breakdown(result_with([trade(999, 5.0)]), history)
     text = format_breakdown(b)
     assert "TREND_UP/NORMAL" in text and "unattributed trades: 1" in text
+
+
+def test_decision_summary_serialises_every_field_as_json_safe_primitives():
+    candidate = CandidateSignal("trend_follow", 1, 0.8, 0.01, 0.02, 60, ("ema_cross",))
+    proposed = ProposedDecision(0, Action.LONG, 0.8, 0.9, ("trend_follow",), (), ("ema_cross",), UP, 0.01, 0.02, 60, (candidate,))
+    risk = RiskDecision(0, "signal", "ok", {"leverage": 1.0})
+    record = DecisionRecord(0, UP, (candidate,), proposed, risk)
+
+    summary = decision_summary(record)
+
+    assert summary == {
+        "t_ms": 0,
+        "regime": "TREND_UP/NORMAL",
+        "candidates": [{"strategy_id": "trend_follow", "direction": 1, "strength": 0.8, "reasons": ["ema_cross"]}],
+        "proposed_action": "LONG",
+        "proposed_score": 0.8,
+        "proposed_confidence": 0.9,
+        "contributing": ["trend_follow"],
+        "gated_out": [],
+        "reasons": ["ema_cross"],
+        "ml_filtered": False,
+        "risk_outcome": "signal",
+        "risk_reason": "ok",
+        "risk_detail": {"leverage": 1.0},
+    }
+    import json
+
+    json.dumps(summary)  # must be JSON-serialisable with no extra encoder
+
+
+def test_decision_summary_reflects_ml_filtered_and_veto_outcomes():
+    proposed = ProposedDecision(0, Action.NO_TRADE, 0.0, 0.0, (), (), (), UP, None, None, None, ())
+    risk = RiskDecision(0, "veto", "macro blackout", {"window_hours": 1.0})
+    record = DecisionRecord(0, UP, (), proposed, risk, ml_filtered=True)
+
+    summary = decision_summary(record)
+
+    assert summary["ml_filtered"] is True
+    assert summary["risk_outcome"] == "veto"
+    assert summary["risk_reason"] == "macro blackout"

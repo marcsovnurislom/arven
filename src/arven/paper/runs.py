@@ -162,7 +162,24 @@ def run_paper_tick(
     root.mkdir(parents=True, exist_ok=True)
     outcome = execute_run(app, bt_cfg, fcfg, window, provider, inputs, out_dir=root, extra={"rest_tail": vars(rest_summary)})
     _append_paper_index(root, outcome.manifest)
+    _write_decision_history(outcome.run_dir, provider)
     return PaperTickOutcome(window, rest_summary, outcome)
+
+
+def _write_decision_history(run_dir: Path | None, provider: SignalProvider) -> None:
+    """``decisions.jsonl``: one line per decision time (Stage 10's explanation/Q&A input). Duck-typed on
+    ``provider.history`` (Stage5Pipeline's own attribute) rather than importing arven.decision - paper/runs.py
+    stays provider-agnostic, exactly like execute_run itself; a provider with no `.history` simply gets no file."""
+    history = getattr(provider, "history", None)
+    if run_dir is None or not history:
+        return
+    import json
+
+    from arven.reports import decision_summary
+
+    with (run_dir / "decisions.jsonl").open("w", encoding="utf-8") as fh:
+        for record in history:
+            fh.write(json.dumps(decision_summary(record), sort_keys=True, default=str) + "\n")
 
 
 def _append_paper_index(root: Path, manifest: dict[str, Any]) -> None:

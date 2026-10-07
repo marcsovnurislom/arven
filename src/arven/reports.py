@@ -19,6 +19,30 @@ from arven.backtest.engine import BacktestResult
 from arven.decision.pipeline import DecisionRecord
 
 
+def decision_summary(record: DecisionRecord) -> dict[str, Any]:
+    """A plain, JSON-serialisable summary of one decision - the fixed, already-computed data an LLM may
+    later be given to write an explanation from (CLAUDE.md rule 9: it only ever turns this into prose, it
+    never recomputes or second-guesses any of these numbers)."""
+    return {
+        "t_ms": record.t_ms,
+        "regime": record.regime.label,
+        "candidates": [
+            {"strategy_id": c.strategy_id, "direction": c.direction, "strength": c.strength, "reasons": list(c.reasons)}
+            for c in record.candidates
+        ],
+        "proposed_action": record.proposed.action.value,
+        "proposed_score": record.proposed.score,
+        "proposed_confidence": record.proposed.confidence,
+        "contributing": list(record.proposed.contributing),
+        "gated_out": list(record.proposed.gated_out),
+        "reasons": list(record.proposed.reasons),
+        "ml_filtered": record.ml_filtered,
+        "risk_outcome": record.risk.outcome,
+        "risk_reason": record.risk.reason,
+        "risk_detail": dict(record.risk.detail),
+    }
+
+
 def regime_at_entry(history: list[DecisionRecord], entry_time_ms: int) -> str | None:
     """The regime label of the decision record whose time equals ``entry_time_ms`` (a trade's signal time,
     which is always a real decision time), or ``None`` if it is not found."""

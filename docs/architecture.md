@@ -49,7 +49,7 @@ These need your confirmation; the design uses the default until told otherwise.
 | A6 | Liquidations? | **Deferred.** Free historical liquidation data is not reliably available (Binance only streams live, throttled liquidation snapshots). Can start *recording* the live stream later; cannot be backtested fairly for past years. |
 | A7 | News sources? | Deferred to a later stage. Candidates: RSS feeds of crypto media, CryptoPanic-like APIs, official FOMC/CPI calendars. Cost/licensing to be checked. |
 | A8 | LLM provider? | Undecided (the `.venv` currently contains the `openai` package). Provider must be swappable behind an interface. Only used in late stages. |
-| A9 | User interface? | CLI + persisted signal log first; optional Streamlit dashboard later. |
+| A9 | User interface? | CLI + persisted signal log first; optional Streamlit dashboard later. **Stage 10: both now implemented** - see the Stage 8/10 "as implemented" notes below. |
 | A10 | Success criterion for the thesis? | Proposed: pipeline beats *no-trade*, *buy-and-hold (risk-adjusted)* and *random-entry* baselines **after costs** on the sealed test period and on forward paper trading — **or** a well-documented negative result. Both are valid diploma outcomes. |
 
 ---
@@ -135,6 +135,15 @@ Driving loop:
 > cheap at the scale a few months of 1m bars implies). Open interest is not REST-updated (optional,
 > NaN-tolerant feature group, see `data/adapters/binance_rest.py`); a CLI/Streamlit view beyond
 > `arven paper run/show/status` is not built (CLI first, per A9 - matches the architecture's own ordering).
+
+> **As implemented in Stage 10** (`src/arven/dashboard/`; details in `current_state.md`): the Streamlit
+> dashboard deferred at Stage 8 (A9's own ordering, above) is now built. It is a read-only presentation
+> layer - `src/arven/dashboard/data.py` only reads artifacts earlier stages already wrote (`run.json`,
+> `equity.csv`, `trades.csv`, `decisions.jsonl`, `news_items`/`news_events`); `src/arven/dashboard/app.py` is
+> the Streamlit script itself, launched via `arven dashboard`. It computes no trading number of its own and
+> has no write path into the market database or any execution code (CLAUDE.md rules 9 and 12). The
+> explain/Q&A buttons call Stage 10's own `llm.explain`/`llm.qa` only on an explicit click, never on page
+> load, so opening the dashboard never spends LLM API budget by itself.
 
 ---
 
@@ -627,8 +636,22 @@ influence decisions through features or risk blackout flags that are separately 
 > decision** - that integration is a deliberately separate, later decision. The LLM provider is Anthropic
 > (`claude-haiku-4-5-20251001` for this classification-sized task), called via a thin stdlib-HTTP client
 > rather than the official SDK (no new dependency), matching the same choice already made for Binance REST
-> in Stage 8. Deduplication/clustering and explanations/chat (the other two "useful" bullets above) are not
-> built - this stage covers news structuring only.
+> in Stage 8. Deduplication/clustering (the other "useful" bullet above) is not built - this stage covers
+> news structuring only.
+
+> **As implemented in Stage 10** (`src/arven/llm/explain.py`, `src/arven/llm/context.py`,
+> `src/arven/llm/qa.py`; `claude-sonnet-5-5`, a more capable model than Stage 9b's classification-sized
+> Haiku, since this is low-volume and user-triggered rather than per-item): explanations (`explain_decision`)
+> turn one already-computed `reports.decision_summary()` payload into 2-4 sentences of prose and are never
+> given the chance to suggest a different action; Q&A (`answer_question`) answers only from a context block
+> built purely from already-stored artifacts (`llm.context.build_context`: the latest paper run's
+> metrics/decisions, recent structured news) and is explicitly told to say so when the context does not
+> cover a question, never to recommend a trade or predict a price. Both are exposed via CLI (`arven explain`,
+> `arven ask`) and the Stage 10 dashboard. Unlike `news.schema`'s fixed-schema validation, there is no
+> further structural gate on the Q&A/explain output beyond the system prompt - a weaker guarantee than the
+> rest of the project's point-in-time/leakage guarantees, documented as such in `llm/qa.py`'s own module
+> docstring. Tested against fakes only; not yet exercised against the real Anthropic API (same acknowledged
+> gap as Stage 9b).
 
 ---
 

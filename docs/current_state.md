@@ -1,17 +1,19 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-05 (Stage 9b news ingestion + LLM structuring implemented, not yet real-API-tested)_
+_Last updated: 2026-10-07 (Stage 10 LLM explanations/Q&A + Streamlit dashboard implemented, not yet
+real-API-tested)_
 
 ## Phase
 
-**Stage 9b (news ingestion + LLM structuring) is implemented and unit-tested against fakes, but has not
-yet made a real call to the Anthropic API** (no API key was available in this session) **and is not wired
-into any feature, risk rule, or decision** (deliberately out of scope - a separate, later integration
-decision). The news source is RSS (CoinDesk, CoinTelegraph), not CryptoPanic's API as first discussed —
-its free tier was discontinued in early 2026, discovered while designing this stage. Forward-only by
-construction: the package has no `BacktestPeriod` concept at all, so there is no historical window an LLM's
-training-knowledge cutoff could contaminate. See "Stage 9b" below for the design, the CryptoPanic finding,
-and what real validation still needs to happen.
+**Stage 10 (LLM explanations/Q&A + the Streamlit dashboard) is implemented, unit-tested, and the dashboard
+itself was smoke-tested against this machine's real local data, but the explain/Q&A LLM calls have not yet
+been made against the real Anthropic API** (same acknowledged gap as Stage 9b - no API key was available in
+this session). Neither piece changes any decision/risk/strategy logic: the dashboard only reads artifacts
+earlier stages already wrote, and `explain_decision`/`answer_question` only turn already-computed data into
+prose. See "Stage 10" below for the design and what real validation still needs to happen.
+- Stage 9b (news ingestion + LLM structuring) is complete: implemented and unit-tested against fakes (not
+  yet real-API-tested, not wired into any decision/risk logic - see "Stage 9b" below). News source is RSS,
+  not CryptoPanic (its free API tier was discontinued in early 2026, found during design).
 - Stage 9a (macro calendar + risk-engine event blackout) is complete: implemented, validated, approved and
   committed (`b67afd0`). The risk engine's 8th rule (rule 2, deferred since Stage 5) now exists: a real,
   officially-sourced FOMC/CPI/NFP calendar vetoes new entries within `macro_blackout_window_hours` (default
@@ -1107,6 +1109,99 @@ structured news output yet, by design); `news` never imports `SplitGuard` or ref
 - `news_events`'s `summary` field is capped at 280 characters (a deliberate bound, not a found limitation)
   to keep stored rows small and because this stage has no downstream consumer that would need more.
 
+## Stage 10 — LLM explanations/Q&A + Streamlit dashboard
+
+**What was built:** two independent pieces, both read-only over already-computed data.
+
+1. **Explanations and Q&A** (`src/arven/llm/explain.py`, `src/arven/llm/context.py`,
+   `src/arven/llm/qa.py`, `src/arven/core/explain_config.py`, `config/explain.yaml`). CLI: `arven explain
+   <run> [--index N]`, `arven ask "<question>"`.
+2. **Streamlit dashboard** (`src/arven/dashboard/`), the A9/Stage-8-deferred UI. CLI: `arven dashboard`
+   (wraps `streamlit run` as a subprocess).
+
+**Design**
+- **`reports.decision_summary()`** turns one `DecisionRecord` (regime, every candidate, the proposed
+  action, risk outcome) into a plain JSON-safe dict - the fixed, already-computed payload an LLM is later
+  given to explain, never to recompute (CLAUDE.md rule 9). `paper.runs._write_decision_history()` writes one
+  `decisions.jsonl` line per decision time alongside every paper run's existing artifacts, duck-typed on
+  `provider.history` so `paper/runs.py` stays provider-agnostic (a provider with no `.history`, e.g. the
+  `NoTrade` baseline, simply gets no file - exercised by test, not assumed).
+- **The LLM only ever writes prose from data it is handed, never a new number.** `explain_decision()` sends
+  one `decision_summary()` payload and a system prompt that forbids suggesting a different action,
+  predicting the future, or recommending a trade - it is structurally unable to overrule the real decision
+  because the decision already happened before the LLM is ever called. `answer_question()` is told to
+  answer only from the context block it is given and to say so plainly when that context does not cover the
+  question - **this is a weaker guarantee than the rest of the project's point-in-time/leakage guarantees**
+  (there is no further structural gate like `news.schema`'s fixed-schema validation on the output), and
+  `llm/qa.py`'s own module docstring says so explicitly.
+- **`llm.context.build_context()` reads only artifacts earlier stages already wrote**: the latest paper
+  run's manifest/metrics and its `decisions.jsonl` (`llm.context.load_latest_paper_context`), plus the most
+  recent structured news rows (`llm.context.load_recent_news`, a left join of `news_items`/`news_events`).
+  Nothing here is computed fresh. A real bug was found and fixed while testing this against a fresh config
+  with no database file yet: `load_recent_news` called `duckdb.connect(..., read_only=True)` without
+  checking the file exists first, raising an unhandled `IOException` on the very first `arven ask` before
+  any `news`/`paper`/`backtest` run had ever created it - fixed to return `[]` in that case (missing data
+  stays a safe, empty result, never a crash, matching the project's NO_TRADE-default culture elsewhere).
+- **Cost control stays explicit.** `config/explain.yaml` uses `claude-sonnet-5-5` (more capable than Stage
+  9b's classification-sized Haiku, since this is low-volume and user-triggered rather than per-item) with
+  separate `max_tokens_explain`/`max_tokens_qa` caps. The dashboard's explain/Q&A sections only ever call the
+  LLM on an explicit button press - never on page load or on every rerun - so opening the dashboard never
+  spends API budget by itself.
+- **The dashboard is a presentation layer, not a new module in the stage-separation sense.**
+  `src/arven/dashboard/__init__.py`'s own docstring states why it is exempt from the rules the packages
+  below it must follow: it has no write path into the market database, no decision/risk/strategy logic of
+  its own, and cannot trigger a backtest, a paper tick, or a real order (CLAUDE.md rules 7, 9, 12).
+  `dashboard/data.py` is pure I/O (`list_runs`, `run_dir_for`, `load_manifest`, `load_csv`,
+  `load_decisions` - no `streamlit` import, so it is unit-testable without a display) and
+  `dashboard/app.py` is the actual Streamlit script: three tabs for paper (forward) runs and backtest runs
+  (manifest metrics, equity curve, trades table, and - paper runs only - the decision history with a
+  per-decision "explain" button), a news tab, and an "ask" chat tab. `arven dashboard` launches it via
+  `python -m streamlit run ... ` as a subprocess rather than any new application code, the same relationship
+  `pytest` already has to this project.
+- **New dependencies**: `pandas` and `streamlit` (which pulls `pyarrow`, `altair`, `pydeck`, and about 20
+  smaller packages - see "Environment" below). The install itself needed several long retries over a very
+  slow connection on this machine (the same connection-reset pattern already seen for `numpy` in Stage 3 and
+  `lightgbm` in Stage 6, this time slow trickling rather than resets); the final attempt completed in well
+  under a minute once most packages were already cached from the earlier partial attempts.
+
+**Module separation, enforced mechanically**: `tests/news/test_news_static_rules.py`'s existing
+`(SRC / "llm").rglob("*.py")` scan already covers the three new `llm/` files with no change needed -
+`explain.py`, `context.py`, and `qa.py` still never import `decision`/`risk`/`strategies`/`regime`/
+`backtest`. `dashboard/` is deliberately outside that scan (see "Design" above for why it is exempt).
+
+**Validation**
+- **30 new tests**: `tests/test_reports.py` (+2: `decision_summary` serialises every field, including the
+  `ml_filtered`/veto case), `tests/paper/test_paper_runs.py` (+2: `decisions.jsonl` is written from the real
+  pipeline's own history and is absent for a provider without one), `tests/llm/test_explain.py` (1),
+  `tests/llm/test_qa.py` (1), `tests/llm/test_llm_context.py` (7, incl. the missing-database-file regression
+  above), `tests/llm/test_explain_config.py` (8, same hash-stability/invalid-config pattern as
+  `test_news_config.py`), `tests/dashboard/test_data.py` (9).
+- **Full suite: 1708 passed, 13 skipped** (no regressions in Stages 1-9b).
+- **The dashboard script itself was smoke-tested against this machine's real local data** (16 real paper
+  runs, 20 real backtest runs): launched headlessly via `streamlit run` (HTTP 200, `/_stcore/health` ok, no
+  exceptions in the server log) and separately executed directly with `runpy` to force every line of
+  `app.py`'s own logic (not just the server's static shell) to run against the real `data/paper`/
+  `data/backtests` artifacts - confirmed to complete with no exception. A `use_container_width` deprecation
+  warning surfaced during this smoke test and was fixed (`width="stretch"`) before commit.
+- **Not yet validated against the real Anthropic API** - same acknowledged gap as Stage 9b, for the same
+  reason (no API key available in this session). `explain_decision`/`answer_question` are tested only
+  against a scripted fake `complete()`.
+
+**Known limitations, all deliberate MVP scope or honestly-reported findings (not bugs)**
+- **No real LLM call has been made** for explanation or Q&A either - see "Validation" above.
+- **The Q&A system prompt is the only guardrail against off-scope answers** - unlike `news.schema`'s
+  pydantic validation, there is no structural check that an answer actually stayed within the given
+  context. Acceptable for a research/explanation tool, explicitly documented as weaker than the rest of the
+  project's guarantees (see "Design" above).
+- **The dashboard has no authentication or access control** - acceptable for a single-user local research
+  tool run with `streamlit run`/`arven dashboard` on one laptop, not suitable for any shared deployment.
+- **No caching** (`st.cache_data`) on the dashboard's file/DB reads - every rerun re-reads from disk. Not a
+  problem at this project's data scale (a few thousand decisions, a few dozen runs); a candidate for later
+  if the dashboard ever feels slow.
+- **Decision history is paper-run-only** - backtest runs do not persist `decisions.jsonl` (`execute_run`
+  itself did not change; only `paper.runs.run_paper_tick` calls the new `_write_decision_history` helper),
+  since the explain/Q&A features are framed around the live/forward loop, not historical backtests.
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -1555,11 +1650,13 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
    forward result: baseline −14.9% over 94.4 days (consistent with every Stage 7 window), logistic MetaFilter
    flat at +0.06% on 2 trades (consistent with Stage 7's non-replication finding, not a new positive result).
    ~~Stage 9a macro calendar + risk blackout~~: done, approved and committed `b67afd0`. All 8 risk engine
-   rules now exist. **Stage 9b news ingestion + LLM structuring**: implemented and unit-tested against
-   fakes (40 new tests, full suite 1678 passed/13 skipped) — see "Stage 9b" above. News source is RSS, not
-   CryptoPanic (its free API tier was discontinued in early 2026, found during design). **Not yet validated
-   against the real Anthropic API** (no key available in-session) and **not wired into any decision/risk
-   logic** — both deliberate, acknowledged gaps, not oversights.
+   rules now exist. ~~Stage 9b news ingestion + LLM structuring~~: done, approved and committed `b9164d5`.
+   News source is RSS, not CryptoPanic (its free API tier was discontinued in early 2026, found during
+   design). **Stage 10 LLM explanations/Q&A + Streamlit dashboard**: implemented and unit-tested (30 new
+   tests, full suite 1708 passed/13 skipped) — see "Stage 10" above; the dashboard itself was also
+   smoke-tested against this machine's real local data. **Neither Stage 9b nor Stage 10's LLM calls have
+   been validated against the real Anthropic API** (no key available in-session) and **neither is wired
+   into any decision/risk logic** — all deliberate, acknowledged gaps, not oversights.
 2. ~~`forward_start = 2026-07-01` is already in the past~~: **resolved by Stage 8** — it needed no relabelling.
    The gap between `history_end`/`forward_start` (2026-07-01) and the day Stage 8 actually ran (2026-10-03,
    ~94 days) was simply backfilled via the new REST-tail path (the same public endpoints, just incremental)
@@ -1632,11 +1729,13 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 
 ## What does NOT exist yet
 
-- Dashboard. (The paper-signal loop exists — Stage 8; the macro calendar + risk blackout, Stage 9a, and
-  news ingestion + LLM structuring, Stage 9b, both exist too — see below. Stage 9b is not yet validated
-  against the real Anthropic API and not wired into any decision/risk logic.)
-- Deduplication/clustering of near-duplicate news stories across sources, and explanations/chat over stored
-  data (architecture.md section 15's other two "useful" LLM bullets) — Stage 9b covers structuring only.
+- ~~Dashboard~~: implemented in Stage 10 (`src/arven/dashboard/`, `arven dashboard`) — see "Stage 10" above.
+  (The paper-signal loop exists — Stage 8; the macro calendar + risk blackout, Stage 9a, and news ingestion
+  + LLM structuring, Stage 9b, both exist too. Neither Stage 9b's nor Stage 10's LLM calls are yet validated
+  against the real Anthropic API, and neither is wired into any decision/risk logic.)
+- Deduplication/clustering of near-duplicate news stories across sources (architecture.md section 15's
+  remaining "useful" LLM bullet not yet built — explanations and Q&A over stored data, the other two
+  bullets, were implemented in Stage 10).
 - `MarketSnapshot` as a separate class (its job is done by `core.series.MarketInputs.available_until` and
   `data.reader`), and the `feature_sets` DuckDB table (replaced by `manifest.json`).
 - ~~REST incremental updates (only bulk files are supported so far)~~: implemented in Stage 8
@@ -1655,7 +1754,8 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
   there is nothing to log — see open issue #8).
 - Git: branch `feat/historical-data`; commits `efb6677` (Stage 1+2), `4be9329` (docs), `6ac57d4` (Stage 3),
   `8009719` (Stage 4), `a6da56b` (docs), `2298e5a` (Stage 5), `e9b7c72` (Stage 6), `aa43c1b` (Stage 7),
-  `f4f3787` (Stage 8), `b67afd0` (Stage 9a). Stage 9b (news + LLM) is included in this commit.
+  `f4f3787` (Stage 8), `b67afd0` (Stage 9a), `b9164d5` (Stage 9b). Stage 10 (LLM explanations/Q&A +
+  Streamlit dashboard) is included in this commit.
 
 ## Environment
 
@@ -1676,7 +1776,14 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
     this venv as a "pre-existing package," now declared explicitly in `pyproject.toml`. No HTTP client
     library (the Anthropic Messages API is called via stdlib `urllib.request`, same choice as Stage 8's
     Binance REST client) and no RSS-parsing library (stdlib `xml.etree.ElementTree`).
-  - Not installed: pandas, pyarrow.
+  - Added in Stage 10: `pandas 3.0.6`, `streamlit 1.65.0` (pulled in `pyarrow 25.0.1`, `altair 6.3.0`,
+    `pydeck 0.9.3`, and about 20 smaller packages: `pillow`, `protobuf`, `click`, `tornado`/`uvicorn`/
+    `starlette`/`httptools`/`websockets`, `watchdog`, `jsonschema`, `requests`, `tzdata`, etc. - the full
+    list is in `pyproject.toml`/the environment's own lockfile, not reproduced here). The install needed
+    several long retries over a very slow connection on this machine (same connection-reset pattern already
+    seen for `numpy` in Stage 3 and `lightgbm` in Stage 6, here manifesting as very slow trickling rather
+    than outright resets); most packages were already downloaded from earlier partial attempts by the time
+    the final, successful attempt completed in well under a minute.
 - Pre-existing packages from the user: `openai`, `pydantic`, `httpx2`, `python-dotenv`.
 
 ## Decisions log
@@ -1738,3 +1845,9 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-05 | LLM provider: Anthropic (`claude-haiku-4-5-20251001`), called via a thin stdlib-HTTP client rather than the official SDK - no new dependency, same choice already made for Binance REST in Stage 8 | approved |
 | 2026-10-05 | Stage 9b design: forward-only by construction (no `BacktestPeriod` concept anywhere in the `news` package, rather than a date check) satisfies architecture.md's rule 11 (LLM training-cutoff contamination); the LLM only ever structures a headline into the fixed `NewsEvent` schema (`extra="forbid"`), never a trading decision; `max_items_per_tick` hard-caps LLM calls per tick for cost control; not wired into any feature/risk/decision - a separate, later integration decision | approved (implemented) |
 | 2026-10-05 | Stage 9b implemented and unit-tested against fakes only (40 new tests); user chose to proceed without a real Anthropic API smoke test for now (no API key provided in-session) - acknowledged, documented gap, not a silent omission | approved (final) |
+| 2026-10-05 | Stage 9b review approved, committed `b9164d5` | approved (final) |
+| 2026-10-06 | User directive: finish the whole project's functionality and build an interface to see real reports/signals before returning to new-strategy experimentation - interpreted as Stage 10 (explanations/Q&A, per the roadmap's own stated deliverables) plus the Streamlit dashboard deferred since Stage 8 (A9) | approved |
+| 2026-10-06 | Stage 10 design: `reports.decision_summary()`/`paper.runs._write_decision_history()` persist one `decisions.jsonl` per paper run as the fixed, already-computed payload explain/Q&A read from; `explain_decision` is never given the chance to suggest a different action (the decision already happened); `answer_question` answers only from a context block of already-stored artifacts and is told to say so when that context doesn't cover a question - a weaker, explicitly-documented guarantee than the rest of the project's point-in-time rules, since there is no structural schema gate on the output; `config/explain.yaml` uses `claude-sonnet-5-5` (more capable than Stage 9b's Haiku, since this is low-volume/user-triggered); the dashboard (`src/arven/dashboard/`) is a read-only presentation layer exempt from the stage-separation rules, calling the LLM only on an explicit button press, never on page load | approved (implemented) |
+| 2026-10-06 | Found and fixed a real bug while testing `llm.context.load_recent_news` against a fresh config with no database file yet: an unhandled `duckdb.IOException` on the very first `arven ask` before any run had created the DB file - fixed to return `[]` (missing data stays safe and empty, never a crash) | implemented (Stage 10) |
+| 2026-10-07 | `pip install streamlit` needed several long retries over a very slow connection (10MB in 10 minutes on the first attempt; a background-process memory-pressure guard also killed one attempt mid-install after the downloads had already finished) - the user explicitly approved each retry rather than the install being silently retried | approved |
+| 2026-10-07 | Stage 10 implemented and validated: 30 new tests (full suite 1708 passed/13 skipped); the dashboard was additionally smoke-tested against this machine's real local data (16 paper runs, 20 backtest runs) via both a headless `streamlit run` and a direct `runpy` execution of its own logic, both clean; a `use_container_width` deprecation (already past its removal date in the installed streamlit 1.65.0) was found and fixed before commit | implemented (Stage 10), approved (final) |
