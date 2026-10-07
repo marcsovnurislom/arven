@@ -1,6 +1,12 @@
 """Module-boundary check for the new engine (ARVEN_MASTER_PROMPT.md phase 1): it must not depend on the
 legacy decision/risk/strategies/regime/backtest stack, so it can be built and tested in isolation without
-any risk of silently coupling to - or breaking - the golden Stage 5 result."""
+any risk of silently coupling to - or breaking - the golden Stage 5 result.
+
+Phase 3 note (kept unchanged on purpose): the event-driven backtest loop must reuse the Stage 4 execution
+layer (``arven.backtest.execution.Simulator`` and friends), which would collide with this rule if the loop
+lived here. It therefore lives in ``arven.backtest.event_engine`` and imports *from* ``arven.engine`` (clock
+and events only) - the dependency points ``backtest -> engine``, never the reverse, so this blanket rule still
+holds verbatim. The loop's own precise boundary is pinned in ``tests/backtest/test_event_engine_static_rules.py``."""
 
 from __future__ import annotations
 

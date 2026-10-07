@@ -1,6 +1,6 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-07 (Signal-product build-out Phase 2: per-TF features + MultiTFView + leakage suite)_
+_Last updated: 2026-10-07 (Signal-product build-out Phase 3: event-driven backtest loop on top of Stage 4 execution)_
 
 ## Phase
 
@@ -8,10 +8,13 @@ _Last updated: 2026-10-07 (Signal-product build-out Phase 2: per-TF features + M
 separate build-out described in `docs/ARVEN_MASTER_PROMPT.md` - a multi-timeframe event-driven engine, a
 new strategy, Telegram alerts and a web dashboard, aimed at a usable signal product rather than only the
 diploma - tracked as its own phase sequence (see "Signal-product build-out" below), kept strictly additive
-so the Stages 0-10 pipeline and its golden `result_hash 3eca0a70...` keep reproducing unchanged. **Phases 1-2
+so the Stages 0-10 pipeline and its golden `result_hash 3eca0a70...` keep reproducing unchanged. **Phases 1-3
 of that build-out (`arven.engine`: `StrategySpec`, `BarCloseEvent`, `EventClock`/`SimulatedEventClock`; generic
-per-timeframe feature tables and `MultiTFView` with their truncation/perturbation leakage suite) are
-implemented and tested** - see "Signal-product build-out" below; next is Phase 3 (event-driven backtest loop). Stage 11 (the sealed-test final
+per-timeframe feature tables and `MultiTFView` with their truncation/perturbation leakage suite;
+`arven.backtest.event_engine.EventBacktester`, the event-driven backtest loop on top of the unchanged Stage 4
+execution layer, proven `result_hash`-identical to the legacy `Backtester` for the 1h Stage 5 pipeline) are
+implemented and tested** - see "Signal-product build-out" below; next is Phase 4 (Signal object v2, paper
+tracker in R, signal store, grading gate). Stage 11 (the sealed-test final
 evaluation) remains untouched, by design (master-prompt phase 12, owner-gated, exactly once).
 - Stage 10 (LLM explanations/Q&A + the Streamlit dashboard) is complete: implemented, unit-tested, and the
   dashboard itself was smoke-tested against this machine's real local data; the explain/Q&A LLM calls have
@@ -1319,6 +1322,89 @@ the engine imports only `features.indicators`/`features.asof`).
   gates, a persisted `features_<tf>` cache/DuckDB table (tables are computed in memory for now), YAML config
   for `TFFeatureParams`, and swing/pivot/zone features for strategy S4 (Phase 7).
 
+**Phase 3 — event-driven backtest loop on top of Stage 4 execution (done, 2026-10-07).** One new source file,
+`src/arven/backtest/event_engine.py`; plus a docstring correction in `src/arven/engine/__init__.py` and an
+explanatory comment in `tests/engine/test_engine_static_rules.py` (rule itself unchanged). No existing logic
+touched - `backtest/engine.py`, `execution.py`, `clock.py`, `provider.py`, `types.py`, `report.py` and every
+Phase 1/2 file are byte-for-byte as before.
+- **`EventBacktester`**: same constructor and validation as the legacy `Backtester` (`app, cfg, window,
+  market, features, stress`; taker-only costs, `latency >= bar availability delay`, market window = allowed
+  window, feature rows = the window's hourly grid). `run(clock: EventClock, providers: Mapping[Timeframe,
+  SignalProvider]) -> BacktestResult` (the legacy dataclass itself, so `report.result_hash`, metrics and run
+  artifacts consume it unchanged). For every event the clock emits whose timeframe has a registered provider
+  it makes **exactly the legacy call sequence** on the unchanged Stage 4 `Simulator`: `j =
+  first_at_or_after(close_ms)`, `run_window(cursor, j)`, `add_point(close_ms, close[j-1], DECISION)`, a
+  `PortfolioSnapshot`/`DecisionContext` (legacy `FeatureView` bound to the event's `close_ms`; `ctx.index` is
+  the provider's own decision count), `decide()` only on the provider registered under `event.timeframe`,
+  and the identical signal → order / reject handling (`position_open`, `exceeds_leverage_cap`, close /
+  `close_ignored`, wrong signal time → `SignalError`). `prepare()` is called once per provider before the loop
+  (coarsest timeframe first) with that timeframe's own decision grid; one final `run_window(cursor, len(md))`
+  + `finish()` at the end. Decision time = bar close, the same convention as the legacy grid; availability
+  delay is handled exactly as before, through `latency_ms`.
+- **Multi-timeframe semantics**: events of timeframes with no registered provider are skipped *entirely* (no
+  simulator call - the next dispatched event's `run_window` covers those minutes), so adding unused
+  timeframes to the clock cannot change a result (tested). Same-instant events follow the clock's own
+  Phase 1 coarsest-first order. One account, one net position: an entry from a second provider while an
+  order is pending or a position is open is rejected `position_open`, as a repeated legacy entry is - no
+  pyramiding. Strict clock validation, all → `DataError`: an event before the previous one, an event outside
+  `[window.start, window.end)` (even for an unregistered timeframe), a registered timeframe's event that is
+  not the next expected decision time, or a clock that ends before emitting every decision time of a
+  registered timeframe. In particular a `SimulatedEventClock(start, end)` built naively over the window is
+  refused rather than silently producing an hour-shifted backtest: its closes are `start+1h .. end`, while the
+  window's decisions are `start .. end-1h` (the legacy grid's first decision is the close at `start` of the bar
+  that opened before the window). `WindowEventClock(symbol, timeframes, start, end, delay)` (same file)
+  builds the correct clock for any timeframe set: a `SimulatedEventClock` started one coarsest bar early,
+  filtered to closes in the window (Phase 1 ordering/tie rule unchanged); `timeframe_grid(start, end, tf)` is
+  the epoch-aligned close grid (equals the legacy `decision_grid` for 1h - tested).
+- **Module-boundary resolution**: the master prompt requires reusing Stage 4 execution unchanged, while
+  Phases 1-2 established that `arven.engine` never imports `arven.backtest`. Rather than loosening that rule,
+  the loop lives in `arven.backtest` and imports *from* `arven.engine` (clock and events only) - the
+  dependency points `backtest -> engine`, never the reverse, so the Phase 1/2 static rules hold verbatim and
+  the loop can import `BacktestResult` directly (a copy of that dataclass would have been a second definition
+  of the result contract). `tests/backtest/test_event_engine_static_rules.py` (6 tests) pins the precise rule:
+  the loop imports from `arven.engine` only `clock`/`events`; from `arven.backtest.engine` only
+  `BacktestResult` (never `Backtester`/`decision_grid`), never `arven.backtest.clock`, never
+  decision/risk/strategies/regime/ML; no legacy `arven.backtest` module imports `arven.engine` or the loop; no
+  later-stage/lower-layer package (nor `arven.engine`) imports the loop. The loop also passes the existing
+  package-wide `tests/backtest/test_backtest_static_rules.py` checks (no wall-clock, I/O, unseeded randomness).
+  The `engine/__init__.py` docstring was corrected while there: the golden `result_hash 3eca0a70...` lives only
+  in the real local artifacts under `data/` and in this document, not in the test suite; what the suite
+  enforces is equality of `result_hash` between runs on identical synthetic fixtures.
+- **The Phase 3 gate - identical `result_hash`** (`tests/engine/test_event_backtest_equivalence.py`, 19
+  tests): the real `Stage5Pipeline` on the same synthetic features/1m market/window (the
+  `test_stage5_no_ml_regression.py` fixture pattern, 180 days, market seed = seed + 1000) run through the
+  legacy `Backtester.run` and through `EventBacktester.run` with a plain Phase 1 `SimulatedEventClock`
+  carrying only `Timeframe.H1` (closes `start .. end-1h`) and the pipeline under `H1`. Asserted equal table by
+  table (`result_tables`: meta, orders, fills, funding, trades, equity) and by `result_hash`: seeds 0, 5, 9,
+  17, 22 with real costs and with zero costs, seeds 0 and 22 under 2x cost stress, seeds 0/9 via
+  `WindowEventClock`, seeds 0/17 with a clock that also carries 15m and 4h events (no provider on them), an
+  all-`None` 150-day run, and a hand-made market with a scripted provider that hits every order branch
+  (entry, `position_open` and leverage-cap rejections, `NO_TRADE`, close, `close_ignored`; exits STOP,
+  SIGNAL_CLOSE, TIME_STOP, TAKE_PROFIT; funding while in a position). Every pipeline seed has real trades
+  (11-65 per run; asserted, plus positive fees in the real-cost runs), and the seed set as a whole includes
+  funding settlements and END_OF_PERIOD closes (asserted). **All hashes matched exactly; no tolerance.**
+- **Multi-timeframe dispatch + orchestration** (`tests/engine/test_event_backtest_loop.py`, 23 tests):
+  counting providers on 1h and 15m are each called exactly once per own-timeframe close and never on the
+  other's (6 and 24 calls over 6 h, `ctx.index` per provider); with 4h/1h/15m providers the order at 4h
+  boundaries is 4h, 1h, 15m and at other hours 1h, 15m; `prepare` once per provider, coarsest first, before
+  any decision, with its own grid; unregistered timeframes skipped; two same-instant entries open one
+  position (second rejected `position_open`); a 15m provider sees the 1h provider's pending order and then the
+  filled position; the `FeatureView` refuses rows after the event time (`LookAheadError`, also for a 15m
+  provider reading the 1h row that has not closed yet); wrong-time signal; every clock-validation error
+  above; empty providers / one provider under two timeframes → `ConfigurationError`; constructor rejects the
+  same inputs as `Backtester`; `WindowEventClock` contents/ordering/validation.
+- **Counts**: 48 new tests (19 + 23 + 6) plus 2 automatic ones (the package-wide backtest static rules
+  parametrise over every `backtest/*.py`, now including `event_engine.py`). Full suite: **1936 passed, 13
+  skipped** (1886 + 50; no regressions; `tests/pipeline/test_stage5_no_ml_regression.py` green with its
+  assertions untouched).
+- **Not yet built / deliberately left for later phases**: wiring `EventBacktester` into `arven.runs`/the CLI,
+  `arven.paper` or a live loop (the legacy `Backtester` still drives all of those); the live `EventClock`
+  (Phase 5); migrating any strategy from the legacy `FeatureView` to `MultiTFView`, enforcing
+  `StrategySpec.warmup_bars`/regime gates in the loop, per-strategy risk budgets and the global net-exposure
+  cap (with one provider per timeframe today, "one net position" is enforced by the shared `Simulator`); Signal
+  object v2, paper tracker in R, signal store and grading gate (Phase 4); `docs/architecture.md` has not yet
+  been updated for the build-out (the master prompt's definition of done schedules that).
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -1974,3 +2060,6 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-07 | Master-prompt Phase 1 implemented and validated: 32 new tests (`tests/engine/`), full suite 1740 passed/13 skipped, no regressions | implemented (Phase 1), approved (final) |
 | 2026-10-07 | Master-prompt Phase 2 design: one generic `compute_tf_features` (same code for every timeframe; regularized grid + the shared `features/indicators.py` primitives; minimal set close/ATR/ATR%/EMA20-50 distance/EMA50 slope/ADX, names qualified as `"<tf>.<name>"` so they cannot collide with Stage 3) in new files under `arven.engine`, neither reusing nor touching the frozen Stage 3 `bars.py`/`builder.py`; `MultiTFView` returns the last row with `available_at <= t` per timeframe, raises the engine's own `LookAheadError` only when no such row exists at all, returns stale rows (older than one bar) as all-NaN like the Stage 3 builder's `max_age`, and treats warm-up/gap NaNs as defined readings (never raises) | approved (implemented) |
 | 2026-10-07 | Master-prompt Phase 2 implemented and validated: 146 new tests (`tests/engine/`); truncation + perturbation leakage gate passes for every new feature column and for `MultiTFView` (incl. delay, gappy/stale data, event-driven, and a leaky-view canary); full suite 1886 passed/13 skipped, no regressions | implemented (Phase 2) |
+| 2026-10-07 | Master-prompt Phase 3 design: the event-driven backtest loop (`EventBacktester`) lives in `arven.backtest.event_engine` and imports *from* `arven.engine` (clock/events only), so the Phase 1/2 rule "`arven.engine` never imports `arven.backtest`" holds verbatim; it reuses the Stage 4 `Simulator` unchanged with exactly the legacy call sequence, returns the legacy `BacktestResult`, never imports `Backtester` or `arven.backtest.clock`, and no legacy module imports it (new static test) | approved (implemented) |
+| 2026-10-07 | Phase 3 loop semantics: providers keyed by trigger timeframe, decide only on their own timeframe's events; events of unregistered timeframes skipped entirely (no simulator call); same-instant dispatch follows the Phase 1 coarsest-first rule; one account / one net position (a second entry is rejected `position_open`); strict clock validation (monotonic, inside the window, exactly the window's decision times per registered timeframe) - a naively-built `SimulatedEventClock(start, end)`, which is shifted one bar late, is refused, and `WindowEventClock` builds the correct window clock | approved (implemented) |
+| 2026-10-07 | Master-prompt Phase 3 implemented and validated: identical `result_hash` (table by table) between legacy `Backtester` and `EventBacktester` with an H1-only clock for the real `Stage5Pipeline` on seeds 0/5/9/17/22 (all with real trades) under real, zero and 2x-stress costs, plus scripted all-branches and all-`None` runs; 48 new tests (+2 auto-parametrised), full suite 1936 passed/13 skipped, no regressions | implemented (Phase 3) |
