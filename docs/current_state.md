@@ -1,16 +1,21 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-07 (Stage 10 LLM explanations/Q&A + Streamlit dashboard implemented, not yet
-real-API-tested)_
+_Last updated: 2026-10-07 (Signal-product build-out Phase 1: StrategySpec/BarCloseEvent/EventClock)_
 
 ## Phase
 
-**Stage 10 (LLM explanations/Q&A + the Streamlit dashboard) is implemented, unit-tested, and the dashboard
-itself was smoke-tested against this machine's real local data, but the explain/Q&A LLM calls have not yet
-been made against the real Anthropic API** (same acknowledged gap as Stage 9b - no API key was available in
-this session). Neither piece changes any decision/risk/strategy logic: the dashboard only reads artifacts
-earlier stages already wrote, and `explain_decision`/`answer_question` only turn already-computed data into
-prose. See "Stage 10" below for the design and what real validation still needs to happen.
+**The 10-stage thesis-core roadmap (Stages 0-10) is complete.** The owner has since approved a larger,
+separate build-out described in `docs/ARVEN_MASTER_PROMPT.md` - a multi-timeframe event-driven engine, a
+new strategy, Telegram alerts and a web dashboard, aimed at a usable signal product rather than only the
+diploma - tracked as its own phase sequence (see "Signal-product build-out" below), kept strictly additive
+so the Stages 0-10 pipeline and its golden `result_hash 3eca0a70...` keep reproducing unchanged. **Phase 1
+of that build-out (`arven.engine`: `StrategySpec`, `BarCloseEvent`, `EventClock`/`SimulatedEventClock`) is
+implemented and tested** - see "Signal-product build-out" below. Stage 11 (the sealed-test final
+evaluation) remains untouched, by design (master-prompt phase 12, owner-gated, exactly once).
+- Stage 10 (LLM explanations/Q&A + the Streamlit dashboard) is complete: implemented, unit-tested, and the
+  dashboard itself was smoke-tested against this machine's real local data; the explain/Q&A LLM calls have
+  not yet been made against the real Anthropic API (same acknowledged gap as Stage 9b - no API key was
+  available in that session). See "Stage 10" below.
 - Stage 9b (news ingestion + LLM structuring) is complete: implemented and unit-tested against fakes (not
   yet real-API-tested, not wired into any decision/risk logic - see "Stage 9b" below). News source is RSS,
   not CryptoPanic (its free API tier was discontinued in early 2026, found during design).
@@ -1202,6 +1207,52 @@ structured news output yet, by design); `news` never imports `SplitGuard` or ref
   itself did not change; only `paper.runs.run_paper_tick` calls the new `_write_decision_history` helper),
   since the explain/Q&A features are framed around the live/forward loop, not historical backtests.
 
+## Signal-product build-out (`docs/ARVEN_MASTER_PROMPT.md`)
+
+A separate, larger initiative approved by the owner after Stage 10: turn ARVEN into a usable signal
+product (multi-timeframe event-driven engine, a new strategy, Telegram alerts, a web dashboard) while never
+breaking the thesis-core pipeline above. Tracked as its own phase sequence (master prompt section 6, 12
+phases); this section is updated at the end of each phase the same way the Stage sections above are.
+
+**Phase 0 — safety net (done, 2026-10-07).** Tag `pre-signal-product` on the Stage-10 head (`b9b28e8`, which
+also carries the master-prompt doc itself); new branch `feat/signal-product`. Golden regression
+(`tests/pipeline/test_stage5_no_ml_regression.py`) green; golden `result_hash 3eca0a70...` confirmed present
+in real local backtest artifacts, matching "Stage 5" above. Full suite baseline recorded: 1708 passed/13
+skipped - exactly the count the master prompt itself names.
+
+**Phase 1 — `StrategySpec`/`BarCloseEvent`/`EventClock` (done, 2026-10-07).** New package `src/arven/engine/`
+(`spec.py`, `events.py`, `clock.py`), deliberately isolated from the legacy stack - it imports only
+`arven.core` (timeframes/time), never `decision`/`risk`/`strategies`/`regime`/`backtest` (enforced by
+`tests/engine/test_engine_static_rules.py`, the same static-AST pattern as `tests/news/test_news_static_rules.py`).
+Nothing in the existing Stages 1-10 code was touched.
+- **`StrategySpec`** (`engine/spec.py`): `strategy_id`, `version`, `context_tfs` (coarser-or-equal to
+  `setup_tf`, may be empty), `setup_tf`, `trigger_tf` (same-or-finer than `setup_tf` - a strategy is
+  evaluated only on its own `trigger_tf`'s close), `warmup_bars`, `allowed_regimes` (a `frozenset` of
+  `Regime.label` strings, or `None` for no gate). Validated in `__post_init__`, matching the project's
+  existing dataclass-validation style (e.g. `CandidateSignal`).
+- **`BarCloseEvent`** (`engine/events.py`): one timeframe's bar closing for one symbol - `open_ms`,
+  `close_ms` (= the decision/event time), `available_at_ms` (`close_ms` + a configured delay, computed the
+  same way as `core.timeframes.bar_available_at`, never differently).
+- **`EventClock`/`SimulatedEventClock`** (`engine/clock.py`): the event-driven analogue of
+  `backtest.clock.Clock`/`SimulationClock` (kept, unmodified, for the legacy path). Builds the full ordered
+  event sequence once, up front, from a fixed set of timeframes over `[start_ms, end_ms)` - same
+  determinism approach as the legacy clock's precomputed grid. **Documented tie rule**: events sharing the
+  same `close_ms` are ordered coarsest-timeframe-first (sort key `(close_ms, -timeframe.ms)`) - a 4h close
+  always coincides with a 1h/15m/5m/1m close, and this ordering guarantees any coarser-or-equal timeframe a
+  strategy reads as context has already been emitted as closed by the time its own, finer `trigger_tf`
+  event fires at that same instant. This removes a whole class of same-instant look-ahead bugs by
+  construction (event order itself), not only by relying on `available_at` arithmetic downstream. Single-
+  symbol for now (multi-symbol is master-prompt phase 9, explicitly separate).
+- **Validation**: 32 new tests (`tests/engine/`) covering construction validation, the `now_ms`/`started`
+  contract (mirrors `SimulationClock`'s own "clock has not started" / stays-put-after-exhaustion
+  behaviour), the coarsest-first tie rule (including a 3-timeframe coincident-close case), strictly
+  non-decreasing `close_ms` across the whole sequence, availability-delay arithmetic, and determinism
+  (identical construction ⇒ byte-identical sequence; timeframe argument order does not affect the result).
+  Full suite: **1740 passed, 13 skipped** (1708 + 32 new; no regressions anywhere in Stages 1-10).
+- **Not yet built** (explicitly later phases): per-timeframe feature tables, `MultiTFView`, the live
+  `EventClock` implementation, and the event-driven backtest loop itself (master-prompt phases 2-3) -
+  `EventClock` right now only schedules events; nothing yet consumes them.
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -1851,3 +1902,7 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-06 | Found and fixed a real bug while testing `llm.context.load_recent_news` against a fresh config with no database file yet: an unhandled `duckdb.IOException` on the very first `arven ask` before any run had created the DB file - fixed to return `[]` (missing data stays safe and empty, never a crash) | implemented (Stage 10) |
 | 2026-10-07 | `pip install streamlit` needed several long retries over a very slow connection (10MB in 10 minutes on the first attempt; a background-process memory-pressure guard also killed one attempt mid-install after the downloads had already finished) - the user explicitly approved each retry rather than the install being silently retried | approved |
 | 2026-10-07 | Stage 10 implemented and validated: 30 new tests (full suite 1708 passed/13 skipped); the dashboard was additionally smoke-tested against this machine's real local data (16 paper runs, 20 backtest runs) via both a headless `streamlit run` and a direct `runpy` execution of its own logic, both clean; a `use_container_width` deprecation (already past its removal date in the installed streamlit 1.65.0) was found and fixed before commit | implemented (Stage 10), approved (final) |
+| 2026-10-07 | Owner authored and committed `docs/ARVEN_MASTER_PROMPT.md` (`b9b28e8`): a larger, separate signal-product initiative (event-driven engine, new strategy, Telegram, web app), with its own honesty contract, strategy-grading gate, and 12-phase plan - explicitly additive to, never replacing, the thesis-core Stages 0-10 and their golden `result_hash` | approved |
+| 2026-10-07 | Master-prompt Phase 0 (safety net): tag `pre-signal-product` on the master-prompt commit; new branch `feat/signal-product`; golden regression and `result_hash 3eca0a70...` reconfirmed; full-suite baseline recorded at 1708 passed/13 skipped (matches the master prompt's own stated baseline exactly) | approved (implemented) |
+| 2026-10-07 | Master-prompt Phase 1 design: `StrategySpec`/`BarCloseEvent`/`EventClock` live in a new, isolated `arven.engine` package (imports only `arven.core`, never the legacy decision/risk/strategies/regime/backtest stack, enforced by a static test) rather than extending any existing module - the legacy 1h-only `Clock`/`FeatureView`/`Stage5Pipeline` path is untouched; tie rule for events sharing one `close_ms` is coarsest-timeframe-first, chosen so a strategy's `trigger_tf` event is always ordered after any coarser same-instant context close, removing a class of look-ahead bugs by construction | approved (implemented) |
+| 2026-10-07 | Master-prompt Phase 1 implemented and validated: 32 new tests (`tests/engine/`), full suite 1740 passed/13 skipped, no regressions | implemented (Phase 1), approved (final) |
