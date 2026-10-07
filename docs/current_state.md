@@ -1,6 +1,6 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-08 (Signal-product build-out Phase 5: always-on paper runtime, LiveEventClock - 48h soak test not yet run)_
+_Last updated: 2026-10-08 (Signal-product build-out Phase 6: Telegram alerts, bot commands, outbox - no real token/chat id supplied yet)_
 
 ## Phase
 
@@ -8,21 +8,22 @@ _Last updated: 2026-10-08 (Signal-product build-out Phase 5: always-on paper run
 separate build-out described in `docs/ARVEN_MASTER_PROMPT.md` - a multi-timeframe event-driven engine, a
 new strategy, Telegram alerts and a web dashboard, aimed at a usable signal product rather than only the
 diploma - tracked as its own phase sequence (see "Signal-product build-out" below), kept strictly additive
-so the Stages 0-10 pipeline and its golden `result_hash 3eca0a70...` keep reproducing unchanged. **Phases 1-5
-of that build-out are implemented and tested**: `arven.engine` (`StrategySpec`, `BarCloseEvent`,
+so the Stages 0-10 pipeline and its golden `result_hash 3eca0a70...` keep reproducing unchanged. **Phases
+1-6 of that build-out are implemented and tested**: `arven.engine` (`StrategySpec`, `BarCloseEvent`,
 `EventClock`/`SimulatedEventClock`/`LiveEventClock`; per-timeframe feature tables and `MultiTFView` with
 their truncation/perturbation leakage suite; the `EngineSignal`/TP-ladder/grading types);
 `arven.backtest.event_engine.EventBacktester` (the event-driven backtest loop on the unchanged Stage 4
 execution layer, proven `result_hash`-identical to the legacy `Backtester` for the 1h Stage 5 pipeline);
 `arven.backtest.paper_tracker` (resolves a signal's TP ladder/stop forward on 1m bars, net of fees/
 slippage, in R-multiples); `arven.paper.runtime` + `arven paper runtime`/`heartbeat` (the always-on polling
-loop around the existing, unmodified `run_paper_tick`) - see "Signal-product build-out" below for what was
-and was not validated. **Phase 5's own gate (a 48-hour soak on live public data) has deliberately not been
-run yet** - it is a real-time, multi-day observation the owner must choose to start (see "Phase 5" below
-and `docs/RUNTIME_OPERATIONS.md`), not something any single session can complete synchronously. Next is
-Phase 6 (Telegram).
-Stage 11 (the sealed-test final evaluation) remains untouched, by design (master-prompt phase 12,
-owner-gated, exactly once).
+loop around the existing, unmodified `run_paper_tick`); `arven.telegram` + `arven telegram send`/
+`commands`/`test` (alerts, bot commands, a persisted outbox - never a real order) - see "Signal-product
+build-out" below for what was and was not validated. **Phase 5's own gate (a 48-hour soak on live public
+data) remains deliberately not run** (owner's choice, recorded below) **and Phase 6's "owner supplies
+token for a live test" step has not happened either** - no real `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_IDS`
+have been provided in any session so far; everything is validated offline, against fakes. Next is Phase 7
+(strategy S4 - Impulse-Retest). Stage 11 (the sealed-test final evaluation) remains untouched, by design
+(master-prompt phase 12, owner-gated, exactly once).
 - Stage 10 (LLM explanations/Q&A + the Streamlit dashboard) is complete: implemented, unit-tested, and the
   dashboard itself was smoke-tested against this machine's real local data; the explain/Q&A LLM calls have
   not yet been made against the real Anthropic API (same acknowledged gap as Stage 9b - no API key was
@@ -1550,6 +1551,72 @@ Nothing in Stages 1-10 or Phases 1-4 was modified.
   loop (deferred until a multi-timeframe strategy exists, Phase 7); Telegram alerts on top of the heartbeat/
   log (Phase 6); any web visibility into runtime health beyond the CLI (Phase 8).
 
+**Phase 6 — Telegram alerts, bot commands, outbox (code done and unit-tested 2026-10-08; the phase's own
+"owner supplies token for a live test" step not yet done).** New package `src/arven/telegram/` (`client.py`,
+`outbox.py`, `messages.py`, `commands.py`, `runs.py`), `src/arven/core/telegram_config.py`,
+`config/telegram.yaml`, two new DuckDB tables (`telegram_outbox`, `telegram_chat_state`,
+`SCHEMA_VERSION` 2 -> 3). CLI: `arven telegram send`/`commands`/`test`. Nothing in Stages 1-10 or Phases
+1-5 was modified except the schema file (purely additive DDL, no existing table touched).
+- **Stdlib HTTP only, no SDK** (`telegram/client.py`): the same choice already made twice (Binance REST,
+  the Anthropic API). `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_IDS` are both secrets, read from the environment/
+  `.env` only (never a YAML file) - `TELEGRAM_CHAT_IDS` fails closed (an empty allow-list, not "allow
+  everyone") when unset, unlike a token which raises outright. **429 rate-limiting is honoured exactly**:
+  a 429 response's own `retry_after` is read and slept for verbatim before the retry (hand-tested:
+  `sleep` is called with exactly the server-supplied value, not a generic backoff).
+- **The persisted outbox** (`telegram_outbox`): "idempotent sends (dedupe by signal_id + event type)"
+  (section 5.4) is the primary key itself - `outbox_id = sha256(signal_id, event_type, chat_id)` - so
+  enqueuing the same alert twice is a no-op, verified by test. An entry that keeps failing becomes
+  permanently `"failed"` after `max_send_attempts` (config), never retried forever and never silently
+  dropped - still visible in the table either way. `/pause`/`/resume` only toggle a **per-chat** mute flag
+  in a second new table (`telegram_chat_state`) - this never touches the trading loop or any other
+  strategy's chat, by construction (there is nothing in this package that *could* reach decision/risk/
+  strategy code - enforced by a static test, same pattern as `arven.news`/`arven.llm`).
+- **Message text is pure formatting of already-computed data** (`messages.py`, CLAUDE.md rule 9): the four
+  kinds from section 5.4 (new signal with its full TP ladder, a signal update, a system alert, a daily
+  summary), every one carrying the simulated/not-financial-advice disclaimer (hand-verified: every field of
+  a hand-built `EngineSignal` - entry, stop, every TP level's price/R/fraction, risk %, confidence, regime,
+  up to 3 reasons - appears correctly in the formatted text).
+- **Bot commands** (`/start /status /signals /history /strategies /pause /resume /help`, `commands.py`):
+  read-only over already-stored data - `/status` reads the real `paper.runtime` heartbeat (genuinely wired
+  to Phase 5's own file, not a stub); `/signals`/`/history`/`/strategies` read the real Phase 4
+  `engine.signal_store` (genuinely wired, though nothing yet *writes* a real signal there in production -
+  see "Not yet built" below). An unrecognised command (or any non-command text) gets no reply at all - this
+  is an alerts bot, not a general chat assistant.
+- **A real bug found while smoke-testing the CLI commands by hand** (not by the unit tests, which all
+  passed first try): `arven telegram commands` crashed with a raw traceback when `TELEGRAM_BOT_TOKEN` was
+  unset, because `run_telegram_commands_tick`'s own `get_updates` call - unlike every entry in
+  `run_telegram_send_tick`'s own loop, which already catches per-entry - was not wrapped in a
+  try/except. `arven telegram send` happened not to crash only because its default `dry_run: true` short-
+  circuits before ever needing a token. Fixed at the source (`telegram/runs.py`): a `getUpdates` failure
+  (missing token, or a real network failure) is now recorded in the tick's own `errors` list, the same
+  never-raise discipline `run_news_tick`/`paper.runtime.run_once` already follow for their own primary
+  call - with a regression test.
+- **A second, self-inflicted test false positive, fixed immediately**: the static "no order/account
+  endpoint" check for `telegram/client.py` originally also forbade the substring `"binance"` (copied
+  without thinking from an unrelated check) and tripped on the client's own docstring, which legitimately
+  *mentions* `binance_rest` as a stylistic precedent. Fixed by dropping that irrelevant word from the
+  check, not by rewording accurate prose.
+- **Counts**: 56 new tests across `tests/telegram/` (client retry/429/auth, outbox dedupe/failure-cap,
+  message formatting, command handling incl. the real heartbeat/signal-store wiring, the two composition
+  roots end-to-end against a scripted fake HTTP server, plus the `getUpdates`-failure regression above) and
+  static module-boundary rules. Full suite: **2093 passed, 13 skipped** (2037 + 56; no regressions; golden
+  regression green).
+- **Known limitation - not run, not hidden**: the master prompt's own Phase 6 gate is *"fake-server tests;
+  owner supplies token for a live test"*. The first half is done (56 tests, all against a scripted fake
+  Bot API - never a real socket). The second half - a real `TELEGRAM_BOT_TOKEN` and at least one real
+  `TELEGRAM_CHAT_IDS` entry, then `arven telegram test` to confirm an actual message arrives - has not
+  happened in any session; this is the same category of acknowledged gap as Stage 9b's own
+  never-called-the-real-Anthropic-API status, not a new kind of shortcut.
+- **Not yet built / deliberately left for later phases**: nothing in production actually *writes* a real
+  `EngineSignal` yet (no strategy emits one live - that starts at Phase 7), so `/signals`/`/history`/
+  `/strategies` and the "new signal"/"position update"/"daily summary" message types are real, tested code
+  with nothing real yet to show; wiring system alerts (data stale, process restarted) from
+  `paper.runtime`'s own heartbeat into the outbox automatically (today the outbox only has what
+  `arven telegram send` is handed - nothing enqueues anything yet); editing a sent message via
+  `edit_message_text` when a position updates (the client function exists and is tested, nothing calls it
+  yet); a `--daemon` mode for `arven telegram send`/`commands` analogous to `arven paper runtime` (both are
+  one-shot CLI ticks today, meant to be scheduled the same way Stage 8's `arven paper run` originally was).
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -2217,3 +2284,7 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-08 | A pre-existing Phase 2 leakage-idiom regex test false-positived on the prose word "backfill" in a new `LiveEventClock` docstring (describing legitimate real-time catch-up, not a leakage pattern); fixed by rewording the docstring rather than weakening the still-valid check | implemented (Phase 5) |
 | 2026-10-08 | Master-prompt Phase 5 code implemented and validated offline: 23 new tests (`engine/clock.py`'s `LiveEventClock`, `paper/runtime.py`'s polling loop/heartbeat/structured log, all against fakes/injectable clocks, no real sleep or network); full suite 2037 passed/13 skipped, no regressions, golden regression green. **The phase's own gate - a 48-hour soak on live public data - was deliberately not run**: a real-time, multi-day, unattended network process against a laptop that must stay powered is a resource commitment requiring the owner's own go-ahead, not something to start unilaterally; `docs/RUNTIME_OPERATIONS.md` has the Task Scheduler/power-settings recipe ready for whenever that is decided | implemented (Phase 5), soak test pending owner decision |
 | 2026-10-08 | Owner's explicit choice when asked: skip the Phase 5 48h soak test for now and move on to Phase 6 (Telegram) rather than run it unattended first - the soak remains a documented, ready-to-run gap (`docs/RUNTIME_OPERATIONS.md`), not silently dropped | approved |
+| 2026-10-08 | Master-prompt Phase 6 design: `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_IDS` are both secrets (env/`.env` only, never YAML), mirroring `ANTHROPIC_API_KEY`'s own precedent; the outbox's primary key itself (`sha256(signal_id, event_type, chat_id)`) is the idempotent-send dedupe, not a separate check; `/pause`/`/resume` only mute a chat's own notifications (`telegram_chat_state`), never touch the trading loop; message text is pure formatting of already-computed `EngineSignal`/heartbeat/signal-store data (CLAUDE.md rule 9) | approved (implemented) |
+| 2026-10-08 | A real bug found while hand-smoke-testing the new CLI (not by the unit tests): `arven telegram commands` crashed with a raw traceback when `TELEGRAM_BOT_TOKEN` was unset, because `run_telegram_commands_tick`'s `get_updates` call - unlike every entry in `run_telegram_send_tick`'s own loop - was not wrapped in a try/except; `arven telegram send` only avoided the same crash because its default `dry_run: true` short-circuits first. Fixed at the source, with a regression test, not papered over at the CLI layer | implemented (Phase 6) |
+| 2026-10-08 | A second, self-inflicted static-test false positive (the "no order/account endpoint" check for `telegram/client.py` also forbade the substring "binance", copied carelessly from an unrelated check, and tripped on the client's own accurate docstring prose) was fixed by dropping the irrelevant word from the check | implemented (Phase 6) |
+| 2026-10-08 | Master-prompt Phase 6 implemented and validated offline: 56 new tests (`tests/telegram/`: client retry/429/auth, outbox dedupe/failure-cap, message formatting, commands incl. real heartbeat/signal-store wiring, both composition roots end-to-end against a scripted fake Bot API); full suite 2093 passed/13 skipped, no regressions, golden regression green. **The phase's "owner supplies token for a live test" step has not happened** - no real `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_IDS` provided in any session so far; `arven telegram test` is ready to confirm it once they are | implemented (Phase 6), live test pending owner |

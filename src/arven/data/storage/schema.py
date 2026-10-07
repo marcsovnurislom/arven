@@ -6,7 +6,7 @@ bar availability delay (applied when reading, so it is not stored). Funding and 
 explicit ``available_at_ms`` because their availability differs from their event time.
 """
 
-SCHEMA_VERSION = 2  # 2 (Stage 9b): added news_items / news_events (informational only - nothing compares against it)
+SCHEMA_VERSION = 3  # 3 (Phase 6): added telegram_outbox / telegram_chat_state (informational only - nothing compares against it)
 
 DDL: tuple[str, ...] = (
     """
@@ -194,6 +194,29 @@ DDL: tuple[str, ...] = (
         parse_error       VARCHAR,              -- NULL on success
         processed_at_ms   BIGINT NOT NULL,
         PRIMARY KEY (news_id, llm_model, prompt_version)
+    )
+    """,
+    # --- telegram (Phase 6) --------------------------------------------------------------------
+    """
+    CREATE TABLE IF NOT EXISTS telegram_outbox (
+        outbox_id            VARCHAR PRIMARY KEY,  -- sha256(signal_id, event_type, chat_id) - dedupes naturally
+        signal_id             VARCHAR NOT NULL,     -- the EngineSignal (or a synthetic id for system alerts) this is about
+        event_type            VARCHAR NOT NULL,     -- "NEW_SIGNAL" | "TP_HIT" | "STOP_MOVED" | "CLOSED" | "DAILY_SUMMARY" | "SYSTEM_ALERT"
+        chat_id               VARCHAR NOT NULL,
+        text                  VARCHAR NOT NULL,
+        status                VARCHAR NOT NULL,     -- "pending" | "sent" | "failed"
+        telegram_message_id  BIGINT,                -- set once sent; lets a later update use editMessageText
+        attempts              INTEGER NOT NULL,
+        last_error            VARCHAR,
+        created_at_ms         BIGINT NOT NULL,
+        sent_at_ms            BIGINT
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS telegram_chat_state (
+        chat_id    VARCHAR PRIMARY KEY,
+        paused     BOOLEAN NOT NULL,
+        updated_at_ms BIGINT NOT NULL
     )
     """,
 )

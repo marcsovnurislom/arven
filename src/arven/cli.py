@@ -696,6 +696,69 @@ def cmd_news_show(cfg: AppConfig, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_telegram_send(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from arven.core.telegram_config import load_telegram_config
+    from arven.telegram.runs import run_telegram_send_tick
+
+    tcfg = load_telegram_config(args.config_dir)
+    with connect(cfg.data.database_path) as con:
+        summary = run_telegram_send_tick(con, tcfg)
+    print(f"sent={summary.sent}  skipped_paused={summary.skipped_paused}  failed={summary.failed}  dry_run={summary.dry_run}")
+    for err in summary.errors:
+        print(f"  ERROR {err}")
+    if tcfg.dry_run:
+        print("dry_run=true (config/telegram.yaml) - nothing was actually sent to Telegram.")
+    return 0 if summary.ok else 1
+
+
+def cmd_telegram_commands(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from arven.core.telegram_config import allowed_chat_ids, load_telegram_config
+    from arven.telegram.runs import read_update_cursor, run_telegram_commands_tick, write_update_cursor
+
+    tcfg = load_telegram_config(args.config_dir)
+    allowed = allowed_chat_ids()
+    if not allowed:
+        print("TELEGRAM_CHAT_IDS is not set (environment/.env) - no chat is allow-listed; every incoming "
+              "message will get the 'not authorized' reply.")
+    root = cfg.data.data_dir / "telegram"
+    cursor_path = root / "commands_cursor.json"
+    last_id = read_update_cursor(cursor_path)
+    with connect(cfg.data.database_path) as con:
+        summary, new_id = run_telegram_commands_tick(
+            con, tcfg, cfg.data.data_dir / "signals", cfg.data.data_dir / "paper" / "heartbeat.json",
+            last_update_id=last_id, allowed_chats=allowed,
+        )
+    write_update_cursor(cursor_path, new_id)
+    print(f"updates_seen={summary.updates_seen}  replied={summary.replied}  unauthorized={summary.unauthorized}")
+    for err in summary.errors:
+        print(f"  ERROR {err}")
+    return 0 if summary.ok else 1
+
+
+def cmd_telegram_test(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Sends one real message to every allow-listed chat - the "owner supplies token for a live test"
+    step of the Phase 6 gate. Ignores config/telegram.yaml's dry_run (a deliberate smoke test, not a tick)."""
+    from arven.core.telegram_config import allowed_chat_ids
+    from arven.telegram.client import TelegramConfigError, TelegramRequestError, send_message
+
+    allowed = allowed_chat_ids()
+    if not allowed:
+        print("TELEGRAM_CHAT_IDS is not set (environment/.env) - nothing to send a test message to.")
+        return 1
+    ok = True
+    for chat_id in allowed:
+        try:
+            sent = send_message(chat_id, "ARVEN test message - if you see this, TELEGRAM_BOT_TOKEN and this chat id both work.")
+            print(f"sent to {chat_id}: message_id={sent.message_id}")
+        except TelegramConfigError as exc:
+            print(f"not configured: {exc}")
+            return 1
+        except TelegramRequestError as exc:
+            print(f"send to {chat_id} failed: {exc}")
+            ok = False
+    return 0 if ok else 1
+
+
 def cmd_explain(cfg: AppConfig, args: argparse.Namespace) -> int:
     import json
 
@@ -851,6 +914,12 @@ def build_parser() -> argparse.ArgumentParser:
     q = nsub.add_parser("show", help="print recent news items and their structured events, if any")
     q.add_argument("--limit", type=int, default=20)
     q.set_defaults(func=cmd_news_show)
+
+    p = sub.add_parser("telegram", help="Phase 6: Telegram alerts and bot commands (never a real order)")
+    tsub = p.add_subparsers(dest="telegram_command", required=True)
+    tsub.add_parser("send", help="drain the outbox - send (or, in dry_run, just mark as sent) every pending alert").set_defaults(func=cmd_telegram_send)
+    tsub.add_parser("commands", help="poll getUpdates once, reply to recognised commands from allow-listed chats").set_defaults(func=cmd_telegram_commands)
+    tsub.add_parser("test", help="send one real test message to every allow-listed chat (ignores dry_run)").set_defaults(func=cmd_telegram_test)
 
     q = sub.add_parser("explain", help="Stage 10: plain-language explanation of one decision from a paper run (never a new decision)")
     q.add_argument("run", help="a paper run id (see `arven paper status`)")
