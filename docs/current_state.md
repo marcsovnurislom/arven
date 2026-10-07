@@ -1,6 +1,6 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-07 (Signal-product build-out Phase 1: StrategySpec/BarCloseEvent/EventClock)_
+_Last updated: 2026-10-07 (Signal-product build-out Phase 2: per-TF features + MultiTFView + leakage suite)_
 
 ## Phase
 
@@ -8,9 +8,10 @@ _Last updated: 2026-10-07 (Signal-product build-out Phase 1: StrategySpec/BarClo
 separate build-out described in `docs/ARVEN_MASTER_PROMPT.md` - a multi-timeframe event-driven engine, a
 new strategy, Telegram alerts and a web dashboard, aimed at a usable signal product rather than only the
 diploma - tracked as its own phase sequence (see "Signal-product build-out" below), kept strictly additive
-so the Stages 0-10 pipeline and its golden `result_hash 3eca0a70...` keep reproducing unchanged. **Phase 1
-of that build-out (`arven.engine`: `StrategySpec`, `BarCloseEvent`, `EventClock`/`SimulatedEventClock`) is
-implemented and tested** - see "Signal-product build-out" below. Stage 11 (the sealed-test final
+so the Stages 0-10 pipeline and its golden `result_hash 3eca0a70...` keep reproducing unchanged. **Phases 1-2
+of that build-out (`arven.engine`: `StrategySpec`, `BarCloseEvent`, `EventClock`/`SimulatedEventClock`; generic
+per-timeframe feature tables and `MultiTFView` with their truncation/perturbation leakage suite) are
+implemented and tested** - see "Signal-product build-out" below; next is Phase 3 (event-driven backtest loop). Stage 11 (the sealed-test final
 evaluation) remains untouched, by design (master-prompt phase 12, owner-gated, exactly once).
 - Stage 10 (LLM explanations/Q&A + the Streamlit dashboard) is complete: implemented, unit-tested, and the
   dashboard itself was smoke-tested against this machine's real local data; the explain/Q&A LLM calls have
@@ -1253,6 +1254,71 @@ Nothing in the existing Stages 1-10 code was touched.
   `EventClock` implementation, and the event-driven backtest loop itself (master-prompt phases 2-3) -
   `EventClock` right now only schedules events; nothing yet consumes them.
 
+**Phase 2 — per-timeframe features + `MultiTFView` + leakage suite (done, 2026-10-07).** Three new files in
+`src/arven/engine/` (`errors.py`, `features.py`, `multitf.py`); Phase 1's files and every Stage 1-10 file
+untouched. Reuses the existing causal primitives directly - `BarSeries.regularized()` (`core/series.py`), the
+`features/indicators.py` functions (`ema`, `atr`, `adx`, `log_ratio`, `safe_divide`, `shift`, `finite_or_nan`)
+and `features/asof.asof_index` - but deliberately **not** Stage 3's `features/bars.py`/`builder.py`/`registry.py`
+machinery (that frozen 61-column 1h-grid set feeds the golden `result_hash`; a new static test enforces that
+the engine imports only `features.indicators`/`features.asof`).
+- **`LookAheadError`** (`engine/errors.py`): same concept as `backtest.errors.LookAheadError`, new home -
+  `arven.engine` may not import `arven.backtest` (module boundary). Deliberately *not* a subclass of the
+  legacy class.
+- **Per-TF feature tables** (`engine/features.py`): one generic function, `compute_tf_features(bars, params)`,
+  the same code for every `Timeframe` (no per-TF builder dict like `bars.PREFIX`). Steps: `regularized()`
+  (gap-free grid, missing/incomplete bars become NaN rows with `complete=False`), the shared primitives
+  (seeded at the first stored bar, warm-up `max(p, ceil(warmup_factor*p))` exactly as Stage 3), non-finite →
+  NaN. Result: `TFFeatureTable` (`timeframe`, `version="tf-v1"`, per-row `open_ms`/`close_ms`/`available_at_ms`
+  (= `BarSeries.available_at_ms`, i.e. close + delay)/`complete`, `names`, a 2-D `values` array,
+  `content_sha256()`; validated layout, strictly increasing `available_at_ms`). Indicator set, kept minimal
+  and "boring" - the families the existing regime detector actually reads plus ATR for volatility-normalised
+  stops: `close`, `atr_14`, `atr_pct_14` (ATR/close), `ema_dist_20`, `ema_dist_50` (log close/EMA),
+  `ema_slope_50` (log EMA50 vs 5 bars earlier), `adx_14`. Parameters live in a frozen, validated
+  `TFFeatureParams` dataclass whose defaults mirror `config/features.yaml` (ATR/ADX 14, EMA 20/50, warm-up
+  factor 5); moving them to YAML is left to the phase that first consumes them. **Naming:** unqualified
+  inside a table (`adx_14`); `qualified_name(tf, name)` = `"<tf>.<name>"` (e.g. `4h.adx_14`) wherever
+  timeframes meet - Stage 3 names never contain a dot, so the two sets cannot collide (tested).
+- **`MultiTFView`** (`engine/multitf.py`): built from per-TF tables (or `from_bars`), queried with
+  `row_at(tf, t)`, `at(t, spec)` or `for_event(event, spec)` (the latter uses `event.available_at_ms` as
+  "now" and refuses an event that is not the spec's `trigger_tf`). Each row is the **last row with
+  `available_at <= t`** (backward as-of via `asof_index`), returned as a frozen `TFRow` (times, `bars_seen`,
+  `complete`, `stale`, read-only `values`) inside a `MultiTFSnapshot` (`trigger`, `setup`, `context` in
+  `spec.context_tfs` order). Three outcomes, kept distinct on purpose: (1) **no row at all** for a requested
+  timeframe at `t` (before its first bar closed, or an empty table) → `LookAheadError`, since the only row
+  that could fill the slot is a future one (the engine maps this to `NO_TRADE`); (2) **stale** - a row exists
+  but `t - available_at >= tf.ms` (a newer bar should exist but the feed stopped) → the row is returned with
+  `stale=True` and **all values NaN**, never carried forward (identical to the Stage 3 builder's
+  `max_age_ms = tf.ms - 1`); a missing trigger bar at the end of data therefore shows up as a stale trigger
+  row; (3) **fresh** row → returned as is, where individual NaNs (warm-up, gap rows, zero division) are a
+  *defined* reading under the existing "NaN in, NaN out, never raise" convention, not an error.
+  `StrategySpec.warmup_bars` is not enforced by the view - rows expose `bars_seen` so the Phase 3 engine can.
+  Same-instant closes: a coarser bar closing exactly at `t` is visible (`<=`, not `<`), consistent with
+  Phase 1's coarsest-first tie rule (tested against `SimulatedEventClock`'s own events at a 4h boundary).
+- **Validation (the Phase 2 gate)**: 146 new tests in `tests/engine/`. `test_tf_features.py` (27):
+  hand-computed values and exact warm-up boundaries (constant bars, an EMA/ATR/ADX ramp), equality with the
+  shared primitives on synthetic data, gap/incomplete-bar NaN rows with recursive restart, timeframe
+  agnosticism, delays, determinism, parameter/table validation, no name collision with Stage 3.
+  `test_multitf.py` (16): raise before the first close and on an empty table, the exact as-of boundary
+  (visible at `close`, not at `close - 1 ms`; with a delay only at `close + delay`), the 4h/1h/15m
+  same-instant tie case, `for_event` with a delay, stale rows (all NaN), a missing trigger bar → stale
+  trigger, warm-up NaN does not raise, configuration errors. `test_engine_leakage.py` (100): through the
+  existing `tests/leakage_harness.py`, **truncation and perturbation tests for every new feature column on
+  every timeframe** (4 TFs × 7 columns, each parametrised, plus non-vacuity checks) and **for `MultiTFView`**
+  under three specs (15m/1h/4h, 1h/1h/4h, 5m/15m/(1h,4h)) covering every role/feature value and the row
+  metadata (`open_ms`, `available_at_ms`, `bars_seen`, `complete`, `stale`, raised-or-not); also on gappy
+  data with stale 4h rows, with a 60 s availability delay (including exact close+delay instants), and driven
+  by `SimulatedEventClock` trigger events against views rebuilt from `available_until(event.available_at_ms)`;
+  plus a canary - a deliberately leaky view that peeks one bar ahead **is** caught by both harness checks.
+  `test_engine_phase2_static_rules.py` (3): the Phase 2 modules exist and import nothing from
+  decision/risk/strategies/regime/backtest; the engine imports only `features.indicators`/`features.asof`;
+  no `shift(-n)`/`bfill`/centered windows. All pass (engine suite ~18 s). Full suite: **1886 passed, 13
+  skipped** (1740 + 146 new; no regressions - `tests/pipeline/test_stage5_no_ml_regression.py` green, the
+  golden `result_hash` code path untouched).
+- **Not yet built** (later phases): wiring `MultiTFView` into a running loop (Phase 3, event-driven backtest
+  on top of Stage 4 execution, where the identical-`result_hash` gate applies), enforcing `warmup_bars`/regime
+  gates, a persisted `features_<tf>` cache/DuckDB table (tables are computed in memory for now), YAML config
+  for `TFFeatureParams`, and swing/pivot/zone features for strategy S4 (Phase 7).
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -1906,3 +1972,5 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-07 | Master-prompt Phase 0 (safety net): tag `pre-signal-product` on the master-prompt commit; new branch `feat/signal-product`; golden regression and `result_hash 3eca0a70...` reconfirmed; full-suite baseline recorded at 1708 passed/13 skipped (matches the master prompt's own stated baseline exactly) | approved (implemented) |
 | 2026-10-07 | Master-prompt Phase 1 design: `StrategySpec`/`BarCloseEvent`/`EventClock` live in a new, isolated `arven.engine` package (imports only `arven.core`, never the legacy decision/risk/strategies/regime/backtest stack, enforced by a static test) rather than extending any existing module - the legacy 1h-only `Clock`/`FeatureView`/`Stage5Pipeline` path is untouched; tie rule for events sharing one `close_ms` is coarsest-timeframe-first, chosen so a strategy's `trigger_tf` event is always ordered after any coarser same-instant context close, removing a class of look-ahead bugs by construction | approved (implemented) |
 | 2026-10-07 | Master-prompt Phase 1 implemented and validated: 32 new tests (`tests/engine/`), full suite 1740 passed/13 skipped, no regressions | implemented (Phase 1), approved (final) |
+| 2026-10-07 | Master-prompt Phase 2 design: one generic `compute_tf_features` (same code for every timeframe; regularized grid + the shared `features/indicators.py` primitives; minimal set close/ATR/ATR%/EMA20-50 distance/EMA50 slope/ADX, names qualified as `"<tf>.<name>"` so they cannot collide with Stage 3) in new files under `arven.engine`, neither reusing nor touching the frozen Stage 3 `bars.py`/`builder.py`; `MultiTFView` returns the last row with `available_at <= t` per timeframe, raises the engine's own `LookAheadError` only when no such row exists at all, returns stale rows (older than one bar) as all-NaN like the Stage 3 builder's `max_age`, and treats warm-up/gap NaNs as defined readings (never raises) | approved (implemented) |
+| 2026-10-07 | Master-prompt Phase 2 implemented and validated: 146 new tests (`tests/engine/`); truncation + perturbation leakage gate passes for every new feature column and for `MultiTFView` (incl. delay, gappy/stale data, event-driven, and a leaky-view canary); full suite 1886 passed/13 skipped, no regressions | implemented (Phase 2) |
