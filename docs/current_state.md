@@ -1,6 +1,6 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-09 (Signal-product build-out Phase 7b, part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
+_Last updated: 2026-10-09 (Signal-product build-out Phase 7b, part 2c: exit-variant study + CFD cost profile; part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
 
 ## Phase
 
@@ -1788,6 +1788,22 @@ would use it up for any later S4 variant.
   of it; the validation result is statistically indistinguishable from zero. S4 is **not shown to be profitable**;
   grade stays EXPERIMENTAL.
 
+**Phase 7b, part 2c - exit-management study and a CFD cost profile (done, 2026-10-09; owner questions: are costs
+too high, would breakeven at +1 R / partial at +2 R help, broker is JustMarkets MT5 BTCUSD).**
+- **Cost check**: Stage 4 costs are computed correctly for a Binance USDT-perp (taker 5 bps/side + slippage ~= 19 bps
+  round trip, ~0.26 R per S4 trade). The owner's venue is a CFD: new profile `config/costs_cfd_justmarkets.yaml`
+  (Pro account, no commission, ~2.5 bps round-trip spread from a public 2025 test, swap-free, stress x4). Default
+  `config/costs.yaml` untouched; every Stage 4-10 result still uses it.
+- **Study** (`scripts/s4_variant_study.py`, pre-registered in `docs/strategy_impulse_retest.md` section 11 before
+  results): unchanged v1.1 signals replayed on 1m bars by the Phase 4 `track_signal`, now extended with
+  `breakeven_at_r` (stop to entry from the bar after +r R is reached; 3 new tests in `tests/engine/test_paper_tracker.py`).
+- **Result**: breakeven (A, B) and fixed +2R/+3R targets (C, D) did not beat the unchanged exits on development
+  (selection rule picked V0). V0 under CFD costs: development +12.3 R (+7.7 %, 127 trades), validation +19.5 R
+  (+18.3 %, 58 trades); under perp costs -23.3 % and -2.6 %; under the x4 spread stress about zero combined.
+  Costs are the swing factor, not exit management. Full tables in section 11 of the spec.
+- **Not done / honest limits**: sealed test untouched; spread unverified on the owner's terminal; tracker has no
+  funding (fine for swap-free CFD); results are replays of signals, not a full engine run with CFD costs; S4 stays EXPERIMENTAL.
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -2472,3 +2488,4 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-09 | First real S4 development run exposed an O(n^2) wall-clock bug (Python-loop ATR/swings recomputed every 15m tick); fixed by vectorising `confirmed_swings` and caching the 1h setup side per 1h bar, with a cache-equivalence test | implemented (Phase 7b part 2) |
 | 2026-10-09 | S4 v1.1 on development: 108 trades, win rate 14.8 %, -20.5 % (stress -27.3 %), max DD 38.3 %; gross +878 USDT turned negative by 2 758 USDT of fees+slippage; no implementation error found in hand audit; no tuning on this period; S4 stays EXPERIMENTAL; windowed robustness/forward paper/grade deferred | recorded (Phase 7b part 2), honest negative result |
 | 2026-10-09 | Unchanged S4 v1.1 run on validation (+0.73 %, 40 trades, 17.5 % win rate, max DD 19.7 %) and forward (4 trades, +0.46 %); sealed test deliberately not run (needs explicit owner go, would be spent for later S4 variants); S4 stays EXPERIMENTAL | recorded (Phase 7b part 2b) |
+| 2026-10-09 | Owner trades BTCUSD CFD on JustMarkets MT5: added `config/costs_cfd_justmarkets.yaml` (~2.5 bps round-trip spread, swap-free; unverified on owner's terminal) beside the untouched perp profile; pre-registered exit variants V0/A/B/C/D, `track_signal` gained `breakeven_at_r`; selection rule picked V0 (exits unchanged); breakeven worsened results; V0 under CFD costs +7.7 % dev / +18.3 % val but ~0 under spread stress; sealed test untouched | recorded (Phase 7b part 2c) |

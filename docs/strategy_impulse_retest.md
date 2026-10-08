@@ -226,3 +226,62 @@ construction, not approximated.
 |---|---|---|---|---|
 | 2026-10-08 | v1 | none | §4's original base-candle definition (`start_swing_index - 1`) found to never geometrically overlap the Fib zone, before any backtest ran - not a tuning change, a definition bug | superseded by v1.1 below |
 | 2026-10-08 | v1.1 (this spec) | §4's base-candle search widened to the whole impulse leg (see "Revision" note in §4) - no threshold (`K`/`M`/`N`/buffer/Fib band/extensions) changed | pending full evaluation (7b) | current |
+| 2026-10-09 | v1.1 exit-management study (pre-registered below, before any variant was evaluated) | exits only: V0 control, A, B, C, D (see "Pre-registration 2026-10-09") - entry logic, stops and all §§2-8 thresholds unchanged | selected by the pre-registered rule: V0 (control, no change); A and B (breakeven) clearly worse | v1.1 exits unchanged |
+
+### Pre-registration 2026-10-09 (written before any variant result existed)
+
+Motivation: v1.1's development run was -20.5 % with a +878 USDT gross edge eaten by 2 758 USDT of costs; a
+diagnostic on the development trades showed 35 % of stopped trades first reached +1 R. The owner asked whether
+a breakeven stop / partial profit would help and whether the broker is a JustMarkets MT5 BTCUSD CFD.
+
+- **Signals**: exactly the unchanged v1.1 signals (`scripts/s4_variant_study.py record`), 127 on development
+  and 58 on validation. Entry fill = first 1m bar open at the decision time plus adverse slippage (as Stage 4).
+- **Variants** (all on the same signals; one open trade at a time per variant, a signal arriving while that
+  variant's trade is open is skipped):
+  - **V0** control: TP1 (100 %) + original stop = the existing single-exit rendering, replayed on the tracker.
+  - **A**: stop moves to the entry fill once price has traded +1 R (effective from the next 1m bar); everything
+    else closes at TP1.
+  - **B**: A, plus 30 % closed at +2 R; the remaining 70 % to TP1 (if TP1 is nearer than +2 R the +2 R rung is dropped).
+  - **C**: single exit at a fixed +2 R, original stop.
+  - **D**: single exit at a fixed +3 R, original stop.
+- **Cost profiles** (both reported for every variant): `config/costs.yaml` (Binance USDT-perp, default) and
+  `config/costs_cfd_justmarkets.yaml` (BTCUSD CFD, JustMarkets MT5 Pro, ~2.5 bps round-trip spread, swap-free;
+  the spread is from one public live test, not verified on the owner's terminal). Funding/swap is not modelled
+  by the tracker (the perp profile therefore omits ~0.2 R-equivalent of funding that Stage 4 does include - stated, not hidden).
+- **Selection rule, fixed now**: under the CFD profile (the venue the owner intends to use), the variant with
+  the highest total R on **development**, among those with >= 80 trades. Validation is **not** used to choose:
+  it is reported once for all variants as a confirmation (a deliberate, disclosed departure from §10's
+  "development only" for parameter search - these are exit-management choices, not parameter searches, and
+  every variant is shown, so there is no re-selection). Five variants x two cost profiles are compared: this
+  multiple-comparison count is part of the result, and a small positive total R must not be read as an edge.
+- **The sealed test (2025-01..2026-07) is not used.**
+
+### Results 2026-10-09 (net R per trade at 1 % risk; no funding/swap in the tracker; sealed test untouched)
+
+| development (127 signals) | perp base | CFD base | CFD stress (x4) |
+|---|---:|---:|---:|
+| V0 | -21.8 R (-23.3 %) | **+12.3 R (+7.7 %)** | -4.8 R |
+| A (BE at +1 R) | -46.7 | -14.4 | -29.4 |
+| B (A + 30 % at +2 R) | -46.6 | -14.8 | -30.2 |
+| C (fixed +2 R) | -39.0 | -6.7 | -21.5 |
+| D (fixed +3 R) | -33.4 | -0.9 | -16.2 |
+
+| validation (58 signals) | perp base | CFD base | CFD stress (x4) |
+|---|---:|---:|---:|
+| V0 | -0.1 R (-2.6 %) | **+19.5 R (+18.3 %)** | +8.0 R |
+| A | -14.3 | +4.0 | +3.3 |
+| B | -14.4 | +3.8 | +0.9 |
+| C | -11.1 | +7.2 | -2.5 |
+| D | +2.0 | +21.7 | +10.6 |
+
+- **Selection (rule fixed in advance): V0** - highest development total R under the CFD profile. D has the
+  best validation number, but validation was declared a confirmation, not a selector; D is **not** adopted.
+- **Breakeven (A, B) hurts** on both periods and both profiles: win rate falls (A: 8 % on development) because
+  trades that retrace to the entry after +1 R are stopped flat (minus costs) and would often have continued.
+- **Sanity check**: V0 replayed on the tracker gives win rate 15.0 % and -21.8 R on development under perp costs,
+  vs 14.8 % and about -20 R in the Stage 4 engine; the engine filled 108 of the 127 signals and models funding,
+  the tracker takes all 127 and has none - the replay is approximate, not byte-identical.
+- **Caveats**: 127 + 58 trades; V0 on CFD costs combined is about +0.17 R per trade over 185 trades (roughly
+  1 sigma of the per-trade noise); under the x4 spread stress the combined result is about +3 R, i.e. zero.
+  Ten comparisons per period were made. The CFD spread (~2.5 bps round trip) is one public 2025 measurement,
+  not verified on the owner's terminal. Not evidence of profitability; grade stays EXPERIMENTAL.

@@ -64,12 +64,18 @@ def track_signal(
     *,
     stress: bool = False,
     move_stop_to_breakeven_after_first_tp: bool = False,
+    breakeven_at_r: float | None = None,
 ) -> PaperTrackResult:
     """Resolve ``signal`` from its real fill forward, on ``market``'s 1m bars.
 
     ``entry_time_ms``/``entry_fill_price`` are facts already established elsewhere (the real fill, with
     its own latency and slippage - not this module's job to compute); ``market`` must contain
     ``entry_time_ms`` as one of its own 1m bar times.
+
+    ``breakeven_at_r``: once price has traded ``breakeven_at_r`` times the planned risk in favour (bar high/low
+    reaching ``entry_fill_price +/- r * |entry_fill_price - stop|``), the stop moves to the entry fill price -
+    effective from the *next* 1m bar, so a bar that both reaches the trigger and then reverses can never be
+    credited with a breakeven exit it could not have had (the same "assume the worse outcome" rule).
     """
     side = signal.side
     stop_price = signal.stop
@@ -84,6 +90,9 @@ def track_signal(
     remaining = 1.0
     next_level = 0
     effective_stop = stop_price
+    risk_per_unit = abs(entry_fill_price - stop_price)
+    breakeven_waiting = breakeven_at_r is not None  # trigger not yet reached
+    breakeven_armed = False  # trigger reached on an earlier bar; stop moves at the start of the next one
     legs: list[ClosedLeg] = []
     updates: list[TrackedUpdate] = []
 
@@ -101,6 +110,11 @@ def track_signal(
             remaining = 0.0
             break
 
+        if breakeven_armed:
+            effective_stop = entry_fill_price
+            breakeven_armed = False
+            updates.append(TrackedUpdate(t, SignalUpdateKind.STOP_MOVED, f"new_stop={entry_fill_price:.8f}"))
+
         stop_touched = (lo <= effective_stop) if side == 1 else (h >= effective_stop)
         if stop_touched:
             sigma = slippage_fraction(o, h, lo, costs, stress)
@@ -111,6 +125,12 @@ def track_signal(
             updates.append(TrackedUpdate(t, SignalUpdateKind.CLOSED, f"reason={reason};fraction={remaining:.8f}"))
             remaining = 0.0
             break
+
+        if breakeven_waiting and breakeven_at_r is not None:
+            trigger = entry_fill_price + side * breakeven_at_r * risk_per_unit
+            if (h >= trigger) if side == 1 else (lo <= trigger):
+                breakeven_waiting = False
+                breakeven_armed = True
 
         if next_level < len(levels):
             level = levels[next_level]

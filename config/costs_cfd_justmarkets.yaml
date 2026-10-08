@@ -1,0 +1,22 @@
+# Alternative cost profile for the exit-variant study (scripts/s4_variant_study.py): BTCUSD CFD on a
+# JustMarkets MT5 Pro account (zero commission, spread-only costs, swap-free crypto).
+# Sources/assumptions (2026-10-09): FXEmpire live test ~$28-30 spread on BTC at ~$117k (2025-07) ~= 2.5 bps per
+# round trip => 1.25 bps per side. NOT verified on the owner's own MT5 terminal - replace with the observed
+# spread from "Market Watch -> BTCUSD" when available. No funding/swap is modelled (swap-free).
+# The default config/costs.yaml (Binance USDT-perp, taker 5 bps) is untouched and still drives every Stage 4-10 result.
+fees:
+  maker_fee_bps: 0.0
+  taker_fee_bps: 0.0
+  entry_order_type: taker
+  exit_order_type: taker
+  stop_order_type: taker
+slippage:
+  model: fixed_plus_volatility
+  fixed_bps: 1.25               # half of a ~2.5 bps round-trip spread, per side
+  volatility_multiplier: 0.0    # spread only; the stress run below covers widened spreads and stop slippage
+  stress_multiplier: 4.0        # 5 bps per side ~= 10 bps round trip (spread widening in fast markets)
+funding:
+  source: historical
+  missing_policy: error
+  assumed_rate_bps: 0.0
+  default_interval_hours: 8

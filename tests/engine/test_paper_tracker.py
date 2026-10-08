@@ -136,3 +136,36 @@ def test_nothing_touched_within_the_given_data_returns_no_resolution():
     result = track_signal(signal, T0, 100.0, market, zero_cost_app().costs)
     assert result.resolution is None
     assert result.updates == ()
+
+
+def test_breakeven_at_r_moves_the_stop_after_the_trigger_and_closes_flat():
+    # long 100, stop 98 (risk 2). bar 1 reaches +1R (102) without hitting TP (200); bar 2 returns to entry.
+    bars = {0: flat_bar(100.0), 1: (100.0, 102.0, 100.0, 101.0), 2: (101.0, 101.0, 99.5, 100.0)}
+    market = make_market(1, bars, base_price=100.0, start_ms=T0)
+    signal = make_signal(ladder=((100.0, 1.0),))
+    result = track_signal(signal, T0, 100.0, market, zero_cost_app().costs, breakeven_at_r=1.0)
+    res = result.resolution
+    assert [leg.exit_reason for leg in res.legs] == ["STOP_BREAKEVEN"]
+    assert res.r_multiple == pytest.approx(0.0)
+    assert [u.kind for u in result.updates] == [SignalUpdateKind.STOP_MOVED, SignalUpdateKind.CLOSED]
+
+
+def test_breakeven_is_not_effective_in_the_bar_that_reaches_the_trigger():
+    # bar 1 reaches +1R and then falls to 98 (the original stop) in the same bar: the original stop applies.
+    bars = {0: flat_bar(100.0), 1: (100.0, 102.0, 97.5, 98.0)}
+    market = make_market(1, bars, base_price=100.0, start_ms=T0)
+    signal = make_signal(ladder=((100.0, 1.0),))
+    res = track_signal(signal, T0, 100.0, market, zero_cost_app().costs, breakeven_at_r=1.0).resolution
+    assert res.legs[0].exit_reason == "STOP" and res.r_multiple == pytest.approx(-1.0)
+
+
+def test_breakeven_not_triggered_below_the_threshold_and_short_side_symmetric():
+    bars = {0: flat_bar(100.0), 1: (100.0, 100.5, 99.0, 99.5), 2: (99.5, 102.5, 99.5, 102.0)}
+    market = make_market(1, bars, base_price=100.0, start_ms=T0)
+    short = make_signal(side=-1, stop=102.0, ladder=((100.0, 1.0),))
+    res = track_signal(short, T0, 100.0, market, zero_cost_app().costs, breakeven_at_r=1.0).resolution
+    assert res.legs[0].exit_reason == "STOP" and res.r_multiple == pytest.approx(-1.0)  # only -0.5R reached, no BE
+    bars2 = {0: flat_bar(100.0), 1: (100.0, 100.0, 98.0, 98.5), 2: (98.5, 100.5, 98.5, 100.0)}
+    market2 = make_market(1, bars2, base_price=100.0, start_ms=T0)
+    res2 = track_signal(short, T0, 100.0, market2, zero_cost_app().costs, breakeven_at_r=1.0).resolution
+    assert res2.legs[0].exit_reason == "STOP_BREAKEVEN" and res2.r_multiple == pytest.approx(0.0)
