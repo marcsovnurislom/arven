@@ -1,6 +1,6 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-09 (Signal-product build-out Phase 7b, part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
+_Last updated: 2026-10-09 (Signal-product build-out Phase 7b, part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
 
 ## Phase
 
@@ -1773,6 +1773,21 @@ development window 2020-01-01 -> 2023-07-01 (30 648 h, 122 592 fifteen-minute de
   and validated on the validation period, never chosen from these numbers.
 - **Not claiming profitability** (CLAUDE.md rule 6): this is a losing development result, reported as is.
 
+**Phase 7b, part 2b - unchanged S4 v1.1 on validation and forward (done, 2026-10-09; owner asked to test other years).**
+Same code and parameters as the development run, nothing tuned. The sealed test period (2025-01-01 ->
+2026-07-01) was **not** run: it needs the owner's explicit go and is logged permanently; running it for S4 now
+would use it up for any later S4 variant.
+- **Validation (2023-07-01 -> 2025-01-01, 13 200 h)**: 58 signals, **40 trades**, win rate **17.5 %**, total
+  return **+0.73 %** (10 000 -> 10 073), max drawdown **19.7 %**, Sharpe 0.10. Gross +1 288 USDT, fees+slippage
+  1 148, net +73. LONG: 17 stops (-2 073), 5 TP (+2 982); SHORT: 16 stops (-1 847), 2 TP (+1 011). By half-year:
+  2023H2 14 trades -226; 2024H1 15 trades -552; 2024H2 11 trades +851.
+- **Forward (2026-07-01 -> 2026-10-08, true out-of-sample, 2 378 h)**: 7 signals, **4 trades**, +0.46 %, win rate
+  25 %, max drawdown 3.0 %, Sharpe 0.27 - a sample far too small to conclude anything.
+- **Reading**: development -20.5 % (108 trades), validation about breakeven (+0.7 %, 40 trades). The signal rate
+  fell from ~0.7/week to ~0.45/week. The gross edge is positive in all three periods but costs take most or all
+  of it; the validation result is statistically indistinguishable from zero. S4 is **not shown to be profitable**;
+  grade stays EXPERIMENTAL.
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -2456,3 +2471,4 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-08 | Phase 7b part 1 implemented and validated: 9 new provider tests + 5 static-boundary tests + 2 corrected Phase 7a tests; full suite 2139 passed/13 skipped, no regressions, golden regression green | implemented (Phase 7b part 1), approved (final) |
 | 2026-10-09 | First real S4 development run exposed an O(n^2) wall-clock bug (Python-loop ATR/swings recomputed every 15m tick); fixed by vectorising `confirmed_swings` and caching the 1h setup side per 1h bar, with a cache-equivalence test | implemented (Phase 7b part 2) |
 | 2026-10-09 | S4 v1.1 on development: 108 trades, win rate 14.8 %, -20.5 % (stress -27.3 %), max DD 38.3 %; gross +878 USDT turned negative by 2 758 USDT of fees+slippage; no implementation error found in hand audit; no tuning on this period; S4 stays EXPERIMENTAL; windowed robustness/forward paper/grade deferred | recorded (Phase 7b part 2), honest negative result |
+| 2026-10-09 | Unchanged S4 v1.1 run on validation (+0.73 %, 40 trades, 17.5 % win rate, max DD 19.7 %) and forward (4 trades, +0.46 %); sealed test deliberately not run (needs explicit owner go, would be spent for later S4 variants); S4 stays EXPERIMENTAL | recorded (Phase 7b part 2b) |
