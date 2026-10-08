@@ -1,6 +1,6 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-08 (Signal-product build-out Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
+_Last updated: 2026-10-09 (Signal-product build-out Phase 7b, part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
 
 ## Phase
 
@@ -1738,6 +1738,41 @@ real bug below) and its own spec doc (§4's confluence-zone definition - also se
   like breakdown; wiring a real forward/paper run; assembling a `TrackRecord` and the grade
   `engine.grading` would assign from whatever those produce.
 
+**Phase 7b, part 2 — S4 evaluated on the real development period (done, 2026-10-09): result is NEGATIVE.**
+S4 v1.1 (spec `docs/strategy_impulse_retest.md`, parameters unchanged, nothing tuned) run alone through
+`EventBacktester` (`Timeframe.M15` events; no other strategy, regime, ML or risk layer involved) on the
+development window 2020-01-01 -> 2023-07-01 (30 648 h, 122 592 fifteen-minute decisions), repo costs config.
+
+- **Performance bug found by running it for real, and fixed**: the first attempt did not finish in 180 s.
+  Cause: `_compute_decision` recomputed Wilder ATR and `confirmed_swings` (both O(n) Python loops) from
+  scratch on a growing array at every 15-minute tick (~122 000 calls) = O(n^2) wall-clock. Fixes: (1)
+  `confirmed_swings` vectorised (shifted-mask comparisons + two-pointer merge keeping the exact original
+  HIGH-before-LOW tie-break; existing truncation/leakage test still passes); (2) the setup-timeframe side
+  (ATR, swings, impulse, zone, trendline) is cached keyed by the truncated 1h array's length, so it is
+  recomputed once per hour, not per tick. New test `test_hourly_setup_cache_never_changes_a_decision`
+  (cached provider == fresh provider at 11 consecutive 15m marks). One run still takes ~20 min CPU.
+- **Result (base costs)**: 127 entry signals, **108 trades** (55 long / 53 short), **win rate 14.8 %**,
+  total return **-20.5 %** (10 000 -> 7 948), max drawdown **38.3 %**, Sharpe -0.37.
+  Gross PnL before costs +878 USDT; fees 1 471 + slippage 1 288 = 2 758 USDT -> net -2 052 USDT.
+  16 take-profits (mean +5.84 R) vs 92 stops (mean -1.23 R): breakeven win rate is ~17-18 %, actual 14.8 %.
+- **Cost stress (2x slippage)**: 109 trades, win rate 14.7 %, return **-27.3 %**, max drawdown 40.9 %, Sharpe -0.54.
+- **Per-side / per-exit breakdown (S4's regime == impulse direction == side)**: LONG stop 44 (-5 477),
+  LONG TP 11 (+5 899); SHORT stop 48 (-5 611), SHORT TP 5 (+3 136). Both sides lose; shorts hit take-profit
+  less often (5 of 53 vs 11 of 55).
+- **Hand audit of the trade list** (first 8 trades + aggregate checks): no stop exit is in profit, no
+  take-profit exit is at a loss, entry time == decision time (fill at the next bar open per the engine's
+  convention), side/stop/target geometry consistent. One trade (#2) was stopped out in the same minute it
+  entered (very tight stop). No implementation error found; the loss looks like a genuine absence of edge
+  after costs, with stops tight relative to fees/slippage. This is a hypothesis, not a proven cause.
+- **Baselines**: not re-run - the Stage 4 development baselines above (no_trade 0; buy_and_hold liquidated,
+  -190 % with funding; random entry mean -8.3 %, p5 -56 %, p95 +61 %) apply to the same window, but use
+  different sizing (full notional, 24 h holds) than S4's 1 % risk, so they are context, not a ranking.
+- **Not done**: windowed robustness (pointless while the full-period result is negative; one run is ~20 min),
+  forward/paper wiring (needs calendar time and a worthwhile strategy), `TrackRecord`/grade. S4 stays
+  `EXPERIMENTAL`. No parameter was tuned on this period; any v2 must be pre-registered in spec section 11
+  and validated on the validation period, never chosen from these numbers.
+- **Not claiming profitability** (CLAUDE.md rule 6): this is a losing development result, reported as is.
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -2419,3 +2454,5 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-08 | A real methodology flaw found empirically (not by unit tests, which had used hand-picked numbers that happened to overlap): spec §4's original "base candle = start_swing_index - 1" definition almost never overlaps the Fibonacci 0.5-0.618 band, which sits 38-50% up the impulse from its origin. Corrected (spec §4 revision, §11 variant log) to search for a qualifying base candle within the impulse leg itself, nearest the end first - matching how a real impulsive move often pauses partway through | implemented (Phase 7b) |
 | 2026-10-08 | A pre-existing, Stage-4-era static rule (`arven.backtest` never imports `arven.features`) caught the provider's own ATR computation; resolved by moving ATR computation into `engine.strategy_s4.setup_tf_atr` (`arven.engine` may import `arven.features`, Phase 2's own precedent) rather than loosening the backtest package's long-standing boundary; the Phase 3/4 `backtest -> engine` static-rule pattern was extended a third time for `strategy_s4_provider.py` | implemented (Phase 7b) |
 | 2026-10-08 | Phase 7b part 1 implemented and validated: 9 new provider tests + 5 static-boundary tests + 2 corrected Phase 7a tests; full suite 2139 passed/13 skipped, no regressions, golden regression green | implemented (Phase 7b part 1), approved (final) |
+| 2026-10-09 | First real S4 development run exposed an O(n^2) wall-clock bug (Python-loop ATR/swings recomputed every 15m tick); fixed by vectorising `confirmed_swings` and caching the 1h setup side per 1h bar, with a cache-equivalence test | implemented (Phase 7b part 2) |
+| 2026-10-09 | S4 v1.1 on development: 108 trades, win rate 14.8 %, -20.5 % (stress -27.3 %), max DD 38.3 %; gross +878 USDT turned negative by 2 758 USDT of fees+slippage; no implementation error found in hand audit; no tuning on this period; S4 stays EXPERIMENTAL; windowed robustness/forward paper/grade deferred | recorded (Phase 7b part 2), honest negative result |

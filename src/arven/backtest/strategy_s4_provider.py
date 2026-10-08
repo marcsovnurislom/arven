@@ -75,6 +75,15 @@ class ImpulseRetestProvider:
         self._multitf = MultiTFView.from_bars({Timeframe.H4: context_bars}, (Timeframe.H4,), tf_params or TFFeatureParams())
         self._last_decision: ImpulseRetestDecision | None = None  # the most recent decide() output, for to_engine_signal()
         self.placed = 0
+        # Cache of the setup_tf-side computation (everything that depends only on setup_bars, not on the
+        # trigger_tf tick that is currently running), keyed by the truncated setup array's own length. A
+        # new setup_tf (1h) bar becomes available only once an hour, but decide() is called every
+        # trigger_tf (15m) tick - four calls out of five would otherwise recompute an unchanged result from
+        # scratch over an ever-growing array (ATR/swings are each O(n) per call), making a multi-year
+        # backtest effectively O(n^2) in wall-clock time. Found and fixed before the first real
+        # development-period run completed - see `docs/current_state.md`'s "Phase 7b" section.
+        self._setup_cache_len: int | None = None
+        self._setup_cache: tuple[BarSeries, float, object | None, object | None] | None = None
 
     def describe(self) -> dict[str, Any]:
         return {"name": STRATEGY_ID, "version": STRATEGY_VERSION, "risk_fraction": RISK_FRACTION}
@@ -82,10 +91,41 @@ class ImpulseRetestProvider:
     def prepare(self, info: PrepareInfo) -> None:
         return None
 
-    def _compute_decision(self, now_ms: int) -> ImpulseRetestDecision | None:
+    def _setup_side(self, now_ms: int) -> tuple[BarSeries, float, object, object, object] | None:
+        """Everything derived from `setup_bars` alone (ATR, swings, the active impulse, zone, trendline) -
+        cached across ticks that fall within the same, still-current setup_tf bar. Returns
+        ``(setup, atr_at_as_of, impulse, zone, trendline)`` or ``None`` if no impulse/zone/trendline
+        exists yet (the 4h-slope-agreement filter is applied separately, by the caller)."""
         setup = self._setup_bars.available_until(now_ms).regularized()
+        if len(setup) < MIN_SETUP_BARS:
+            return None
+        if self._setup_cache_len == len(setup):
+            setup_cached, atr_at_as_of, impulse, zone_and_line = self._setup_cache  # type: ignore[misc]
+        else:
+            atr_setup = setup_tf_atr(setup.high, setup.low, setup.close)
+            swings = confirmed_swings(setup.high, setup.low)
+            as_of = len(setup) - 1
+            impulse = find_last_impulse(swings, atr_setup, as_of)
+            zone_and_line = None
+            if impulse is not None:
+                zone = confluence_zone(impulse, setup.high, setup.low, atr_setup)
+                if zone is not None:
+                    trendline = counter_trend_trendline(swings, impulse, as_of, setup.open_time_ms)
+                    if trendline is not None:
+                        zone_and_line = (zone, trendline)
+            atr_at_as_of = float(atr_setup[as_of])
+            self._setup_cache_len = len(setup)
+            self._setup_cache = (setup, atr_at_as_of, impulse, zone_and_line)
+            setup_cached = setup
+
+        if impulse is None or zone_and_line is None:
+            return None
+        zone, trendline = zone_and_line
+        return setup_cached, atr_at_as_of, impulse, zone, trendline
+
+    def _compute_decision(self, now_ms: int) -> ImpulseRetestDecision | None:
         trigger = self._trigger_bars.available_until(now_ms).regularized()
-        if len(setup) < MIN_SETUP_BARS or len(trigger) < 2:
+        if len(trigger) < 2:
             return None
 
         try:
@@ -96,21 +136,12 @@ class ImpulseRetestProvider:
         if not math.isfinite(slope):
             return None
 
-        atr_setup = setup_tf_atr(setup.high, setup.low, setup.close)
-        swings = confirmed_swings(setup.high, setup.low)
-        as_of = len(setup) - 1
-        impulse = find_last_impulse(swings, atr_setup, as_of)
-        if impulse is None:
+        side_result = self._setup_side(now_ms)
+        if side_result is None:
             return None
+        setup, atr_at_entry, impulse, zone, trendline = side_result
         if (impulse.side == 1 and slope <= 0) or (impulse.side == -1 and slope >= 0):
             return None  # spec section 1.1: direction must agree with the 4h trend
-
-        zone = confluence_zone(impulse, setup.high, setup.low, atr_setup)
-        if zone is None:
-            return None
-        trendline = counter_trend_trendline(swings, impulse, as_of, setup.open_time_ms)
-        if trendline is None:
-            return None
 
         search_from = int(np.searchsorted(trigger.open_time_ms, setup.open_time_ms[impulse.end.index]))
         trigger_idx = find_trigger(
@@ -120,7 +151,6 @@ class ImpulseRetestProvider:
             return None  # only a *fresh* trigger on the current decision bar fires - never a stale one
 
         entry_price = float(trigger.close[trigger_idx])
-        atr_at_entry = float(atr_setup[as_of])
         if not math.isfinite(atr_at_entry) or atr_at_entry <= 0:
             return None
         return build_decision(impulse, zone, entry_price, atr_at_entry, trigger_idx)

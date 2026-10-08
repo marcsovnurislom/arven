@@ -65,17 +65,45 @@ def confirmed_swings(high: np.ndarray, low: np.ndarray, k: int = SWING_K) -> tup
     """Every causal swing high/low in ``high``/``low`` (spec section 2): bar ``i`` is a swing high if it is
     strictly higher than every one of the ``k`` bars on both sides, confirmed (knowable) only once bar
     ``i + k`` has closed. A bar adjacent to a NaN is never flagged (NaN comparisons are always false), which
-    is the safe, not a special-cased, behaviour."""
+    is the safe, not a special-cased, behaviour.
+
+    Vectorised (one boolean mask built by ``k`` shifted comparisons, not a Python loop per bar) - this
+    function is recomputed on every provider tick over a growing array (see
+    ``backtest.strategy_s4_provider``'s own caching note), so an O(n) **Python** loop here would make a
+    multi-year backtest effectively O(n^2) in wall-clock time; found and fixed before the first real
+    development-period run completed (see `docs/current_state.md`'s "Phase 7b" section). Byte-identical
+    results to a naive per-bar loop, including the tie-break when one bar is both a swing high and a swing
+    low (high ordered before low at the same index)."""
     if k < 1:
         raise ValueError("k must be >= 1")
     n = len(high)
+    if n <= 2 * k:
+        return ()
+    is_high = np.ones(n, dtype=bool)
+    is_low = np.ones(n, dtype=bool)
+    for shift in range(1, k + 1):
+        left_h, right_h = np.full(n, -np.inf), np.full(n, -np.inf)
+        left_h[shift:], right_h[: n - shift] = high[:-shift], high[shift:]
+        is_high &= (high > left_h) & (high > right_h)
+        left_l, right_l = np.full(n, np.inf), np.full(n, np.inf)
+        left_l[shift:], right_l[: n - shift] = low[:-shift], low[shift:]
+        is_low &= (low < left_l) & (low < right_l)
+    is_high[:k] = is_high[n - k :] = False
+    is_low[:k] = is_low[n - k :] = False
+
+    high_idx, low_idx = np.flatnonzero(is_high), np.flatnonzero(is_low)
     swings: list[Swing] = []
-    for i in range(k, n - k):
-        if np.all(high[i] > high[i - k : i]) and np.all(high[i] > high[i + 1 : i + k + 1]):
-            swings.append(Swing(i, SwingKind.HIGH, float(high[i]), i + k))
-        if np.all(low[i] < low[i - k : i]) and np.all(low[i] < low[i + 1 : i + k + 1]):
-            swings.append(Swing(i, SwingKind.LOW, float(low[i]), i + k))
-    return tuple(sorted(swings, key=lambda s: s.index))
+    hi = li = 0
+    while hi < len(high_idx) or li < len(low_idx):
+        h = int(high_idx[hi]) if hi < len(high_idx) else None
+        lo = int(low_idx[li]) if li < len(low_idx) else None
+        if h is not None and (lo is None or h <= lo):
+            swings.append(Swing(h, SwingKind.HIGH, float(high[h]), h + k))
+            hi += 1
+        else:
+            swings.append(Swing(lo, SwingKind.LOW, float(low[lo]), lo + k))
+            li += 1
+    return tuple(swings)
 
 
 @dataclass(frozen=True, slots=True)

@@ -191,3 +191,13 @@ def test_to_engine_signal_is_none_when_no_decision_was_just_made():
 def test_make_spec_matches_the_documented_timeframes():
     spec = make_spec()
     assert spec.context_tfs == (Timeframe.H4,) and spec.setup_tf == Timeframe.H1 and spec.trigger_tf == Timeframe.M15
+
+
+def test_hourly_setup_cache_never_changes_a_decision():
+    """The setup-side cache (keyed by the truncated 1h array's length) must be a pure speed-up: ticking one
+    provider through consecutive 15m marks gives exactly the decisions fresh providers give at those marks."""
+    cached, now_ms = build_firing_scenario()
+    for k in range(10, -1, -1):
+        t = now_ms - k * 900_000
+        fresh, _ = build_firing_scenario()
+        assert repr(cached._compute_decision(t)) == repr(fresh._compute_decision(t)), t
