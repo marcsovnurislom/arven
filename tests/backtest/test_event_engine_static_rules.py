@@ -17,10 +17,14 @@ exactly as it was (``tests/engine/test_engine_static_rules.py``). What this file
 
 Phase 4 note: ``arven.backtest.paper_tracker`` (the signal-ladder paper tracker) resolves the same tension
 the same way - it also lives in ``arven.backtest`` and imports *from* ``arven.engine`` (its own
-``test_paper_tracker_static_rules.py`` pins its precise vocabulary). ``test_legacy_backtest_modules_never_
-import_the_engine_or_the_loop`` below therefore excludes both new modules, not just this one, by name - any
-*other* file in ``arven.backtest`` (``execution.py``, ``engine.py``, ``clock.py``, ``provider.py``, ...)
-still may not import ``arven.engine`` or either new module.
+``test_paper_tracker_static_rules.py`` pins its precise vocabulary).
+
+Phase 7b note: ``arven.backtest.strategy_s4_provider`` (the S4 ``SignalProvider`` adapter) is a third such
+module, same resolution again (its own ``test_strategy_s4_provider_static_rules.py`` pins its precise
+vocabulary). ``test_legacy_backtest_modules_never_import_the_engine_or_the_loop`` below therefore excludes
+all three new modules, not just the first one, by name - any *other* file in ``arven.backtest``
+(``execution.py``, ``engine.py``, ``clock.py``, ``provider.py``, ...) still may not import ``arven.engine``
+or any of them.
 """
 
 import ast
@@ -29,7 +33,8 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parents[2] / "src" / "arven"
 LOOP = SRC / "backtest" / "event_engine.py"
 TRACKER = SRC / "backtest" / "paper_tracker.py"
-NEW_MODULES = (LOOP, TRACKER)
+S4_PROVIDER = SRC / "backtest" / "strategy_s4_provider.py"
+NEW_MODULES = (LOOP, TRACKER, S4_PROVIDER)
 
 
 def _import_nodes(path: Path):
@@ -76,8 +81,8 @@ def test_legacy_backtest_modules_never_import_the_engine_or_the_loop():
         bad = [
             m
             for m, n in _import_nodes(path)
-            if m.startswith(("arven.engine", "arven.backtest.event_engine", "arven.backtest.paper_tracker"))
-            or (m == "arven.backtest" and n in ("event_engine", "paper_tracker"))
+            if m.startswith(("arven.engine", "arven.backtest.event_engine", "arven.backtest.paper_tracker", "arven.backtest.strategy_s4_provider"))
+            or (m == "arven.backtest" and n in ("event_engine", "paper_tracker", "strategy_s4_provider"))
         ]
         assert not bad, f"{path.name}: {bad}"
 

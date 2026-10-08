@@ -78,26 +78,37 @@ qualifies if impulse_size >= M * ATR_14(setup_tf) at the end swing's own bar
 
 ## 4. Confluence zone
 
-```
-fib_zone = [start + 0.382 * impulse_size, start + 0.5 * impulse_size]   (long: start = swing-low price)
-                                                                         (measured from the swing nearer price)
-```
-
-Precisely, per the master prompt's own text, the retracement band is **Fibonacci 0.5-0.618** of the
-impulse (measured back from the impulse's *end*, i.e. the point the price must retrace through):
+Per the master prompt's own text, the retracement band is **Fibonacci 0.5-0.618** of the impulse
+(measured back from the impulse's *end*, i.e. the point the price must retrace through):
 
 ```
-long:  zone_price_band = [end - 0.618 * impulse_size, end - 0.5 * impulse_size]
-short: zone_price_band = [end + 0.5 * impulse_size,   end + 0.618 * impulse_size]
+long:  fib_band = [end - 0.618 * impulse_size, end - 0.5 * impulse_size]
+short: fib_band = [end + 0.5 * impulse_size,   end + 0.618 * impulse_size]
 ```
 
-This band must **overlap** a rule-defined demand/supply zone: the **base candle** immediately before the
-impulse's starting swing bar, i.e. bar `start_swing_index - 1` on `setup_tf`, whose own range qualifies:
+**Revision 2026-10-08 (before any evaluation ran - see §11):** the first draft of this section defined the
+demand/supply "base candle" as the single bar immediately before the impulse's *starting* swing
+(`start_swing_index - 1`). That bar's own price is, by construction, at or very near the impulse's origin -
+but `fib_band` sits 38-50% of the way *up* the move from that origin, so the two essentially never overlap
+for a real impulsive leg (confirmed empirically before writing any backtest/evaluation code: a hand-built
+impulse-retest scenario produced `zone = None` every time with the original definition). This is corrected
+here, not hidden - CLAUDE.md's "investigate an anomaly rather than accept it" applies to a strategy's own
+geometry just as much as to a "0 trades" backtest result.
+
+**Corrected rule**: the base candle is searched for *within the impulse leg itself* (any `setup_tf` bar
+from `start_swing_index` to `end_swing_index` inclusive), nearest the impulse's end first - the first one
+found (scanning backward from the end) whose own range overlaps `fib_band` and qualifies by size:
 
 ```
-base_range = high[start_swing_index - 1] - low[start_swing_index - 1]
-qualifies if base_range >= N * ATR_14(setup_tf) at that same bar
+base_range = high[i] - low[i]
+qualifies if base_range >= N * ATR_14(setup_tf) at bar i, AND [low[i], high[i]] overlaps fib_band
 ```
+
+This matches the real pattern this strategy formalises better than the original draft: an impulsive leg
+often pauses briefly partway through (a small base/consolidation the move "broke out from" on its way to
+the swing extreme), and that pause - not the move's literal starting candle - is what price later returns
+to retest. If no bar in the leg qualifies, there is no valid zone and the impulse produces no signal, same
+as before.
 
 - **`N = 1.0`** - the base candle must be at least as large as the prevailing ATR (filters out a doji or a
   tiny bar as a meaningless "zone"). Round number, not tuned.
@@ -213,4 +224,5 @@ construction, not approximated.
 
 | Date | Variant | Parameters changed from §§2-8 defaults | Result (one line) | Kept? |
 |---|---|---|---|---|
-| 2026-10-08 | v1 (this spec) | none - the defaults above are the first and only version evaluated so far | pending implementation | current |
+| 2026-10-08 | v1 | none | §4's original base-candle definition (`start_swing_index - 1`) found to never geometrically overlap the Fib zone, before any backtest ran - not a tuning change, a definition bug | superseded by v1.1 below |
+| 2026-10-08 | v1.1 (this spec) | §4's base-candle search widened to the whole impulse leg (see "Revision" note in §4) - no threshold (`K`/`M`/`N`/buffer/Fib band/extensions) changed | pending full evaluation (7b) | current |

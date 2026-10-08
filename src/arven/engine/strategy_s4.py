@@ -25,15 +25,27 @@ from enum import StrEnum
 
 import numpy as np
 
+from arven.features import indicators as ind
+
 # Spec section 2-8 parameters - fixed before any evaluation, never fitted.
 SWING_K = 2
 IMPULSE_ATR_MULT = 3.0
 BASE_CANDLE_ATR_MULT = 1.0
 STOP_ATR_BUFFER = 0.25
+ATR_PERIOD = 14
 FIB_ZONE_LOW = 0.5
 FIB_ZONE_HIGH = 0.618
 FIB_EXTENSIONS = (1.0, 1.414, 1.618)
 CLOSE_FRACTIONS = (0.5, 0.3, 0.2)
+
+
+def setup_tf_atr(high: np.ndarray, low: np.ndarray, close: np.ndarray) -> np.ndarray:
+    """Wilder ATR(14) of `setup_tf`, the one place this module touches `arven.features` - kept here
+    (`arven.engine` may import `arven.features`, the same precedent `engine.features.py` already set in
+    Phase 2) rather than in the `SignalProvider` adapter: `arven.backtest` must never import
+    `arven.features` at all (a pre-existing, package-wide rule from Stage 4, `test_backtest_static_rules.
+    py` - found while wiring this strategy in, not weakened to work around it)."""
+    return ind.atr(high, low, close, ATR_PERIOD, ATR_PERIOD)
 
 
 class SwingKind(StrEnum):
@@ -108,43 +120,56 @@ class Zone:
 def confluence_zone(
     impulse: Impulse, high: np.ndarray, low: np.ndarray, atr: np.ndarray, n: float = BASE_CANDLE_ATR_MULT,
 ) -> Zone | None:
-    """Fibonacci 0.5-0.618 retracement band of ``impulse``, intersected with the base candle's range (the
-    bar immediately before the impulse's starting swing) - ``None`` if the base candle does not qualify
-    (spec section 4) or the two bands do not actually overlap."""
+    """Fibonacci 0.5-0.618 retracement band of ``impulse``, intersected with a qualifying base candle's
+    range - ``None`` if no bar qualifies (spec section 4) or the two bands do not actually overlap.
+
+    The base candle is searched for *within the impulse leg itself* (``start.index`` to ``end.index``
+    inclusive), nearest the impulse's end first - not fixed at ``start.index - 1`` (that was this
+    function's original definition; found, before any evaluation ran, to geometrically never overlap the
+    Fibonacci band for a real impulsive leg, since that band sits 38-50% of the way *up* the move from the
+    origin - see the spec's own "Revision" note in section 4)."""
     end, start = impulse.end, impulse.start
     if impulse.side == 1:
         fib_lo, fib_hi = end.price - FIB_ZONE_HIGH * impulse.size, end.price - FIB_ZONE_LOW * impulse.size
     else:
         fib_lo, fib_hi = end.price + FIB_ZONE_LOW * impulse.size, end.price + FIB_ZONE_HIGH * impulse.size
-    base_index = start.index - 1
-    if base_index < 0:
-        return None
-    base_range = high[base_index] - low[base_index]
-    a = atr[base_index]
-    if not (math.isfinite(a) and a > 0 and math.isfinite(base_range) and base_range >= n * a):
-        return None
-    lower, upper = max(fib_lo, low[base_index]), min(fib_hi, high[base_index])
-    if lower >= upper:
-        return None
-    return Zone(float(lower), float(upper), float(fib_lo), float(fib_hi))
+    for i in range(end.index, start.index - 1, -1):
+        a = atr[i]
+        base_range = high[i] - low[i]
+        if not (math.isfinite(a) and a > 0 and math.isfinite(base_range) and base_range >= n * a):
+            continue
+        lower, upper = max(fib_lo, low[i]), min(fib_hi, high[i])
+        if lower < upper:
+            return Zone(float(lower), float(upper), float(fib_lo), float(fib_hi))
+    return None
 
 
 @dataclass(frozen=True, slots=True)
 class TrendLine:
-    t1: int
+    """Prices at real epoch-ms times, never bar indices - the trendline is built from ``setup_tf`` pivots
+    but ``find_trigger`` must evaluate it on ``trigger_tf`` bars, a *different* index space (a 1h bar index
+    10 and a 15m bar index 10 are ten hours apart vs. 150 minutes apart). Using indices directly here was a
+    real bug found before this was ever wired to a second timeframe - see `docs/current_state.md`'s
+    "Phase 7b" section."""
+
+    t1_ms: int
     p1: float
-    t2: int
+    t2_ms: int
     p2: float
 
-    def price_at(self, t: int) -> float:
-        if self.t2 == self.t1:
+    def price_at(self, t_ms: int) -> float:
+        if self.t2_ms == self.t1_ms:
             return self.p2
-        return self.p1 + (self.p2 - self.p1) * (t - self.t1) / (self.t2 - self.t1)
+        return self.p1 + (self.p2 - self.p1) * (t_ms - self.t1_ms) / (self.t2_ms - self.t1_ms)
 
 
-def counter_trend_trendline(swings: tuple[Swing, ...], impulse: Impulse, as_of_index: int) -> TrendLine | None:
+def counter_trend_trendline(
+    swings: tuple[Swing, ...], impulse: Impulse, as_of_index: int, bar_times_ms: np.ndarray,
+) -> TrendLine | None:
     """A line through the last two confirmed counter-trend pivots since the impulse's end (spec section
-    5) - ``None`` if fewer than two exist yet."""
+    5) - ``None`` if fewer than two exist yet. ``bar_times_ms`` is the *same* ``setup_tf`` array the
+    pivots' own ``index`` values refer to (e.g. ``BarSeries.open_time_ms``), converting index -> real time
+    once here so every other function downstream only ever deals in real time."""
     counter_kind = SwingKind.HIGH if impulse.side == 1 else SwingKind.LOW
     pivots = [
         s for s in swings
@@ -153,19 +178,21 @@ def counter_trend_trendline(swings: tuple[Swing, ...], impulse: Impulse, as_of_i
     if len(pivots) < 2:
         return None
     p1, p2 = pivots[-2], pivots[-1]
-    return TrendLine(p1.index, p1.price, p2.index, p2.price)
+    return TrendLine(int(bar_times_ms[p1.index]), p1.price, int(bar_times_ms[p2.index]), p2.price)
 
 
 def find_trigger(
-    close: np.ndarray, high: np.ndarray, low: np.ndarray, trendline: TrendLine, zone: Zone, side: int,
-    search_from_index: int,
+    close: np.ndarray, high: np.ndarray, low: np.ndarray, bar_times_ms: np.ndarray, trendline: TrendLine,
+    zone: Zone, side: int, search_from_index: int,
 ) -> int | None:
     """First `trigger_tf` bar index at or after ``search_from_index`` where an earlier-or-same bar closed
     beyond the trendline *and* this bar's low/high (long/short) touches the zone while its own close holds
-    beyond the zone's near edge (spec section 6) - ``None`` if not yet triggered within the given arrays."""
+    beyond the zone's near edge (spec section 6) - ``None`` if not yet triggered within the given arrays.
+    ``bar_times_ms`` is ``trigger_tf``'s own bar-time array (e.g. ``BarSeries.open_time_ms``), used to
+    evaluate the (``setup_tf``-built) ``trendline`` at this timeframe's own real times."""
     broke = False
     for i in range(search_from_index, len(close)):
-        line_price = trendline.price_at(i)
+        line_price = trendline.price_at(int(bar_times_ms[i]))
         if side == 1:
             broke = broke or close[i] > line_price
             if broke and low[i] <= zone.upper and close[i] >= zone.lower:

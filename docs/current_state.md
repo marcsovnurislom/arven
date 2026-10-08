@@ -1,6 +1,6 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-08 (Signal-product build-out Phase 7a: strategy S4 "Impulse-Retest" spec + causal detection math, hand-tested; wiring/evaluation is Phase 7b, not yet done)_
+_Last updated: 2026-10-08 (Signal-product build-out Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
 
 ## Phase
 
@@ -24,11 +24,15 @@ token for a live test" step has not happened either** - no real `TELEGRAM_BOT_TO
 have been provided in any session so far; everything is validated offline, against fakes. **Phase 7
 (strategy S4 "Impulse-Retest") is split into 7a/7b, the same way Stage 9 was split into 9a/9b**: 7a (the
 formal spec, `docs/strategy_impulse_retest.md`, and the causal swing/impulse/zone/trendline/trigger/target
-detection math, hand-tested in isolation) is done; 7b (wiring S4 into a real `SignalProvider`/`EngineSignal`,
-the development backtest, windowed robustness, baselines, cost stress, per-regime-like breakdown, and
-forward paper) is the explicit next step, not yet started. Stage 11 (the sealed-test final evaluation)
-remains untouched, by design
-(master-prompt phase 12, owner-gated, exactly once).
+detection math, hand-tested in isolation) is done. **7b is itself split into two parts** (the same
+scope-management precedent as 9a/9b and 7a/7b themselves): part 1 - `arven.backtest.strategy_s4_provider`,
+the `SignalProvider` adapter wiring S4's detection math into a real `EventBacktester`-compatible provider,
+plus both its `Signal` (backtest) and `EngineSignal` (paper/live) renderings, verified end to end against a
+hand-built scenario (including two real bugs found and fixed before any evaluation ran - see
+"Signal-product build-out" below) - is done. Part 2 (the development backtest, windowed robustness,
+baselines, cost stress, per-regime-like breakdown, and forward paper) is the explicit next step, not yet
+started. Stage 11 (the sealed-test final evaluation) remains untouched, by design (master-prompt phase 12,
+owner-gated, exactly once).
 - Stage 10 (LLM explanations/Q&A + the Streamlit dashboard) is complete: implemented, unit-tested, and the
   dashboard itself was smoke-tested against this machine's real local data; the explain/Q&A LLM calls have
   not yet been made against the real Anthropic API (same acknowledged gap as Stage 9b - no API key was
@@ -1676,6 +1680,64 @@ Phase 3/4 `backtest -> engine` pattern). Nothing in Stages 1-10 or Phases 1-6 wa
   real forward/paper run; a `TrackRecord` and the grade the gate (`engine.grading`) would assign from any
   of the above.
 
+**Phase 7b, part 1 — the S4 `SignalProvider` adapter, wired and hand-verified end to end (done, 2026-10-08;
+part 2 - the actual development backtest/WFO/baselines/stress/per-regime/forward-paper run - is next).**
+One new file, `src/arven/backtest/strategy_s4_provider.py` (`ImpulseRetestProvider`, `make_spec`), plus a
+small, additive extension to the already-committed `engine/strategy_s4.py` (`setup_tf_atr` - see the
+real bug below) and its own spec doc (§4's confluence-zone definition - also see below). Nothing in Stages
+1-10 was touched.
+- **Ignores `ctx.features` entirely.** `EventBacktester` hands every registered provider the same legacy
+  1h-gridded `FeatureView` regardless of `trigger_tf` - useless for a 15m-triggered strategy. `decide()`
+  instead truncates its own pre-built `setup_tf`/`trigger_tf` `BarSeries` at `ctx.now_ms` via
+  `.available_until` (the same "truncate first, then compute" idiom `strategy_s4.py` already documents)
+  and looks up the 4h context row from its own `MultiTFView` - never the view it was handed.
+  **"Only fire on a fresh trigger"**: `find_trigger`'s result is only accepted when it lands on the
+  *current* (latest-available) `trigger_tf` bar - otherwise a pattern that triggered several bars ago while
+  flat would keep re-firing on every subsequent poll.
+- **One decision, two renderings** (spec §10): `decide()` returns the legacy single-exit `Signal` (TP1 and
+  the stop only, sized by `risk_fraction / stop_pct` - the standard risk-based position-sizing formula) for
+  the backtest/WFO/baselines/stress evaluation; `to_engine_signal()` builds the full ladder `EngineSignal`
+  from the *same* cached `ImpulseRetestDecision` for paper/live, so the technical-analysis math is never
+  computed twice from two different code paths.
+- **Two real bugs found before any backtest/evaluation ran - by actually constructing and running a
+  synthetic end-to-end scenario, not only by the Phase 7a unit tests**:
+  1. **A genuine cross-timeframe bug in the already-committed Phase 7a code**: `TrendLine`/`find_trigger`
+     used raw bar *indices* as if they were time - correct only by accident when every test stayed within
+     one timeframe's own array. Wiring S4's `setup_tf`-built trendline against `trigger_tf` bars exposed
+     this immediately (a 1h index 10 and a 15m index 10 are ten hours apart vs. 150 minutes). Fixed:
+     `TrendLine`/`counter_trend_trendline`/`find_trigger` now carry and compare real epoch-ms times, with a
+     dedicated regression test proving the old index-based approach would have evaluated the trendline at
+     the wrong real time.
+  2. **A real methodology flaw in the spec itself**: §4's original "base candle = `start_swing_index - 1`"
+     definition was found, empirically, to almost never overlap the Fibonacci 0.5-0.618 retracement band -
+     that band sits 38-50% of the way *up* the impulse from its origin, nowhere near the single candle
+     immediately before the move started. A hand-built scenario produced `zone = None` on every attempt
+     with the original rule. Corrected (spec §4's own "Revision" note, §11's variant log) to search for a
+     qualifying base candle *within the impulse leg itself*, nearest the end first - matching how a real
+     impulsive move often pauses briefly partway through, and that pause (not the leg's starting candle) is
+     what price later retests. Existing Phase 7a tests for `confluence_zone` were updated for the new
+     search, not discarded.
+- **A pre-existing, Stage-4-era static rule was also found and respected, not weakened**:
+  `test_backtest_static_rules.py`'s package-wide "`arven.backtest` never imports `arven.features`" check
+  (a CLAUDE.md rule 7 guard older than this whole build-out) caught the provider's own ATR computation.
+  Fixed by moving ATR computation into `engine.strategy_s4.setup_tf_atr` (`arven.engine` may import
+  `arven.features`, the same precedent Phase 2's `engine/features.py` already set) rather than loosening
+  the backtest package's own long-standing boundary.
+- **A third extension of the Phase 3/4 `backtest -> engine` static-rule pattern**: the same
+  `test_event_engine_static_rules.py` check amended once for `paper_tracker.py` (Phase 4) now also
+  excludes `strategy_s4_provider.py` by name, for the same reason.
+- **Counts**: 9 new tests (`tests/backtest/test_strategy_s4_provider.py`: wrong-timeframe construction,
+  insufficient warmup, a full hand-built firing scenario checking `decide()`/`to_engine_signal()` agree
+  with each other, no-reentry-while-open/order-pending, the 4h context filter blocking an otherwise-valid
+  setup, `to_engine_signal()` returning `None` with no cached decision) plus 5 static-boundary tests
+  (`test_strategy_s4_provider_static_rules.py`) plus 2 new/updated tests in `test_strategy_s4.py` for the
+  cross-timeframe fix and the confluence-zone correction. Full suite: **2139 passed, 13 skipped** (2120 +
+  19; no regressions; golden regression green).
+- **Not yet built (part 2, explicitly next)**: actually running S4 through `EventBacktester` on the
+  development period; the windowed robustness check, baselines, cost stress; the S4-specific per-regime-
+  like breakdown; wiring a real forward/paper run; assembling a `TrackRecord` and the grade
+  `engine.grading` would assign from whatever those produce.
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -2352,3 +2414,8 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-08 | S4 evaluation methodology decision (spec §10): the backtest/WFO/baselines/stress evaluation in 7b will use S4's nearest target (TP1) and its stop only, through the unchanged Stage 4 execution model - the full TP ladder is evaluated on the forward/paper leg via the Phase 4 `paper_tracker` instead, so no change to the shared execution layer is needed for this strategy | approved |
 | 2026-10-08 | A real sign-error bug was found by S4's own hand-computed tests before any other code used it: `build_decision`'s R-multiple formula applied `side` once instead of letting it cancel (`side**2 == 1`), giving a negative R for a short's profit target; the long-side test alone could not have caught this (`side=1` hid it) - fixed, with the short-side case as its own dedicated test | implemented (Phase 7a) |
 | 2026-10-08 | Master-prompt Phase 7a implemented and validated: 27 new tests (`tests/engine/test_strategy_s4.py`, incl. a dedicated truncation/leakage test for `confirmed_swings` per CLAUDE.md's "mandatory for every feature" rule); full suite 2120 passed/13 skipped, no regressions, golden regression green | implemented (Phase 7a), approved (final) |
+| 2026-10-08 | Phase 7b split into two parts (same precedent as 9a/9b, 7a/7b): part 1 is the `SignalProvider` adapter wiring S4 into a real, hand-verified end-to-end scenario; part 2 (the actual backtest/WFO/baselines/stress/per-regime/forward-paper evaluation) is deliberately deferred to its own step | approved |
+| 2026-10-08 | A genuine cross-timeframe bug found while wiring S4 (not by Phase 7a's own unit tests, which never crossed a timeframe boundary): `TrendLine`/`find_trigger` treated bar indices as if they were time, correct only by accident within one timeframe's own array - a setup_tf-built trendline evaluated against trigger_tf bars exposed this immediately. Fixed by carrying real epoch-ms times throughout, with a dedicated regression test proving the old approach would evaluate the trendline at the wrong real time | implemented (Phase 7b) |
+| 2026-10-08 | A real methodology flaw found empirically (not by unit tests, which had used hand-picked numbers that happened to overlap): spec §4's original "base candle = start_swing_index - 1" definition almost never overlaps the Fibonacci 0.5-0.618 band, which sits 38-50% up the impulse from its origin. Corrected (spec §4 revision, §11 variant log) to search for a qualifying base candle within the impulse leg itself, nearest the end first - matching how a real impulsive move often pauses partway through | implemented (Phase 7b) |
+| 2026-10-08 | A pre-existing, Stage-4-era static rule (`arven.backtest` never imports `arven.features`) caught the provider's own ATR computation; resolved by moving ATR computation into `engine.strategy_s4.setup_tf_atr` (`arven.engine` may import `arven.features`, Phase 2's own precedent) rather than loosening the backtest package's long-standing boundary; the Phase 3/4 `backtest -> engine` static-rule pattern was extended a third time for `strategy_s4_provider.py` | implemented (Phase 7b) |
+| 2026-10-08 | Phase 7b part 1 implemented and validated: 9 new provider tests + 5 static-boundary tests + 2 corrected Phase 7a tests; full suite 2139 passed/13 skipped, no regressions, golden regression green | implemented (Phase 7b part 1), approved (final) |
