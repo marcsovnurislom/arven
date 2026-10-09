@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
 import { api, type Signal } from "../api";
-import { CandleChart, type ChartLine } from "../CandleChart";
+import { Suspense, lazy } from "react";
+import type { ChartLine } from "../CandleChart";
 import { useI18n } from "../i18n";
 import { useLoad, useNow } from "../hooks";
 import { Card, Chip, Empty, ErrorBox, PageTitle, SidePill, Skeleton, fmt, fmtTime, shortId } from "../ui";
 
+const CandleChart = lazy(() => import("../CandleChart").then((m) => ({ default: m.CandleChart })));
 const MIN15 = 15 * 60_000;
 
 function Detail({ s }: { s: Signal }) {
@@ -30,7 +32,7 @@ function Detail({ s }: { s: Signal }) {
     >
       {error && <ErrorBox error={error} onRetry={reload} />}
       {!data && !error && <Skeleton h={380} />}
-      {data && <CandleChart candles={data.candles} lines={lines} markers={markers} height={380} />}
+      {data && <Suspense fallback={<Skeleton h={380} />}><CandleChart candles={data.candles} lines={lines} markers={markers} height={380} /></Suspense>}
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <div>
           <table>

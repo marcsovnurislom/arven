@@ -1,6 +1,6 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-10 (Signal-product build-out Phase 8b: React web app; Phase 8a: read-only HTTP API; earlier: Strategies S5 and S6 and an ML signal filter (no value) added and evaluated; forward evaluation of S4/S5/S6 wired (first 14 weeks negative); Phase 7b, part 2c: exit-variant study + CFD cost profile; part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
+_Last updated: 2026-10-10 (Signal-product build-out Phase 8 complete (8a API, 8b React app, 8c browser tests/Lighthouse); earlier: Strategies S5 and S6 and an ML signal filter (no value) added and evaluated; forward evaluation of S4/S5/S6 wired (first 14 weeks negative); Phase 7b, part 2c: exit-variant study + CFD cost profile; part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
 
 ## Phase
 
@@ -1872,6 +1872,20 @@ with headless Chrome screenshots of every page against real data (199 real signa
 profitability" is on every page. Not done: automated browser tests, Lighthouse scores and committed screenshots (Phase 8c, needs the owner's
 OK for Playwright: it is not in the master prompt's approved dependency list). `data/` and `web/dist` are git-ignored.
 
+**Phase 8c - browser tests, Lighthouse, screenshots (done, 2026-10-10; Phase 8 complete).** Playwright (`@playwright/test`) and
+`lighthouse`/`chrome-launcher` added to `web/` as dev dependencies with the owner's explicit OK; they drive the **installed Google
+Chrome** (`channel: "chrome"`), so no browser was downloaded. The server under test is `scripts/web_fixture_server.py`: the real
+`arven.web` API over a temporary, clearly synthetic data directory (never the real database). `web/e2e/app.spec.ts`: **51 passed**
+(desktop and phone-emulated Pixel 7): every page renders without console errors and shows the honesty banner, no horizontal page
+scroll on any page, overview table and small-sample warning, signal list/selection/filter and chart overlays, keyboard shortcuts,
+language/theme persistence, journal add and delete, the offline state, the lab's sealed-test flag, no bot token ever shown. Run with
+`cd web && npx playwright test`. **Lighthouse** (`web/e2e/lighthouse.mjs`, results in `docs/lighthouse.json`, all 8 pages, mobile and
+desktop presets): performance min 95, accessibility min 95, best-practices 100, SEO 100 - gate (>= 90) met. First measurement on mobile
+was 77-81 for performance: fixed by lazy-loading every page and the chart library (main bundle 554 kB -> 233 kB) and by replacing
+Framer Motion with CSS transitions (the package was removed again; a small deviation from the master prompt's stack, taken for the
+performance gate). Screenshots of all pages in `docs/screenshots/` (fixture data, stated in its README). Also found by the tests: nothing
+in the app itself; the failures during development were test-selector mistakes.
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -2564,3 +2578,4 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-10 | Forward evaluation of S4/S5/S6 wired as `arven paper strategies` (CFD costs, signal store, summary; not scheduled, no Telegram token yet); first 14 forward weeks: S4 -0.13 R (7), S5 -0.34 R (31), S6 -0.11 R (160); the agreement hypothesis is not supported (-0.33 R vs -0.09 R) | recorded (forward wiring) |
 | 2026-10-10 | Phase 8 split into 8a (API) / 8b (React app) / 8c (browser tests); 8a done: FastAPI read-only API on localhost with a separate manual journal, SSE, honest empty states, 13 tests, verified against the real database; fastapi/uvicorn/httpx added (approved in the master prompt) | implemented (Phase 8a) |
 | 2026-10-10 | Phase 8b: React/TypeScript/Tailwind web app (8 pages) built in `web/`, served by `arven web`; honest banner on every page, designed empty/error/offline states, EN/RU and dark/light; typechecked, built and checked visually with headless Chrome screenshots on real data; Playwright/Lighthouse (8c) await the owner's OK to add Playwright | implemented (Phase 8b) |
+| 2026-10-10 | Phase 8c done with the owner's OK for Playwright: 51 browser tests (desktop + phone), Lighthouse perf>=95 / a11y>=95 / best-practices 100 / SEO 100 on all pages, screenshots committed (fixture data, labelled); mobile performance fixed via lazy loading and by dropping Framer Motion for CSS transitions; Phase 8 complete | implemented (Phase 8c) |

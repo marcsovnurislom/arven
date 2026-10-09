@@ -1,14 +1,15 @@
-import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { I18nProvider, useI18n, type Key } from "./i18n";
-import { Charts } from "./pages/Charts";
-import { Journal } from "./pages/Journal";
-import { Lab } from "./pages/Lab";
-import { Overview } from "./pages/Overview";
-import { Screener } from "./pages/Screener";
-import { Settings } from "./pages/Settings";
-import { Signals } from "./pages/Signals";
-import { Strategies } from "./pages/Strategies";
+
+
+const Overview = lazy(() => import("./pages/Overview").then((m) => ({ default: m.Overview })));
+const Signals = lazy(() => import("./pages/Signals").then((m) => ({ default: m.Signals })));
+const Screener = lazy(() => import("./pages/Screener").then((m) => ({ default: m.Screener })));
+const Charts = lazy(() => import("./pages/Charts").then((m) => ({ default: m.Charts })));
+const Strategies = lazy(() => import("./pages/Strategies").then((m) => ({ default: m.Strategies })));
+const Journal = lazy(() => import("./pages/Journal").then((m) => ({ default: m.Journal })));
+const Lab = lazy(() => import("./pages/Lab").then((m) => ({ default: m.Lab })));
+const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
 
 const PAGES = ["overview", "signals", "screener", "charts", "strategies", "journal", "lab", "settings"] as const;
 type Page = (typeof PAGES)[number];
@@ -100,11 +101,9 @@ function Shell() {
         <div className="px-4 pb-2 text-center text-xs" style={{ color: "var(--warn)" }}>{t("honesty")}</div>
       </header>
       <main id="main" className="mx-auto max-w-7xl px-4 pb-28 pt-6 lg:pb-10">
-        <AnimatePresence mode="wait">
-          <motion.div key={page} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
-            {view}
-          </motion.div>
-        </AnimatePresence>
+        <div key={page} className="rise">
+            <Suspense fallback={<div className="skeleton" style={{ height: 160 }} aria-hidden="true" />}>{view}</Suspense>
+        </div>
       </main>
       <nav className="fixed inset-x-0 bottom-0 z-20 flex justify-around overflow-x-auto border-t px-1 py-2 backdrop-blur lg:hidden" style={{ borderColor: "var(--border)", background: "color-mix(in srgb, var(--bg) 88%, transparent)" }} aria-label="Pages">
         {PAGES.map(nav)}

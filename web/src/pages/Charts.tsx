@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
 import { api } from "../api";
-import { CandleChart, type ChartMarker } from "../CandleChart";
+import { Suspense, lazy } from "react";
+import type { ChartMarker } from "../CandleChart";
 import { useI18n } from "../i18n";
 import { useLoad } from "../hooks";
 import { Card, ErrorBox, PageTitle, Skeleton } from "../ui";
 
+const CandleChart = lazy(() => import("../CandleChart").then((m) => ({ default: m.CandleChart })));
 const TFS = ["5m", "15m", "1h", "4h"] as const;
 
 export function Charts() {
@@ -31,7 +33,7 @@ export function Charts() {
       >
         {candles.error && !candles.data && <ErrorBox error={candles.error} onRetry={candles.reload} />}
         {candles.loading && !candles.data && <Skeleton h={460} />}
-        {candles.data && <CandleChart candles={candles.data.candles} markers={markers} height={460} />}
+        {candles.data && <Suspense fallback={<Skeleton h={460} />}><CandleChart candles={candles.data.candles} markers={markers} height={460} /></Suspense>}
       </Card>
     </>
   );

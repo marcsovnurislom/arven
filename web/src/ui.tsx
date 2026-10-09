@@ -1,4 +1,3 @@
-import { motion } from "framer-motion";
 import type { ReactNode } from "react";
 import { ApiError } from "./api";
 import { useI18n } from "./i18n";
@@ -13,7 +12,7 @@ export const shortId = (id: string) => id.slice(0, 8);
 
 export function Card({ title, children, right, className = "" }: { title?: ReactNode; children: ReactNode; right?: ReactNode; className?: string }) {
   return (
-    <motion.section initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }} className={`glass p-4 sm:p-5 ${className}`}>
+    <section className={`glass rise p-4 sm:p-5 ${className}`}>
       {(title || right) && (
         <header className="mb-3 flex items-center justify-between gap-3">
           <h2 className="text-sm font-medium uppercase tracking-wider muted">{title}</h2>
@@ -21,7 +20,7 @@ export function Card({ title, children, right, className = "" }: { title?: React
         </header>
       )}
       {children}
-    </motion.section>
+    </section>
   );
 }
 
