@@ -158,3 +158,13 @@ def test_cors_allows_only_localhost_origins(env):
     bad = client.get("/api/health", headers={"Origin": "http://evil.example"})
     assert good.headers.get("access-control-allow-origin") == "http://localhost:5173"
     assert "access-control-allow-origin" not in bad.headers
+
+
+def test_built_frontend_is_served_from_dist_when_present(env, tmp_path):
+    cfg, _, _ = env
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<!doctype html><title>ARVEN</title>", encoding="utf-8")
+    client = TestClient(create_app(cfg, dist_dir=dist))
+    assert "ARVEN" in client.get("/").text
+    assert client.get("/api/health").json()["status"] == "ok"  # API routes still win over the static mount

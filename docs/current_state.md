@@ -1,6 +1,6 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-10 (Signal-product build-out Phase 8a: read-only HTTP API; earlier: Strategies S5 and S6 and an ML signal filter (no value) added and evaluated; forward evaluation of S4/S5/S6 wired (first 14 weeks negative); Phase 7b, part 2c: exit-variant study + CFD cost profile; part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
+_Last updated: 2026-10-10 (Signal-product build-out Phase 8b: React web app; Phase 8a: read-only HTTP API; earlier: Strategies S5 and S6 and an ML signal filter (no value) added and evaluated; forward evaluation of S4/S5/S6 wired (first 14 weeks negative); Phase 7b, part 2c: exit-variant study + CFD cost profile; part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
 
 ## Phase
 
@@ -1857,6 +1857,21 @@ against the real database (overview, signals, candles, telegram status all retur
 heartbeat because the always-on runtime is not running). Not built yet: the React front end (8b) and Playwright/Lighthouse checks
 (8c; Playwright is not in the master prompt's approved dependency list, so the owner is asked before it is installed).
 
+**Phase 8b - the web app (done, 2026-10-10).** `web/` (Vite 8 + React 19 + TypeScript + Tailwind 4 + `lightweight-charts` + Framer Motion; all
+approved in the master prompt). Build: `cd web && npm install && npm run build`; then `arven web` serves it at `http://127.0.0.1:8000`
+(dev server: `npm run dev`, proxies `/api`). Pages: Overview (data freshness, runtime heartbeat, signal counts, forward results with the
+small-sample warning and the agreement hypothesis), Live signals (list + candle chart with entry/stop/TP ladder lines and a signal marker,
+countdown to the next 15m close, reasons, risk checks, update timeline), Screener (single symbol, honest note), Charts (5m/15m/1h/4h with all
+signal markers), Strategies (forward stats per strategy plus a clearly sourced static table of the offline development/validation results),
+Journal (manual trades, R stats, delete), Research lab (stored backtest/paper/WFO manifests with the `touched_test_set` flag and hashes),
+Settings (Telegram status without secrets, EN/RU, dark/light). Design: near-black canvas with gold and emerald/crimson semantics, glass
+cards, tabular monospace numerals, skeleton loaders, designed empty/error/offline states, keyboard shortcuts (1-8, T, L), skip link,
+`prefers-reduced-motion` respected, bottom tab bar on narrow screens. `tsc --noEmit` and the production build pass. **Verified visually**
+with headless Chrome screenshots of every page against real data (199 real signals, real candles); one real defect found and fixed that way
+(wide tables forced horizontal page scroll at phone width). The honest banner "paper simulation, not advice, not evidence of
+profitability" is on every page. Not done: automated browser tests, Lighthouse scores and committed screenshots (Phase 8c, needs the owner's
+OK for Playwright: it is not in the master prompt's approved dependency list). `data/` and `web/dist` are git-ignored.
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -2548,3 +2563,4 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-10 | Pattern study of S4/S5/S6 outcomes (development mined with family-wise permutation control; nothing significant) and two rules fixed in advance (R1 no weak trend/no weekend, R2 calm market) both FAILED on validation; descriptive probe: signals confirmed by another strategy within 4 h did better in both periods (hypothesis for forward data); `docs/proposal_unified_strategy.md` written as information only (regime router + agreement grade), no code changed; all further evaluation uses broker (CFD) costs | recorded (pattern study + unified proposal) |
 | 2026-10-10 | Forward evaluation of S4/S5/S6 wired as `arven paper strategies` (CFD costs, signal store, summary; not scheduled, no Telegram token yet); first 14 forward weeks: S4 -0.13 R (7), S5 -0.34 R (31), S6 -0.11 R (160); the agreement hypothesis is not supported (-0.33 R vs -0.09 R) | recorded (forward wiring) |
 | 2026-10-10 | Phase 8 split into 8a (API) / 8b (React app) / 8c (browser tests); 8a done: FastAPI read-only API on localhost with a separate manual journal, SSE, honest empty states, 13 tests, verified against the real database; fastapi/uvicorn/httpx added (approved in the master prompt) | implemented (Phase 8a) |
+| 2026-10-10 | Phase 8b: React/TypeScript/Tailwind web app (8 pages) built in `web/`, served by `arven web`; honest banner on every page, designed empty/error/offline states, EN/RU and dark/light; typechecked, built and checked visually with headless Chrome screenshots on real data; Playwright/Lighthouse (8c) await the owner's OK to add Playwright | implemented (Phase 8b) |

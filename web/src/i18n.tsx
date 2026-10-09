@@ -1,0 +1,201 @@
+import { createContext, useContext, useState, type ReactNode } from "react";
+
+const en = {
+  appTagline: "Decision support for BTC/USDT. Signals only - never orders.",
+  honesty: "Paper simulation on real market data. Not an exchange account, not advice, not evidence of profitability.",
+  nav_overview: "Overview",
+  nav_signals: "Signals",
+  nav_screener: "Screener",
+  nav_charts: "Charts",
+  nav_strategies: "Strategies",
+  nav_journal: "Journal",
+  nav_lab: "Lab",
+  nav_settings: "Settings",
+  loading: "Loading",
+  offline: "The ARVEN API is not reachable. Start it with `arven web`.",
+  busy: "The market database is busy (a data update is writing). Retrying.",
+  retry: "Retry",
+  emptySignals: "No signals yet. They appear here when a strategy fires on a closed 15m bar.",
+  emptyRuns: "No stored runs found.",
+  emptyJournal: "No journal entries yet. Add your own trades to track R and mistakes.",
+  dataAge: "Data age",
+  runtime: "Runtime",
+  runtimeNone: "Not running (no heartbeat)",
+  runtimeStale: "Heartbeat is stale",
+  runtimeOk: "Alive",
+  stale: "Stale - decisions would be NO_TRADE",
+  fresh: "Fresh",
+  openSignals: "Open signals",
+  last24h: "Signals, last 24 h",
+  total: "Total signals",
+  forward: "Forward paper results (true out-of-sample)",
+  sampleWarn: "Small sample: fewer than 100 closed signals cannot separate an edge from luck.",
+  breakeven: "Break-even win rate = 1 / (1 + average reward-to-risk). With the 50/30/20 ladder it is roughly 35-45%.",
+  agreement: "Agreement hypothesis",
+  agreementHelp: "Signals confirmed by another strategy on the same side within 4 h versus lone signals.",
+  alone: "Alone",
+  agreed: "Confirmed by another strategy",
+  winRate: "Win rate",
+  meanR: "Mean R",
+  totalR: "Total R",
+  perWeek: "per week",
+  closed: "Closed",
+  entry: "Entry",
+  stop: "Stop",
+  grade: "Grade",
+  confidence: "Confidence",
+  regime: "Regime",
+  why: "Why this signal",
+  risk: "Risk checks",
+  updates: "Timeline",
+  nextClose: "Next 15m close in",
+  long: "LONG",
+  short: "SHORT",
+  tpLadder: "Take-profit ladder",
+  screenerNote: "Single-symbol MVP. Multi-symbol screening is a later phase and is not faked.",
+  verified: "Verified history (offline studies, unchanged v1 strategies)",
+  verifiedSrc: "Source: docs/strategy_*.md and docs/current_state.md. Development 2020-2023, validation 2023-2025; CFD cost profile.",
+  addTrade: "Add a trade",
+  side: "Side",
+  exit: "Exit",
+  notes: "Notes",
+  tags: "Mistake / setup tags (comma separated)",
+  save: "Save",
+  delete: "Delete",
+  lab: "Stored runs (read-only)",
+  sealed: "Sealed test",
+  touched: "touched",
+  untouched: "not touched",
+  telegram: "Telegram",
+  dryRun: "Dry run (messages are recorded, not sent)",
+  token: "Bot token",
+  configured: "configured",
+  missing: "missing",
+  chats: "Allowed chats",
+  outbox: "Outbox",
+  language: "Language",
+  theme: "Theme",
+  live: "live",
+  polling: "polling",
+  skip: "Skip to content",
+  chartTf: "Timeframe",
+  price: "Price",
+  change24: "24 h",
+  volume24: "24 h volume",
+};
+
+const ru: typeof en = {
+  appTagline: "Поддержка решений по BTC/USDT. Только сигналы, никаких ордеров.",
+  honesty: "Бумажная симуляция на реальных данных. Это не биржевой счёт, не совет и не доказательство прибыльности.",
+  nav_overview: "Обзор",
+  nav_signals: "Сигналы",
+  nav_screener: "Скринер",
+  nav_charts: "Графики",
+  nav_strategies: "Стратегии",
+  nav_journal: "Журнал",
+  nav_lab: "Лаборатория",
+  nav_settings: "Настройки",
+  loading: "Загрузка",
+  offline: "API ARVEN недоступно. Запустите его командой `arven web`.",
+  busy: "База рынка занята (идёт обновление данных). Повторяю попытку.",
+  retry: "Повторить",
+  emptySignals: "Сигналов пока нет. Они появятся, когда стратегия сработает на закрытом 15m-баре.",
+  emptyRuns: "Сохранённых прогонов не найдено.",
+  emptyJournal: "Записей пока нет. Добавляйте свои сделки, чтобы видеть R и ошибки.",
+  dataAge: "Возраст данных",
+  runtime: "Рантайм",
+  runtimeNone: "Не запущен (нет пульса)",
+  runtimeStale: "Пульс устарел",
+  runtimeOk: "Работает",
+  stale: "Устарели: решения были бы NO_TRADE",
+  fresh: "Свежие",
+  openSignals: "Открытые сигналы",
+  last24h: "Сигналов за 24 ч",
+  total: "Всего сигналов",
+  forward: "Forward-результаты на бумаге (настоящее будущее)",
+  sampleWarn: "Мало данных: меньше 100 закрытых сигналов не отличают преимущество от везения.",
+  breakeven: "Безубыточный win rate = 1 / (1 + средний выигрыш к риску). С лестницей 50/30/20 это примерно 35–45%.",
+  agreement: "Гипотеза согласия",
+  agreementHelp: "Сигналы, подтверждённые другой стратегией в ту же сторону в течение 4 ч, против одиночных.",
+  alone: "Одиночные",
+  agreed: "Подтверждены другой стратегией",
+  winRate: "Win rate",
+  meanR: "Средний R",
+  totalR: "Сумма R",
+  perWeek: "в неделю",
+  closed: "Закрыто",
+  entry: "Вход",
+  stop: "Стоп",
+  grade: "Класс",
+  confidence: "Уверенность",
+  regime: "Режим",
+  why: "Почему этот сигнал",
+  risk: "Проверки риска",
+  updates: "Хронология",
+  nextClose: "До закрытия 15m-бара",
+  long: "ЛОНГ",
+  short: "ШОРТ",
+  tpLadder: "Лестница тейк-профитов",
+  screenerNote: "MVP на одном инструменте. Мультисимвольный скринер — следующая фаза, подделывать его я не буду.",
+  verified: "Проверенная история (офлайн-исследования, стратегии v1 без изменений)",
+  verifiedSrc: "Источник: docs/strategy_*.md и docs/current_state.md. Development 2020–2023, validation 2023–2025; издержки CFD.",
+  addTrade: "Добавить сделку",
+  side: "Сторона",
+  exit: "Выход",
+  notes: "Заметки",
+  tags: "Теги ошибок / сетапа (через запятую)",
+  save: "Сохранить",
+  delete: "Удалить",
+  lab: "Сохранённые прогоны (только чтение)",
+  sealed: "Sealed test",
+  touched: "затронут",
+  untouched: "не затронут",
+  telegram: "Telegram",
+  dryRun: "Сухой режим (сообщения записываются, но не отправляются)",
+  token: "Токен бота",
+  configured: "задан",
+  missing: "не задан",
+  chats: "Разрешённые чаты",
+  outbox: "Очередь",
+  language: "Язык",
+  theme: "Тема",
+  live: "онлайн",
+  polling: "опрос",
+  skip: "К содержимому",
+  chartTf: "Таймфрейм",
+  price: "Цена",
+  change24: "24 ч",
+  volume24: "Объём 24 ч",
+};
+
+export type Key = keyof typeof en;
+export type Lang = "en" | "ru";
+const dicts = { en, ru };
+
+const Ctx = createContext<{ lang: Lang; setLang: (l: Lang) => void; t: (k: Key) => string }>({ lang: "en", setLang: () => {}, t: (k) => en[k] });
+
+function initialLang(): Lang {
+  try {
+    const saved = localStorage.getItem("arven.lang");
+    if (saved === "en" || saved === "ru") return saved;
+  } catch {
+    /* storage unavailable */
+  }
+  return typeof navigator !== "undefined" && navigator.language?.startsWith("ru") ? "ru" : "en";
+}
+
+export function I18nProvider({ children }: { children: ReactNode }) {
+  const [lang, setLangState] = useState<Lang>(initialLang);
+  const setLang = (l: Lang) => {
+    setLangState(l);
+    try {
+      localStorage.setItem("arven.lang", l);
+    } catch {
+      /* ignore */
+    }
+    document.documentElement.lang = l;
+  };
+  return <Ctx.Provider value={{ lang, setLang, t: (k) => dicts[lang][k] }}>{children}</Ctx.Provider>;
+}
+
+export const useI18n = () => useContext(Ctx);

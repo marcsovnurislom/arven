@@ -17,3 +17,7 @@ dist/
 /data/
 *.duckdb
 *.duckdb.wal
+
+# Web app build output and dependencies
+/web/node_modules/
+/web/dist/

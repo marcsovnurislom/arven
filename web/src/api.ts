@@ -1,0 +1,143 @@
+export type Candle = { t: number; o: number; h: number; l: number; c: number; v: number; complete: boolean };
+
+export type SignalUpdate = { signal_id: string; time_ms: number; kind: string; detail: string };
+
+export type Signal = {
+  signal_id: string;
+  symbol: string;
+  side: 1 | -1;
+  strategy_id: string;
+  strategy_version: string;
+  grade: string;
+  event_time_ms: number;
+  entry_reference: number;
+  stop: number;
+  tp_ladder: [number, number, number][]; // [r_multiple, close_fraction, price]
+  risk_fraction: number;
+  confidence: number;
+  regime: string;
+  reasons: string[];
+  risk_checks: string[];
+  status: "open" | "partial" | "closed";
+  updates: SignalUpdate[];
+};
+
+export type StrategyStats = {
+  signals: number;
+  closed: number;
+  open: number;
+  signals_per_week: number | null;
+  total_r: number;
+  mean_r: number | null;
+  win_rate: number | null;
+};
+
+export type Group = { n: number; mean_r: number | null; win_rate: number | null };
+
+export type ForwardSummary = {
+  generated_at: string;
+  forward_start_ms: number;
+  data_through_ms: number;
+  cost_profile: string;
+  strategies: Record<string, StrategyStats>;
+  agreement_hypothesis: { alone: Group; agreed_by_another_strategy: Group };
+  note: string;
+};
+
+export type Overview = {
+  now_ms: number;
+  symbol: string;
+  last_1m_bar_open_ms: number | null;
+  data_age_seconds: number | null;
+  data_stale: boolean;
+  runtime: { present: boolean; stale: boolean; heartbeat: Record<string, unknown> | null };
+  signals_total: number;
+  signals_last_24h: number;
+  signals_open: number;
+  strategies: string[];
+  strategies_summary: ForwardSummary | null;
+  note: string;
+};
+
+export type ScreenerRow = { symbol: string; price: number; change_24h_pct: number | null; quote_volume_24h: number; as_of_ms: number; sparkline: number[] };
+
+export type ResearchRun = {
+  kind: string;
+  run_id: string;
+  created_at: string | null;
+  period: string | null;
+  provider: string | null;
+  touched_test_set: boolean | null;
+  stress: boolean | null;
+  result_hash: string | null;
+  git_commit: string | null;
+  git_dirty: boolean | null;
+  total_return: number | null;
+  max_drawdown: number | null;
+  n_trades: number | null;
+  win_rate: number | null;
+  sharpe: number | null;
+};
+
+export type JournalEntry = {
+  id: string;
+  symbol: string;
+  side: 1 | -1;
+  entry: number;
+  stop: number | null;
+  exit: number | null;
+  size: number | null;
+  fees: number;
+  opened_at: string | null;
+  notes: string;
+  tags: string[];
+  r_multiple: number | null;
+  created_at: string;
+};
+
+export type JournalStats = { trades: number; with_r: number; total_r: number; expectancy_r: number | null; win_rate: number | null };
+
+export type TelegramStatus = { dry_run: boolean; token_configured: boolean; allowed_chats: number; outbox: Record<string, number> };
+
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(path, init);
+  } catch {
+    throw new ApiError(0, "offline");
+  }
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      detail = (await res.json()).detail ?? detail;
+    } catch {
+      /* keep status text */
+    }
+    throw new ApiError(res.status, String(detail));
+  }
+  return (await res.json()) as T;
+}
+
+export const api = {
+  overview: () => request<Overview>("/api/overview"),
+  candles: (tf: string, limit = 400, before?: number) =>
+    request<{ candles: Candle[] }>(`/api/candles?tf=${tf}&limit=${limit}${before ? `&before=${before}` : ""}`),
+  signals: (strategy?: string, limit = 200) =>
+    request<{ signals: Signal[] }>(`/api/signals?limit=${limit}${strategy ? `&strategy=${strategy}` : ""}`),
+  strategies: () => request<{ forward_summary: ForwardSummary | null; strategies: string[] }>("/api/strategies"),
+  screener: () => request<{ supported_symbols: string[]; rows: ScreenerRow[]; note: string }>("/api/screener"),
+  research: () => request<{ runs: ResearchRun[] }>("/api/research"),
+  journal: () => request<{ entries: JournalEntry[]; stats: JournalStats }>("/api/journal"),
+  addJournal: (body: Record<string, unknown>) =>
+    request<JournalEntry>("/api/journal", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+  deleteJournal: (id: string) => request<{ deleted: string }>(`/api/journal/${id}`, { method: "DELETE" }),
+  telegram: () => request<TelegramStatus>("/api/telegram"),
+};
