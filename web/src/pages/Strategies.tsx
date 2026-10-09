@@ -1,11 +1,13 @@
 import { api } from "../api";
 import { Reveal, Tilt } from "../fx";
+import { LegacyPipelineCard } from "../Legacy";
 import { useI18n } from "../i18n";
 import { useLoad } from "../hooks";
 import { Card, Chip, Empty, ErrorBox, PageTitle, Skeleton, fmt, fmtPct, fmtR, signClass } from "../ui";
 
 // Static reference: the offline studies recorded in docs/ (unchanged v1 strategies). Labelled with its source on the page.
 const STUDIES = [
+  { id: "s1_s2_s3_pipeline", dev: "410 / -17.4%", val: "530 / -9.9%", note: "trend_momentum + breakout + mean_reversion voting; gross also negative: no edge", devPct: -17.4, valPct: -9.9 },
   { id: "s4_impulse_retest", dev: "127 / +7.7%", val: "58 / +18.3%", note: "~0 under spread stress", devPct: 7.7, valPct: 18.3 },
   { id: "s5_squeeze_breakout", dev: "208 / -26.3%", val: "97 / +1.4%", note: "weakest; no robust regime", devPct: -26.3, valPct: 1.4 },
   { id: "s6_trend_pullback", dev: "342 / +5.7%", val: "212 / +4.1%", note: "most frequent; ~-5% under stress", devPct: 5.7, valPct: 4.1 },
@@ -13,12 +15,12 @@ const STUDIES = [
 
 function CompareChart() {
   const { t } = useI18n();
-  const W = 640, H = 240, base = 150, scale = 4.2;
+  const W = 640, H = 260, base = 150, scale = 3.4;
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label={t("compareTitle")}>
       <line x1="30" x2={W - 10} y1={base} y2={base} stroke="currentColor" opacity="0.3" />
       {STUDIES.map((s, i) => {
-        const x0 = 70 + i * 200;
+        const x0 = 40 + i * 150;
         return [["dev", s.devPct, "#d9b256"], ["val", s.valPct, "#6aa8ff"]].map(([k, v, c], j) => {
           const val = v as number, h = Math.abs(val) * scale, x = x0 + j * 54;
           return (
@@ -31,7 +33,7 @@ function CompareChart() {
         });
       })}
       {STUDIES.map((s, i) => (
-        <text key={s.id} x={70 + i * 200 + 49} y="20" textAnchor="middle" fontSize="12" fill="currentColor" className="num">{s.id.split("_")[0].toUpperCase()}</text>
+        <text key={s.id} x={40 + i * 150 + 49} y="20" textAnchor="middle" fontSize="12" fill="currentColor" className="num">{s.id.startsWith("s1_") ? "S1-S3" : s.id.split("_")[0].toUpperCase()}</text>
       ))}
     </svg>
   );
@@ -48,7 +50,8 @@ export function Strategies() {
       {loading && !data && <Skeleton h={160} />}
       {data && (
         <div className="grid gap-4">
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <LegacyPipelineCard />
             {data.strategies.length === 0 && <Empty>{t("emptySignals")}</Empty>}
             {data.strategies.map((sid) => {
               const s = sum?.strategies[sid];

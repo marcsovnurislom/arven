@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api, type Overview as OverviewT } from "../api";
 import { Bar, EquityCurve, Gauge } from "../Charts2";
 import { CountUp, Reveal, Tilt } from "../fx";
+import { LegacyPipelineCard } from "../Legacy";
 import { useI18n } from "../i18n";
 import { useLoad, useOverviewStream } from "../hooks";
 import { Card, Chip, Empty, ErrorBox, PageTitle, Skeleton, fmt, fmtPct, fmtR, signClass, fmtTime } from "../ui";
@@ -67,7 +68,8 @@ export function Overview() {
                 <Empty>{t("emptySignals")}</Empty>
               ) : (
                 <>
-                  <div className="grid gap-4 md:grid-cols-3">
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    <LegacyPipelineCard />
                     {Object.entries(sum.strategies).map(([sid, s]) => (
                       <Tilt key={sid} className="rounded-2xl border p-4" >
                         <div className="flex items-center gap-2"><span className="dot" style={{ color: COLOR[sid] ?? "var(--muted)" }} /><span className="num text-sm">{sid}</span></div>

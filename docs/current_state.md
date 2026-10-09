@@ -1906,6 +1906,18 @@ bars and re-created themselves on every data change, so panning left showed an e
 refreshes the newest bars every 30 s); a signal's chart first loads back to 6 h before the signal and is centred on it. Browser test added
 (dragging back in time issues older-history requests; the fixture now holds 1300 bars per timeframe so paging is exercised): 60 tests.
 
+**The first three strategies in the UI and under broker costs (2026-10-10, owner question: "why only S4-S6 everywhere, were S1-S3 forgotten?").**
+They were not forgotten but they run in a different system: `trend_momentum`, `breakout` and `mean_reversion` vote inside the hourly Stage 5
+pipeline (decision engine + risk engine), which writes run artifacts, while the signal store and the forward tick used by the UI only hold the
+event-driven S4-S6. The web app now shows them as one card "S1 + S2 + S3 (Stage 5 pipeline)" next to S4-S6 (latest hourly paper run, from
+`/api/research`) and as a bar group in the offline-studies chart. They were also never "good" in the data: Stage 5 development -20.3 % (111
+trades), Stage 7 walk-forward negative in all 16 windows (mean -11.2 %), forward paper -17.6 % (92 trades, 101 days) - all under exchange
+costs. New today: the same pipeline re-run **under the broker (CFD) cost profile** via `arven --config-dir <copy of config with
+costs_cfd_justmarkets.yaml as costs.yaml and an absolute data_dir> backtest run --provider pipeline`: development **-17.4 %** (410 trades,
+win 35.9 %, profit factor 0.87, **gross -11.1 % before costs**), validation **-9.9 %** (530 trades, win 34.7 %, profit factor 0.93, gross -1.6 %).
+So even before costs they show no edge. (Trade count differs from the old 111 because cheaper costs keep the equity path above the risk
+engine's halts; same code, different cost path.) Sealed test untouched.
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -2600,3 +2612,4 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-10 | Phase 8b: React/TypeScript/Tailwind web app (8 pages) built in `web/`, served by `arven web`; honest banner on every page, designed empty/error/offline states, EN/RU and dark/light; typechecked, built and checked visually with headless Chrome screenshots on real data; Playwright/Lighthouse (8c) await the owner's OK to add Playwright | implemented (Phase 8b) |
 | 2026-10-10 | Phase 8c done with the owner's OK for Playwright: 51 browser tests (desktop + phone), Lighthouse perf>=95 / a11y>=95 / best-practices 100 / SEO 100 on all pages, screenshots committed (fixture data, labelled); mobile performance fixed via lazy loading and by dropping Framer Motion for CSS transitions; Phase 8 complete | implemented (Phase 8c) |
 | 2026-10-10 | Web app redesign for the defence audience: Home page with animated hero/pipeline/honesty cards/real equity curve, guided tour, animated command centre; dark default; forward summary gained a `trades` series; 59 browser tests pass; Lighthouse perf>=92, a11y>=95; real-data screenshots committed | implemented (web redesign) |
+| 2026-10-10 | Owner asked why only S4-S6 appear: S1-S3 are the Stage 5 voting pipeline (different system); added a combined S1+S2+S3 card to Overview/Strategies and re-ran the pipeline under CFD costs: development -17.4 % (gross -11.1 %), validation -9.9 % (gross -1.6 %) - no edge even before costs; sealed test untouched | recorded (S1-S3 in UI + CFD re-run) |

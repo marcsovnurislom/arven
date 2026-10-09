@@ -141,6 +141,9 @@ const en = {
   liveFeed: "Live feed",
   noClosed: "No closed signals yet.",
   finalR: "total",
+  legacyChip: "Stage 5 pipeline",
+  legacyForward: "hourly paper run, exchange costs",
+  legacyNote: "The first three strategies vote together in one hourly pipeline. Measured on development, validation and live data they did not show an edge even before costs.",
 };
 
 const ru: typeof en = {
@@ -284,6 +287,9 @@ const ru: typeof en = {
   liveFeed: "Лента",
   noClosed: "Закрытых сигналов пока нет.",
   finalR: "итого",
+  legacyChip: "Пайплайн Stage 5",
+  legacyForward: "часовой бумажный прогон, издержки биржи",
+  legacyNote: "Первые три стратегии голосуют вместе в одном часовом пайплайне. На development, validation и живых данных они не показали преимущества даже до издержек.",
 };
 
 export type Key = keyof typeof en;
