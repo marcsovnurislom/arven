@@ -557,6 +557,20 @@ def cmd_paper_run(cfg: AppConfig, args: argparse.Namespace) -> int:
     return 0 if rs.ok else 1
 
 
+def cmd_web(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Phase 8: serve the read-only HTTP API (and the built web app, if present) on localhost."""
+    import uvicorn
+
+    from arven.web.app import create_app
+
+    if args.host not in ("127.0.0.1", "localhost", "::1") and not args.allow_remote:
+        print(f"refusing to bind to {args.host}: ARVEN's API is local-only by default (pass --allow-remote to override).")
+        return 2
+    print(f"ARVEN web: http://{args.host}:{args.port}  (API docs at /api/docs; read-only, no order endpoints)")
+    uvicorn.run(create_app(cfg, args.config_dir), host=args.host, port=args.port, log_level="info")
+    return 0
+
+
 def cmd_paper_strategies(cfg: AppConfig, args: argparse.Namespace) -> int:
     """Forward paper evaluation of S4/S5/S6 under the broker (CFD) cost profile; see ``arven.paper.strategies_forward``."""
     from pathlib import Path
@@ -920,6 +934,11 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("run")
     q.set_defaults(func=cmd_wfo_show)
 
+    q = sub.add_parser("web", help="Phase 8: local read-only HTTP API + web app")
+    q.add_argument("--host", default="127.0.0.1")
+    q.add_argument("--port", type=int, default=8000)
+    q.add_argument("--allow-remote", action="store_true", help="allow binding to a non-local address (not recommended)")
+    q.set_defaults(func=cmd_web)
     p = sub.add_parser("paper", help="Stage 8: the paper-signal loop (forward-only, simulated fills on live data)")
     psub = p.add_subparsers(dest="paper_command", required=True)
     q = psub.add_parser("run", help="REST-update market data, then decide+paper-trade every new forward decision time since the last run")

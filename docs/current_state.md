@@ -1,6 +1,6 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-09 (Signal-product build-out: Strategies S5 and S6 and an ML signal filter (no value) added and evaluated; forward evaluation of S4/S5/S6 wired (first 14 weeks negative); Phase 7b, part 2c: exit-variant study + CFD cost profile; part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
+_Last updated: 2026-10-10 (Signal-product build-out Phase 8a: read-only HTTP API; earlier: Strategies S5 and S6 and an ML signal filter (no value) added and evaluated; forward evaluation of S4/S5/S6 wired (first 14 weeks negative); Phase 7b, part 2c: exit-variant study + CFD cost profile; part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
 
 ## Phase
 
@@ -1844,6 +1844,19 @@ runs unattended yet.
   **Not supported** by the first forward data (the earlier dev/val impression was a post-hoc cut).
 - Small sample, ladder exits (not the V0 single exit of the studies), spread-only costs: not a verdict, not evidence of profitability.
 
+**Phase 8a - read-only HTTP API (done, 2026-10-10; Phase 8 split into 8a API / 8b React app / 8c browser tests, as 9a/9b before).**
+`arven web` (`src/arven/web/`: `app.py`, `service.py`, `journal.py`) serves FastAPI on `127.0.0.1:8000` only (`--allow-remote` is
+required for anything else). Endpoints: `/api/health`, `/api/overview` (data freshness, runtime heartbeat, signal counts, forward
+summary), `/api/candles` (1m/5m/15m/1h/4h from the stored database), `/api/signals` (+ detail and updates), `/api/strategies`,
+`/api/screener` (single symbol, honest note: multi-symbol is Phase 9), `/api/research` (backtest/paper/WFO manifests incl.
+`touched_test_set`), `/api/journal` (the only write path: the owner's manual trades, separate file, R stats), `/api/telegram`
+(status only, never the token), `/api/stream` (Server-Sent Events), `/api/docs`. CORS limited to localhost origins; no endpoint can
+place an order or write market data (checked by tests). Dependencies added with the owner's explicit approval in the master prompt:
+`fastapi`, `uvicorn`, `httpx` (pyproject). 13 new tests (`tests/web`), run against a temporary data directory; also queried live
+against the real database (overview, signals, candles, telegram status all returned real data; the 'runtime' block honestly shows no
+heartbeat because the always-on runtime is not running). Not built yet: the React front end (8b) and Playwright/Lighthouse checks
+(8c; Playwright is not in the master prompt's approved dependency list, so the owner is asked before it is installed).
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -2534,3 +2547,4 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-09 | ML signal filter for S4/S5/S6 pre-registered (logistic, walk-forward on development, one frozen validation test vs random-rejection control) and run once: dev OOF ROC-AUC 0.57, validation 0.62, kept mean R +0.095 vs +0.074 all, random 95th pct +0.198 -> NO VALUE, not adopted; sealed test untouched | recorded (ML filter) |
 | 2026-10-10 | Pattern study of S4/S5/S6 outcomes (development mined with family-wise permutation control; nothing significant) and two rules fixed in advance (R1 no weak trend/no weekend, R2 calm market) both FAILED on validation; descriptive probe: signals confirmed by another strategy within 4 h did better in both periods (hypothesis for forward data); `docs/proposal_unified_strategy.md` written as information only (regime router + agreement grade), no code changed; all further evaluation uses broker (CFD) costs | recorded (pattern study + unified proposal) |
 | 2026-10-10 | Forward evaluation of S4/S5/S6 wired as `arven paper strategies` (CFD costs, signal store, summary; not scheduled, no Telegram token yet); first 14 forward weeks: S4 -0.13 R (7), S5 -0.34 R (31), S6 -0.11 R (160); the agreement hypothesis is not supported (-0.33 R vs -0.09 R) | recorded (forward wiring) |
+| 2026-10-10 | Phase 8 split into 8a (API) / 8b (React app) / 8c (browser tests); 8a done: FastAPI read-only API on localhost with a separate manual journal, SSE, honest empty states, 13 tests, verified against the real database; fastapi/uvicorn/httpx added (approved in the master prompt) | implemented (Phase 8a) |

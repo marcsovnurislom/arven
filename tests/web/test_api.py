@@ -1,0 +1,160 @@
+"""The read-only HTTP API on a temporary data directory: no real database or network is touched."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from arven.core.config import load_config
+from arven.core.time import to_ms, utc_now
+from arven.data.storage.db import connect
+from arven.engine.grading import Grade
+from arven.engine.signal import EngineSignal, SignalVersions, tp_ladder_from_r_multiples
+from arven.engine.signal_events import SignalUpdate, SignalUpdateKind
+from arven.engine.signal_store import append_signal, append_update
+from arven.web.app import create_app
+
+HOUR = 3_600_000
+
+
+@pytest.fixture()
+def env(tmp_path: Path):
+    base = load_config()
+    cfg = base.model_copy(update={"data": base.data.model_copy(update={"data_dir": tmp_path})})
+    now = to_ms(utc_now()) // 60_000 * 60_000
+    with connect(cfg.data.database_path) as con:
+        for i in range(30):
+            t = now - (30 - i) * 60_000
+            con.execute(
+                "INSERT INTO ohlcv_1m (symbol, open_time_ms, close_time_ms, open, high, low, close, volume, quote_volume, trade_count, taker_buy_volume, "
+                "taker_buy_quote_volume, source_key, ingested_at_ms) VALUES (?, ?, ?, 100, 101, 99, 100.5, 1, 100, 1, 0.5, 50, 'test', 0)", [cfg.market.symbol, t, t + 59_999],
+            )
+        for i in range(30):
+            t = now // HOUR * HOUR - (30 - i) * HOUR
+            con.execute(
+                "INSERT INTO ohlcv (symbol, timeframe, open_time_ms, close_time_ms, open, high, low, close, volume, quote_volume, trade_count, "
+                "taker_buy_volume, taker_buy_quote_volume, bar_count, is_complete, built_at_ms) VALUES (?, '1h', ?, ?, 100, 101, 99, ?, 1, 100, 1, 0.5, 50, 60, TRUE, 0)",
+                [cfg.market.symbol, t, t + HOUR - 1, 100.0 + i],
+            )
+    return cfg, TestClient(create_app(cfg, dist_dir=tmp_path / "no-dist")), now
+
+
+def _signal(strategy_id: str, t: int) -> EngineSignal:
+    ladder = tp_ladder_from_r_multiples(((1.0, 0.5), (2.0, 0.5)), entry=100.0, stop=99.0, side=1)
+    return EngineSignal(
+        symbol="BTCUSDT", side=1, strategy_id=strategy_id, strategy_version="v1", grade=Grade.EXPERIMENTAL, event_time_ms=t,
+        entry_reference=100.0, stop=99.0, tp_ladder=ladder, risk_fraction=0.01, confidence=0.5, regime="x", reasons=("why",), risk_checks=(),
+        versions=SignalVersions("v1", "h", None),
+    )
+
+
+def test_health_and_read_only_surface(env):
+    _, client, _ = env
+    assert client.get("/api/health").json()["read_only"] is True
+    methods = {m for r in client.app.routes for m in getattr(r, "methods", set())}
+    paths = {r.path for r in client.app.routes}
+    assert not any("order" in p or "trade/" in p for p in paths)
+    assert methods <= {"GET", "POST", "DELETE", "HEAD", "OPTIONS"}
+    market_writers = [r.path for r in client.app.routes if "POST" in getattr(r, "methods", set())]
+    assert market_writers == ["/api/journal"]  # the journal is the only write path
+
+
+def test_overview_reports_fresh_data_and_missing_runtime_honestly(env):
+    _, client, now = env
+    o = client.get("/api/overview").json()
+    assert o["last_1m_bar_open_ms"] == now - 60_000 and o["data_stale"] is False
+    assert o["runtime"]["present"] is False and o["runtime"]["stale"] is True
+    assert o["signals_total"] == 0 and o["strategies_summary"] is None
+
+
+def test_candles_ascending_limit_and_validation(env):
+    _, client, now = env
+    c = client.get("/api/candles", params={"tf": "1m", "limit": 10}).json()["candles"]
+    assert len(c) == 10 and [x["t"] for x in c] == sorted(x["t"] for x in c) and c[-1]["t"] == now - 60_000
+    h = client.get("/api/candles", params={"tf": "1h", "limit": 5}).json()["candles"]
+    assert len(h) == 5 and h[-1]["c"] == 129.0
+    older = client.get("/api/candles", params={"tf": "1m", "limit": 5, "before": c[0]["t"]}).json()["candles"]
+    assert all(x["t"] < c[0]["t"] for x in older)
+    assert client.get("/api/candles", params={"tf": "7m"}).status_code == 422
+
+
+def test_signals_list_detail_status_and_filters(env):
+    cfg, client, now = env
+    root = cfg.data.data_dir / "signals"
+    s1, s2 = _signal("s6_trend_pullback", now - 2 * HOUR), _signal("s4_impulse_retest", now - HOUR)
+    append_signal(root, s1)
+    append_signal(root, s2)
+    append_update(root, "s6_trend_pullback", SignalUpdate(s1.signal_id, now - HOUR, SignalUpdateKind.TP_HIT, "level=TP1"))
+    append_update(root, "s6_trend_pullback", SignalUpdate(s1.signal_id, now - 30 * 60_000, SignalUpdateKind.CLOSED, "reason=STOP"))
+    allsig = client.get("/api/signals").json()["signals"]
+    assert [s["strategy_id"] for s in allsig] == ["s4_impulse_retest", "s6_trend_pullback"]  # newest first
+    by_id = {s["signal_id"]: s for s in allsig}
+    assert by_id[s1.signal_id]["status"] == "closed" and len(by_id[s1.signal_id]["updates"]) == 2
+    assert by_id[s2.signal_id]["status"] == "open"
+    assert [s["signal_id"] for s in client.get("/api/signals", params={"strategy": "s4_impulse_retest"}).json()["signals"]] == [s2.signal_id]
+    assert client.get("/api/signals", params={"strategy": "nope"}).json() == {"signals": []}
+    assert client.get(f"/api/signals/{s2.signal_id}").json()["reasons"] == ["why"]
+    assert client.get("/api/signals/unknown").status_code == 404
+    o = client.get("/api/overview").json()
+    assert o["signals_total"] == 2 and o["signals_open"] == 1 and o["signals_last_24h"] == 2
+
+
+def test_strategies_and_research_read_artifacts(env):
+    cfg, client, _ = env
+    paper = cfg.data.data_dir / "paper"
+    (paper / "r1").mkdir(parents=True)
+    (paper / "strategies_summary.json").write_text(json.dumps({"strategies": {"s6_trend_pullback": {"signals": 3}}}))
+    (paper / "r1" / "run.json").write_text(json.dumps({"run_id": "r1", "created_at": "2026-01-01", "period": "forward", "touched_test_set": False, "metrics": {"total_return": -0.1}}))
+    assert client.get("/api/strategies").json()["forward_summary"]["strategies"]["s6_trend_pullback"]["signals"] == 3
+    runs = client.get("/api/research").json()["runs"]
+    assert runs[0]["run_id"] == "r1" and runs[0]["touched_test_set"] is False and runs[0]["total_return"] == -0.1
+
+
+def test_screener_is_single_symbol_and_honest(env):
+    _, client, _ = env
+    s = client.get("/api/screener").json()
+    assert s["supported_symbols"] == ["BTCUSDT"] and len(s["rows"]) == 1 and s["rows"][0]["price"] == 129.0
+    assert "not faked" in s["note"]
+
+
+def test_journal_add_stats_delete_and_validation(env):
+    _, client, _ = env
+    assert client.get("/api/journal").json()["entries"] == []
+    ok = client.post("/api/journal", json={"symbol": "BTCUSD", "side": 1, "entry": 100, "stop": 98, "exit": 104, "notes": "n", "tags": ["fomo"]})
+    assert ok.status_code == 201 and ok.json()["r_multiple"] == pytest.approx(2.0)
+    short = client.post("/api/journal", json={"symbol": "BTCUSD", "side": -1, "entry": 100, "stop": 102, "exit": 103}).json()
+    assert short["r_multiple"] == pytest.approx(-1.5)
+    j = client.get("/api/journal").json()
+    assert j["stats"]["trades"] == 2 and j["stats"]["total_r"] == pytest.approx(0.5) and j["stats"]["win_rate"] == pytest.approx(0.5)
+    assert client.post("/api/journal", json={"symbol": "X", "side": 2, "entry": 1}).status_code == 422
+    assert client.post("/api/journal", json={"symbol": "X", "side": 1, "entry": -1}).status_code == 422
+    assert client.delete(f"/api/journal/{short['id']}").status_code == 200
+    assert client.delete("/api/journal/missing").status_code == 404
+    assert client.get("/api/journal").json()["stats"]["trades"] == 1
+
+
+def test_telegram_status_never_leaks_secrets(env, monkeypatch):
+    _, client, _ = env
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:SECRET")
+    monkeypatch.setenv("TELEGRAM_CHAT_IDS", "1,2")
+    t = client.get("/api/telegram").json()
+    assert t["token_configured"] is True and t["allowed_chats"] == 2 and "SECRET" not in json.dumps(t)
+
+
+def test_sse_stream_emits_overview_events(env):
+    _, client, _ = env
+    with client.stream("GET", "/api/stream", params={"interval": 0.2, "max_events": 2}) as r:
+        body = "".join(r.iter_text())
+    events = [ln for ln in body.splitlines() if ln.startswith("event: overview")]
+    assert len(events) == 2 and "data: " in body
+
+
+def test_cors_allows_only_localhost_origins(env):
+    _, client, _ = env
+    good = client.get("/api/health", headers={"Origin": "http://localhost:5173"})
+    bad = client.get("/api/health", headers={"Origin": "http://evil.example"})
+    assert good.headers.get("access-control-allow-origin") == "http://localhost:5173"
+    assert "access-control-allow-origin" not in bad.headers
