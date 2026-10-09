@@ -1886,6 +1886,20 @@ Framer Motion with CSS transitions (the package was removed again; a small devia
 performance gate). Screenshots of all pages in `docs/screenshots/` (fixture data, stated in its README). Also found by the tests: nothing
 in the app itself; the failures during development were test-selector mistakes.
 
+**Web app redesign "wow pass" (done, 2026-10-10; owner feedback: the first interface was too plain, more animation and beauty, and it must
+explain ARVEN to teachers who will not grasp the functionality).** New first page **Home**: animated constellation hero with a typing
+tagline, count-up facts, three pillars (Analyse / Decide / Protect), an animated **pipeline** of the seven steps a signal travels, five
+"honest by design" cards, and the **live equity curve in R** drawn from the real forward paper trades (currently -29 R: the honest result
+is shown, not hidden). A **guided tour** (button in the header, 7 steps, keyboard-navigable) opens each page in turn and explains it in two
+sentences. Overview became a command centre (radial data-freshness gauge, pulsing runtime dot, count-up counters, equity curve, per-strategy
+cards with animated win-rate bars); signals got an animated risk/reward ladder and pulsing open markers; strategies got an animated
+development/validation bar chart; cards tilt and light up under the pointer; on-scroll reveals; slow aurora background; dark is the default
+look (light one click away); EN/RU. All motion respects `prefers-reduced-motion`. Backend support: the forward summary now carries a `trades`
+series (`trade_log`, 1 test). Browser tests updated and extended (home, tour): **59 passed**; Lighthouse after the redesign: performance min
+92 (mobile) / 99 (desktop), accessibility min 95, best practices 100, SEO 100 - an expensive CSS blur on the background was removed to
+hold the gate. Screenshots: `docs/screenshots/` (synthetic fixture) and `docs/screenshots/real/` (the real database, dark theme, desktop and
+phone, including full-page captures of Home and Overview).
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -2579,3 +2593,4 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-10 | Phase 8 split into 8a (API) / 8b (React app) / 8c (browser tests); 8a done: FastAPI read-only API on localhost with a separate manual journal, SSE, honest empty states, 13 tests, verified against the real database; fastapi/uvicorn/httpx added (approved in the master prompt) | implemented (Phase 8a) |
 | 2026-10-10 | Phase 8b: React/TypeScript/Tailwind web app (8 pages) built in `web/`, served by `arven web`; honest banner on every page, designed empty/error/offline states, EN/RU and dark/light; typechecked, built and checked visually with headless Chrome screenshots on real data; Playwright/Lighthouse (8c) await the owner's OK to add Playwright | implemented (Phase 8b) |
 | 2026-10-10 | Phase 8c done with the owner's OK for Playwright: 51 browser tests (desktop + phone), Lighthouse perf>=95 / a11y>=95 / best-practices 100 / SEO 100 on all pages, screenshots committed (fixture data, labelled); mobile performance fixed via lazy loading and by dropping Framer Motion for CSS transitions; Phase 8 complete | implemented (Phase 8c) |
+| 2026-10-10 | Web app redesign for the defence audience: Home page with animated hero/pipeline/honesty cards/real equity curve, guided tour, animated command centre; dark default; forward summary gained a `trades` series; 59 browser tests pass; Lighthouse perf>=92, a11y>=95; real-data screenshots committed | implemented (web redesign) |

@@ -6,7 +6,7 @@ import { launch } from "chrome-launcher";
 
 const base = process.argv[2] ?? "http://127.0.0.1:8124";
 const out = process.argv[3] ?? "../docs/lighthouse.json";
-const pages = ["overview", "signals", "screener", "charts", "strategies", "journal", "lab", "settings"];
+const pages = ["home", "overview", "signals", "screener", "charts", "strategies", "journal", "lab", "settings"];
 const chrome = await launch({ chromeFlags: ["--headless=new", "--no-sandbox", "--disable-gpu"] });
 const rows = [];
 for (const preset of ["mobile", "desktop"]) {

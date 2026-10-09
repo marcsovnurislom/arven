@@ -1,19 +1,27 @@
 {
-  "generated": "2026-10-09T22:00:04.571Z",
+  "generated": "2026-10-09T22:26:42.299Z",
   "base": "http://127.0.0.1:8124",
   "rows": [
     {
       "preset": "mobile",
+      "page": "home",
+      "performance": 93,
+      "accessibility": 100,
+      "bestPractices": 100,
+      "seo": 100
+    },
+    {
+      "preset": "mobile",
       "page": "overview",
-      "performance": 96,
-      "accessibility": 95,
+      "performance": 93,
+      "accessibility": 100,
       "bestPractices": 100,
       "seo": 100
     },
     {
       "preset": "mobile",
       "page": "signals",
-      "performance": 95,
+      "performance": 92,
       "accessibility": 97,
       "bestPractices": 100,
       "seo": 100
@@ -21,15 +29,15 @@
     {
       "preset": "mobile",
       "page": "screener",
-      "performance": 95,
-      "accessibility": 96,
+      "performance": 94,
+      "accessibility": 100,
       "bestPractices": 100,
       "seo": 100
     },
     {
       "preset": "mobile",
       "page": "charts",
-      "performance": 96,
+      "performance": 95,
       "accessibility": 100,
       "bestPractices": 100,
       "seo": 100
@@ -37,15 +45,15 @@
     {
       "preset": "mobile",
       "page": "strategies",
-      "performance": 95,
-      "accessibility": 95,
+      "performance": 94,
+      "accessibility": 96,
       "bestPractices": 100,
       "seo": 100
     },
     {
       "preset": "mobile",
       "page": "journal",
-      "performance": 96,
+      "performance": 95,
       "accessibility": 95,
       "bestPractices": 100,
       "seo": 100
@@ -53,8 +61,8 @@
     {
       "preset": "mobile",
       "page": "lab",
-      "performance": 96,
-      "accessibility": 95,
+      "performance": 95,
+      "accessibility": 100,
       "bestPractices": 100,
       "seo": 100
     },
@@ -62,7 +70,15 @@
       "preset": "mobile",
       "page": "settings",
       "performance": 95,
-      "accessibility": 96,
+      "accessibility": 100,
+      "bestPractices": 100,
+      "seo": 100
+    },
+    {
+      "preset": "desktop",
+      "page": "home",
+      "performance": 100,
+      "accessibility": 100,
       "bestPractices": 100,
       "seo": 100
     },
@@ -70,14 +86,14 @@
       "preset": "desktop",
       "page": "overview",
       "performance": 100,
-      "accessibility": 95,
+      "accessibility": 100,
       "bestPractices": 100,
       "seo": 100
     },
     {
       "preset": "desktop",
       "page": "signals",
-      "performance": 100,
+      "performance": 99,
       "accessibility": 97,
       "bestPractices": 100,
       "seo": 100
@@ -86,7 +102,7 @@
       "preset": "desktop",
       "page": "screener",
       "performance": 100,
-      "accessibility": 96,
+      "accessibility": 100,
       "bestPractices": 100,
       "seo": 100
     },
@@ -102,7 +118,7 @@
       "preset": "desktop",
       "page": "strategies",
       "performance": 100,
-      "accessibility": 95,
+      "accessibility": 96,
       "bestPractices": 100,
       "seo": 100
     },
@@ -110,7 +126,7 @@
       "preset": "desktop",
       "page": "journal",
       "performance": 100,
-      "accessibility": 95,
+      "accessibility": 100,
       "bestPractices": 100,
       "seo": 100
     },
@@ -118,7 +134,7 @@
       "preset": "desktop",
       "page": "lab",
       "performance": 100,
-      "accessibility": 95,
+      "accessibility": 100,
       "bestPractices": 100,
       "seo": 100
     },
@@ -126,7 +142,7 @@
       "preset": "desktop",
       "page": "settings",
       "performance": 100,
-      "accessibility": 96,
+      "accessibility": 100,
       "bestPractices": 100,
       "seo": 100
     }

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const PAGES = ["overview", "signals", "screener", "charts", "strategies", "journal", "lab", "settings"] as const;
+const PAGES = ["home", "overview", "signals", "screener", "charts", "strategies", "journal", "lab", "settings"] as const;
 
 function collectErrors(page: Page): string[] {
   const errors: string[] = [];
@@ -45,11 +45,33 @@ test.describe("every page", () => {
   }
 });
 
-test("overview shows the forward table with the small-sample warning", async ({ page }) => {
+test("overview shows the equity curve, three strategy cards and the small-sample warning", async ({ page }) => {
   await open(page, "overview");
-  await expect(page.getByRole("row")).toHaveCount(4); // header + 3 strategies
+  await expect(page.getByRole("img", { name: /Cumulative result in R/ })).toBeVisible();
+  await expect(page.getByText("s4_impulse_retest").first()).toBeVisible();
   await expect(page.getByText("fewer than 100 closed signals")).toBeVisible();
   await expect(page.getByText("Agreement hypothesis")).toBeVisible();
+});
+
+test("home explains the product: pipeline of seven steps, honesty cards, counted stats", async ({ page }) => {
+  await open(page, "home");
+  await expect(page.getByRole("heading", { name: "ARVEN", level: 1 })).toBeVisible();
+  await expect(page.getByRole("list").filter({ hasText: "Market data" }).getByRole("listitem")).toHaveCount(7);
+  await expect(page.getByText("A sealed final exam")).toBeVisible();
+  await expect(page.getByText("real orders sent")).toBeVisible();
+});
+
+test("guided tour walks through the pages and can be closed with Escape", async ({ page }) => {
+  await open(page, "home");
+  await page.getByRole("button", { name: "Guided tour" }).click();
+  const dialog = page.getByRole("dialog", { name: "Guided tour" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Next" }).click();
+  await expect(page).toHaveURL(/#\/overview/);
+  await dialog.getByRole("button", { name: "Next" }).click();
+  await expect(page).toHaveURL(/#\/signals/);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
 });
 
 test("signals: list, selection changes the detail, chart and ladder are drawn", async ({ page }) => {
@@ -73,10 +95,10 @@ test("signals: filter by strategy", async ({ page }) => {
 
 test("keyboard shortcuts: page switch, theme and language", async ({ page, isMobile }) => {
   test.skip(!!isMobile, "keyboard shortcuts are a desktop feature");
-  await open(page, "overview");
+  await open(page, "home");
   await expect(page.locator("main h1")).toBeVisible();
   await page.waitForLoadState("networkidle");
-  await page.keyboard.press("2");
+  await page.keyboard.press("3");
   await expect(page).toHaveURL(/#\/signals/);
   const before = await page.locator("html").getAttribute("data-theme");
   await page.keyboard.press("t");
@@ -127,7 +149,7 @@ test("screenshots (SHOTS=1)", async ({ page }, info) => {
   for (const name of PAGES) {
     await open(page, name);
     await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(3600); // let the entrance animations finish
     await page.screenshot({ path: `../docs/screenshots/${name}-${info.project.name}.png`, fullPage: false });
   }
 });

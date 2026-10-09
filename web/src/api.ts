@@ -41,6 +41,7 @@ export type ForwardSummary = {
   cost_profile: string;
   strategies: Record<string, StrategyStats>;
   agreement_hypothesis: { alone: Group; agreed_by_another_strategy: Group };
+  trades?: { t: number; strategy: string; side: number; r: number }[];
   note: string;
 };
 

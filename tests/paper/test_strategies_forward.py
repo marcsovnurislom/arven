@@ -21,6 +21,7 @@ from arven.paper.strategies_forward import (
     process_events,
     resolve_signal,
     strategy_summary,
+    trade_log,
 )
 
 HOUR = 3_600_000
@@ -127,3 +128,12 @@ def test_strategy_summary_counts():
     s = strategy_summary(outs, weeks=1.0)
     assert (s["signals"], s["closed"], s["open"]) == (3, 2, 1)
     assert s["total_r"] == pytest.approx(1.0) and s["win_rate"] == pytest.approx(0.5) and s["signals_per_week"] == pytest.approx(3.0)
+
+
+def test_trade_log_is_closed_signals_only_sorted_by_time():
+    outs = {
+        "s6_trend_pullback": [_closed("s6_trend_pullback", 1, 2 * HOUR, -1.0), SignalOutcome(_signal("s6_trend_pullback", 1, 5 * HOUR), False, None, ())],
+        "s4_impulse_retest": [_closed("s4_impulse_retest", -1, HOUR, 2.5)],
+    }
+    log = trade_log(outs)
+    assert [(r["t"], r["strategy"], r["r"]) for r in log] == [(HOUR, "s4_impulse_retest", 2.5), (2 * HOUR, "s6_trend_pullback", -1.0)]

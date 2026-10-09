@@ -145,6 +145,15 @@ def strategy_summary(outcomes: Sequence[SignalOutcome], weeks: float) -> dict[st
     }
 
 
+def trade_log(outcomes_by_strategy: dict[str, Sequence[SignalOutcome]]) -> list[dict[str, Any]]:
+    """Closed signals, oldest first - the series behind the web app's equity curve in R (each signal resolved independently)."""
+    rows = [
+        {"t": o.signal.event_time_ms, "strategy": sid, "side": o.signal.side, "r": o.net_r}
+        for sid, outs in outcomes_by_strategy.items() for o in outs if o.closed and o.net_r is not None
+    ]
+    return sorted(rows, key=lambda r: r["t"])
+
+
 def _read_json(path: Path, default: Any) -> Any:
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
 
@@ -240,10 +249,11 @@ def run_strategies_tick(
         "cost_profile": "config/costs_cfd_justmarkets.yaml (broker CFD, spread only)", "git_commit": commit,
         "strategies": {sid: strategy_summary(v, weeks) for sid, v in outcomes_by_strategy.items()},
         "agreement_hypothesis": agreement_summary(all_outcomes),
+        "trades": trade_log(outcomes_by_strategy),
         "note": "paper results on live data, full 50/30/20 ladder, signals resolved independently; not evidence of profitability",
     }
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
     return StrategiesTickOutcome(rest, window.end_ms, new_counts, summary)
 
 
-__all__ = ["PROVIDERS", "SignalOutcome", "StrategiesTickOutcome", "agreement_summary", "event_times", "process_events", "resolve_signal", "run_strategies_tick", "strategy_summary"]
+__all__ = ["PROVIDERS", "SignalOutcome", "StrategiesTickOutcome", "agreement_summary", "event_times", "process_events", "resolve_signal", "run_strategies_tick", "strategy_summary", "trade_log"]

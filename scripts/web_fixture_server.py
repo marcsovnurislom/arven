@@ -79,6 +79,11 @@ def seed(data_dir: Path):
         "generated_at": "2026-10-01T00:00:00+00:00", "forward_start_ms": now - 30 * 86_400_000, "data_through_ms": now, "cost_profile": "fixture",
         "strategies": {"s4_impulse_retest": stat, "s5_squeeze_breakout": stat, "s6_trend_pullback": stat},
         "agreement_hypothesis": {"alone": {"n": 20, "mean_r": -0.1, "win_rate": 0.35}, "agreed_by_another_strategy": {"n": 6, "mean_r": -0.3, "win_rate": 0.33}},
+        "trades": [
+            {"t": now - (60 - i) * 12 * HOUR, "strategy": ("s4_impulse_retest", "s5_squeeze_breakout", "s6_trend_pullback")[i % 3], "side": 1 if i % 2 else -1,
+             "r": round(2.2 * math.sin(i * 1.7) - 0.03 * i + 0.1, 2)}
+            for i in range(60)
+        ],
         "note": "fixture",
     }))
     # fixture heartbeat is dated in the future so it never reads as stale during a test run

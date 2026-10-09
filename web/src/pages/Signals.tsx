@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { api, type Signal } from "../api";
 import { Suspense, lazy } from "react";
 import type { ChartLine } from "../CandleChart";
+import { RiskLadder } from "../Charts2";
 import { useI18n } from "../i18n";
 import { useLoad, useNow } from "../hooks";
 import { Card, Chip, Empty, ErrorBox, PageTitle, SidePill, Skeleton, fmt, fmtTime, shortId } from "../ui";
@@ -35,6 +36,8 @@ function Detail({ s }: { s: Signal }) {
       {data && <Suspense fallback={<Skeleton h={380} />}><CandleChart candles={data.candles} lines={lines} markers={markers} height={380} /></Suspense>}
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <div>
+          <div className="mb-2 text-xs uppercase tracking-wider faint">{t("ladderTitle")}</div>
+          <RiskLadder s={s} />
           <table>
             <tbody>
               <tr><th>{t("entry")}</th><td className="num">{fmt(s.entry_reference)}</td></tr>
@@ -107,7 +110,7 @@ export function Signals() {
               >
                 <div className="flex items-center justify-between gap-2">
                   <SidePill side={s.side} />
-                  <Chip tone={s.status === "closed" ? "" : "gold"}>{s.status}</Chip>
+                  <Chip tone={s.status === "closed" ? "" : "gold"}>{s.status !== "closed" && <span className="dot ring-pulse" style={{ width: 7, height: 7, color: "var(--gold)" }} />}{s.status}</Chip>
                 </div>
                 <div className="num mt-1 text-sm">{s.strategy_id}</div>
                 <div className="num text-xs faint">{fmtTime(s.event_time_ms)} · {fmt(s.entry_reference, 0)}</div>
