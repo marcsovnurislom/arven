@@ -1,6 +1,6 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-09 (Signal-product build-out: Strategies S5 and S6 and an ML signal filter (no value) added and evaluated; Phase 7b, part 2c: exit-variant study + CFD cost profile; part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
+_Last updated: 2026-10-09 (Signal-product build-out: Strategies S5 and S6 and an ML signal filter (no value) added and evaluated; forward evaluation of S4/S5/S6 wired (first 14 weeks negative); Phase 7b, part 2c: exit-variant study + CFD cost profile; part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
 
 ## Phase
 
@@ -1832,6 +1832,18 @@ walk-forward on development (`scripts/ml_signal_filter_study.py`), then one froz
 sorts by strategy. Sealed test untouched. Remaining ideas in the agreed order: S7 (mean reversion in ranges); the realistic
 conclusion so far is that none of S4-S6 nor an ML filter on top gives a reliable edge.
 
+**Forward evaluation of S4/S5/S6 (wired 2026-10-10; first run).** New command `arven paper strategies` (`src/arven/paper/strategies_forward.py`,
+`scripts/run_paper_strategies.bat`, `docs/RUNTIME_OPERATIONS.md`): REST update, the same provider objects as the backtest asked at every
+15m close, signals appended to `data/signals/<strategy_id>/`, every signal resolved on 1m bars under the CFD (broker) cost profile with the
+full 50/30/20 ladder, summary in `data/paper/strategies_summary.json`. Signals are independent (no one-position gating), so counts are
+higher than in the backtest. 8 new tests. **Not scheduled automatically** and no Telegram token is configured (`dry_run: true`), so nothing
+runs unattended yet.
+- **First run, 2026-07-01 -> 2026-10-10 (~14 weeks, true out-of-sample)**: S4 7 signals (-0.13 R mean, 14 % win), S5 31 (-0.34 R, 35 %),
+  S6 161 (-0.11 R, 41 %; 11 signals/week without the backtest's one-trade-at-a-time gating). All three negative so far.
+- **Agreement hypothesis**: signals confirmed by another strategy within 4 h: n = 49, -0.33 R (37 % win); lone signals n = 149, -0.09 R.
+  **Not supported** by the first forward data (the earlier dev/val impression was a post-hoc cut).
+- Small sample, ladder exits (not the V0 single exit of the studies), spread-only costs: not a verdict, not evidence of profitability.
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -2521,3 +2533,4 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-09 | S6 Trend-Pullback specified (fixed parameters), implemented and evaluated once: development -22.6 % engine / +5.7 % CFD costs, validation -13.5 % / +4.1 %; 1.9-2.7 signals per week; edge ~+0.025 R per trade, inside noise; no tuning; EXPERIMENTAL; S7 and the ML filter await the owner's go | recorded (S6) |
 | 2026-10-09 | ML signal filter for S4/S5/S6 pre-registered (logistic, walk-forward on development, one frozen validation test vs random-rejection control) and run once: dev OOF ROC-AUC 0.57, validation 0.62, kept mean R +0.095 vs +0.074 all, random 95th pct +0.198 -> NO VALUE, not adopted; sealed test untouched | recorded (ML filter) |
 | 2026-10-10 | Pattern study of S4/S5/S6 outcomes (development mined with family-wise permutation control; nothing significant) and two rules fixed in advance (R1 no weak trend/no weekend, R2 calm market) both FAILED on validation; descriptive probe: signals confirmed by another strategy within 4 h did better in both periods (hypothesis for forward data); `docs/proposal_unified_strategy.md` written as information only (regime router + agreement grade), no code changed; all further evaluation uses broker (CFD) costs | recorded (pattern study + unified proposal) |
+| 2026-10-10 | Forward evaluation of S4/S5/S6 wired as `arven paper strategies` (CFD costs, signal store, summary; not scheduled, no Telegram token yet); first 14 forward weeks: S4 -0.13 R (7), S5 -0.34 R (31), S6 -0.11 R (160); the agreement hypothesis is not supported (-0.33 R vs -0.09 R) | recorded (forward wiring) |

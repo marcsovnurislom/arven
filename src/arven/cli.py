@@ -557,6 +557,36 @@ def cmd_paper_run(cfg: AppConfig, args: argparse.Namespace) -> int:
     return 0 if rs.ok else 1
 
 
+def cmd_paper_strategies(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Forward paper evaluation of S4/S5/S6 under the broker (CFD) cost profile; see ``arven.paper.strategies_forward``."""
+    from pathlib import Path
+
+    from arven.core.telegram_config import allowed_chat_ids
+    from arven.paper.strategies_forward import run_strategies_tick
+
+    fcfg = load_features_config(args.config_dir)
+    config_dir = Path(args.config_dir) if args.config_dir else Path("config")
+    chat_ids = frozenset() if args.no_telegram else allowed_chat_ids()
+
+    def progress(sid: str, done: int, total: int) -> None:
+        print(f"  {sid}: {done}/{total} decision times", flush=True)
+
+    outcome = run_strategies_tick(cfg, fcfg, config_dir, chat_ids=chat_ids, on_progress=progress)
+    rs = outcome.rest_summary
+    print(f"REST tail: klines +{rs.klines_written} (of {rs.klines_fetched} fetched)  funding +{rs.funding_written}  pages={rs.pages}")
+    for err in rs.errors:
+        print(f"  REST ERROR {err}")
+    if outcome.summary is None:
+        print("forward_start has not arrived yet relative to now; nothing to decide")
+        return 0 if rs.ok else 1
+    print("new signals:", outcome.new_signals)
+    for sid, st in outcome.summary["strategies"].items():
+        print(f"  {sid}: {st}")
+    print("agreement hypothesis:", outcome.summary["agreement_hypothesis"])
+    print(outcome.summary["note"])
+    return 0 if rs.ok else 1
+
+
 def cmd_paper_runtime(cfg: AppConfig, args: argparse.Namespace) -> int:
     """Phase 5 (ARVEN_MASTER_PROMPT.md): one long-running process instead of an externally-scheduled
     `paper run` per tick. Ctrl+C stops it before/after the current tick (every tick is already a complete,
@@ -900,6 +930,9 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("run")
     q.set_defaults(func=cmd_paper_show)
     psub.add_parser("status", help="latest ingested data and latest paper run").set_defaults(func=cmd_paper_status)
+    q = psub.add_parser("strategies", help="forward paper evaluation of S4/S5/S6 (broker/CFD costs): new signals -> signal store -> summary")
+    q.add_argument("--no-telegram", action="store_true", help="do not queue Telegram alerts for new signals")
+    q.set_defaults(func=cmd_paper_strategies)
     q = psub.add_parser("runtime", help="Phase 5: one long-running process polling for new decision times, instead of an externally-scheduled `paper run`")
     q.add_argument("--poll-seconds", type=float, default=15.0, help="how often to check for a new decision time (default 15s)")
     q.add_argument("--stop-file", help="create this file to request a graceful stop (checked once a second); Ctrl+C also works")

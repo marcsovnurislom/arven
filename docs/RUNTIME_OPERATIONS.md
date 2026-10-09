@@ -76,3 +76,21 @@ stale => NO_TRADE"**. That is a real-time, multi-day observation, not something 
 session can complete synchronously - it was not run as part of landing this phase's code. See
 `docs/current_state.md`'s "Phase 5" section for exactly what *was* validated (offline, against fakes) and
 what this leaves as an explicit, acknowledged gap rather than a silently-skipped requirement.
+
+## Forward evaluation of S4 / S5 / S6 (`arven paper strategies`)
+
+One idempotent, catch-up-capable command (`src/arven/paper/strategies_forward.py`): REST-updates market data, asks the three
+strategy providers about every 15m close since the stored cursor, appends new signals to `data/signals/<strategy_id>/signals.jsonl`
+(and queues Telegram alerts only for signals younger than 6 h, only if `TELEGRAM_CHAT_IDS` is set; sending still respects
+`config/telegram.yaml` `dry_run`), resolves every stored signal on 1m bars under the broker (CFD) cost profile
+`config/costs_cfd_justmarkets.yaml`, and writes `data/paper/strategies_summary.json` (per-strategy counts/R plus the
+"signal confirmed by another strategy within 4 h" hypothesis split). The first run replays every 15m close since 2026-07-01 and
+takes ~30 min; later runs take seconds to a minute.
+
+Run once by hand: `.venv\Scripts\python.exe -m arven paper strategies` (add `--no-telegram` to skip alerts).
+To run it every 15 minutes (not registered automatically - it changes the machine's scheduled tasks):
+
+    schtasks /Create /TN "ARVEN Paper Strategies" /SC MINUTE /MO 15 /TR "C:\Users\Victus\arven\scripts\run_paper_strategies.bat"
+
+Do not run it at the same moment as `arven paper run` / the runtime: both write the DuckDB market database (single writer).
+Output is a simulation on real market data with a spread-only cost model - not an exchange account and not evidence of profitability.
