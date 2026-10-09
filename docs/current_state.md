@@ -1900,6 +1900,12 @@ series (`trade_log`, 1 test). Browser tests updated and extended (home, tour): *
 hold the gate. Screenshots: `docs/screenshots/` (synthetic fixture) and `docs/screenshots/real/` (the real database, dark theme, desktop and
 phone, including full-page captures of Home and Overview).
 
+**Chart history fix (2026-10-10, owner report: "the market does not load when I scroll left").** The chart components loaded a fixed 220-500
+bars and re-created themselves on every data change, so panning left showed an empty area. Now `CandleChart` keeps its view and the new
+`useCandleFeed` hook prepends 500 older bars from `/api/candles?before=` whenever the view comes within 25 bars of the oldest loaded one (and
+refreshes the newest bars every 30 s); a signal's chart first loads back to 6 h before the signal and is centred on it. Browser test added
+(dragging back in time issues older-history requests; the fixture now holds 1300 bars per timeframe so paging is exercised): 60 tests.
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:

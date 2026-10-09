@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError } from "./api";
+import { ApiError, api, type Candle } from "./api";
 
 export type Loadable<T> = { data: T | null; error: ApiError | null; loading: boolean; reload: () => void };
 
@@ -57,4 +57,65 @@ export function useNow(intervalMs = 1000): number {
     return () => window.clearInterval(id);
   }, [intervalMs]);
   return now;
+}
+
+/** Candles of one timeframe that grow to the left on demand (`loadOlder`), optionally until `coverFromMs` is on screen, and refresh at the right. */
+export function useCandleFeed(tf: string, coverFromMs?: number, pageSize = 500) {
+  const [candles, setCandles] = useState<Candle[]>([]);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [exhausted, setExhausted] = useState(false);
+  const busy = useRef(false);
+  const ref = useRef<Candle[]>([]);
+  ref.current = candles;
+
+  useEffect(() => {
+    let cancelled = false;
+    setCandles([]);
+    setExhausted(false);
+    setLoading(true);
+    api.candles(tf, pageSize)
+      .then((r) => { if (!cancelled) { setCandles(r.candles); setError(null); } })
+      .catch((e) => { if (!cancelled) setError(e instanceof ApiError ? e : new ApiError(0, String(e))); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [tf, pageSize]);
+
+  const loadOlder = useCallback(async () => {
+    if (busy.current || exhausted || ref.current.length === 0) return;
+    busy.current = true;
+    try {
+      const r = await api.candles(tf, pageSize, ref.current[0].t);
+      if (r.candles.length === 0) setExhausted(true);
+      else setCandles((cur) => [...r.candles, ...cur]);
+      if (r.candles.length < pageSize) setExhausted(true);
+    } catch (e) {
+      setError(e instanceof ApiError ? e : new ApiError(0, String(e)));
+    } finally {
+      busy.current = false;
+    }
+  }, [tf, pageSize, exhausted]);
+
+  useEffect(() => {
+    if (coverFromMs && candles.length && candles[0].t > coverFromMs && !exhausted) void loadOlder();
+  }, [candles, coverFromMs, exhausted, loadOlder]);
+
+  useEffect(() => {
+    const id = window.setInterval(async () => {
+      try {
+        const r = await api.candles(tf, 8);
+        setCandles((cur) => {
+          if (!cur.length) return cur;
+          const lastOld = cur[cur.length - 1].t;
+          const merged = cur.filter((c) => c.t < r.candles[0].t);
+          return merged.length === cur.length && r.candles[r.candles.length - 1].t <= lastOld ? cur : [...merged, ...r.candles];
+        });
+      } catch {
+        /* keep the last good data */
+      }
+    }, 30000);
+    return () => window.clearInterval(id);
+  }, [tf]);
+
+  return { candles, error, loading, loadOlder, exhausted };
 }

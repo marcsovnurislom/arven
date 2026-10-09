@@ -44,8 +44,8 @@ def seed(data_dir: Path):
                 [sym, t, t + 59_999, p, p + 40, p - 40, p + 10],
             )
         for tf, ms in TF_MS.items():
-            for i in range(240):
-                t = now // ms * ms - (240 - i) * ms
+            for i in range(1300):  # more than one 500-bar page so the chart's on-demand history loading is exercised
+                t = now // ms * ms - (1300 - i) * ms
                 p = price(i * (ms // 60_000) // 3)
                 con.execute(
                     "INSERT INTO ohlcv (symbol, timeframe, open_time_ms, close_time_ms, open, high, low, close, volume, quote_volume, trade_count, "

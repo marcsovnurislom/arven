@@ -4,7 +4,7 @@ import { Suspense, lazy } from "react";
 import type { ChartLine } from "../CandleChart";
 import { RiskLadder } from "../Charts2";
 import { useI18n } from "../i18n";
-import { useLoad, useNow } from "../hooks";
+import { useCandleFeed, useLoad, useNow } from "../hooks";
 import { Card, Chip, Empty, ErrorBox, PageTitle, SidePill, Skeleton, fmt, fmtTime, shortId } from "../ui";
 
 const CandleChart = lazy(() => import("../CandleChart").then((m) => ({ default: m.CandleChart })));
@@ -13,7 +13,7 @@ const MIN15 = 15 * 60_000;
 function Detail({ s }: { s: Signal }) {
   const { t } = useI18n();
   const now = useNow();
-  const { data, error, reload } = useLoad(() => api.candles("15m", 220), [s.signal_id], 30000);
+  const feed = useCandleFeed("15m", s.event_time_ms - 6 * 3_600_000);
   const lines = useMemo<ChartLine[]>(
     () => [
       { price: s.entry_reference, color: "#d9b256", title: t("entry") },
@@ -31,9 +31,9 @@ function Detail({ s }: { s: Signal }) {
       title={<span className="flex items-center gap-2"><SidePill side={s.side} /> <span className="num">{s.strategy_id}</span> <span className="faint num">#{shortId(s.signal_id)}</span></span>}
       right={<span className="text-xs muted">{t("nextClose")} <span className="num gold">{mm}:{ss}</span></span>}
     >
-      {error && <ErrorBox error={error} onRetry={reload} />}
-      {!data && !error && <Skeleton h={380} />}
-      {data && <Suspense fallback={<Skeleton h={380} />}><CandleChart candles={data.candles} lines={lines} markers={markers} height={380} /></Suspense>}
+      {feed.error && feed.candles.length === 0 && <ErrorBox error={feed.error} />}
+      {feed.candles.length === 0 && !feed.error && <Skeleton h={380} />}
+      {feed.candles.length > 0 && <Suspense fallback={<Skeleton h={380} />}><CandleChart key={s.signal_id} candles={feed.candles} lines={lines} markers={markers} height={380} focusTimeMs={s.event_time_ms} onNeedOlder={feed.loadOlder} /></Suspense>}
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <div>
           <div className="mb-2 text-xs uppercase tracking-wider faint">{t("ladderTitle")}</div>

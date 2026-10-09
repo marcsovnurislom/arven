@@ -3,7 +3,7 @@ import { api } from "../api";
 import { Suspense, lazy } from "react";
 import type { ChartMarker } from "../CandleChart";
 import { useI18n } from "../i18n";
-import { useLoad } from "../hooks";
+import { useCandleFeed, useLoad } from "../hooks";
 import { Card, ErrorBox, PageTitle, Skeleton } from "../ui";
 
 const CandleChart = lazy(() => import("../CandleChart").then((m) => ({ default: m.CandleChart })));
@@ -12,7 +12,7 @@ const TFS = ["5m", "15m", "1h", "4h"] as const;
 export function Charts() {
   const { t } = useI18n();
   const [tf, setTf] = useState<(typeof TFS)[number]>("15m");
-  const candles = useLoad(() => api.candles(tf, 500), [tf], 30000);
+  const feed = useCandleFeed(tf);
   const signals = useLoad(() => api.signals(undefined, 300), [], 60000);
   const markers = useMemo<ChartMarker[]>(
     () => (signals.data?.signals ?? []).map((s) => ({ timeMs: s.event_time_ms, side: s.side, text: s.strategy_id.slice(0, 2).toUpperCase() })),
@@ -31,9 +31,10 @@ export function Charts() {
           </div>
         }
       >
-        {candles.error && !candles.data && <ErrorBox error={candles.error} onRetry={candles.reload} />}
-        {candles.loading && !candles.data && <Skeleton h={460} />}
-        {candles.data && <Suspense fallback={<Skeleton h={460} />}><CandleChart candles={candles.data.candles} markers={markers} height={460} /></Suspense>}
+        {feed.error && feed.candles.length === 0 && <ErrorBox error={feed.error} />}
+        {feed.loading && feed.candles.length === 0 && <Skeleton h={460} />}
+        {feed.candles.length > 0 && <Suspense fallback={<Skeleton h={460} />}><CandleChart key={tf} candles={feed.candles} markers={markers} height={460} onNeedOlder={feed.loadOlder} /></Suspense>}
+        <p className="mt-2 text-xs faint">{feed.exhausted ? "Start of stored history reached." : "Drag the chart to the right to load older history automatically."}</p>
       </Card>
     </>
   );

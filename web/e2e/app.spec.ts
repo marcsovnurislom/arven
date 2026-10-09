@@ -126,6 +126,25 @@ test("journal: add a trade, see R, delete it", async ({ page }) => {
   await expect(page.getByText("No journal entries yet")).toBeVisible();
 });
 
+test("charts: dragging back in time loads older history on demand", async ({ page, isMobile }) => {
+  test.skip(!!isMobile, "uses a mouse drag");
+  const olderRequests: string[] = [];
+  page.on("request", (r) => {
+    if (r.url().includes("/api/candles") && r.url().includes("before=")) olderRequests.push(r.url());
+  });
+  await open(page, "charts");
+  await page.waitForLoadState("networkidle");
+  const box = await page.locator("main canvas").first().boundingBox();
+  expect(box).not.toBeNull();
+  for (let k = 0; k < 14; k++) {
+    await page.mouse.move(box!.x + 120, box!.y + 150);
+    await page.mouse.down();
+    await page.mouse.move(box!.x + box!.width - 60, box!.y + 150, { steps: 8 });
+    await page.mouse.up();
+  }
+  await expect.poll(() => olderRequests.length, { timeout: 10_000 }).toBeGreaterThan(0);
+});
+
 test("offline: when the API is unreachable the page says so instead of inventing data", async ({ page }) => {
   await page.route("**/api/**", (route) => route.abort());
   await open(page, "overview");
