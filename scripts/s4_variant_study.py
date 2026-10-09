@@ -24,7 +24,9 @@ from arven.backtest.event_engine import EventBacktester, WindowEventClock
 from arven.backtest.costs import adverse_price, slippage_fraction, taker_fee_rate
 from arven.backtest.paper_tracker import track_signal
 from arven.backtest.provider import DecisionContext
+from arven.backtest.metrics import compute_metrics
 from arven.backtest.strategy_s4_provider import ImpulseRetestProvider
+from arven.backtest.strategy_s5_provider import SqueezeBreakoutProvider
 from arven.core.backtest_config import load_backtest_config
 from arven.core.config import CostsConfig, load_config
 from arven.engine.grading import Grade
@@ -39,12 +41,14 @@ from arven.runs import load_inputs, make_guard
 FORWARD_START_MS = 1782864000000
 
 
-class RecordingProvider(ImpulseRetestProvider):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.recorded: list[dict] = []
+class _Recording:
+    """Mixin: records every engine signal the wrapped provider proposes."""
+
+    recorded: list[dict]
 
     def decide(self, ctx: DecisionContext):
+        if not hasattr(self, "recorded"):
+            self.recorded = []
         signal = super().decide(ctx)
         if signal is not None:
             es = self.to_engine_signal(ctx.now_ms, feature_version="v1", config_hash="study", git_commit=None)
@@ -56,7 +60,15 @@ class RecordingProvider(ImpulseRetestProvider):
         return signal
 
 
-def record(period: str, out: Path) -> None:
+class RecordingS4(_Recording, ImpulseRetestProvider):
+    pass
+
+
+class RecordingS5(_Recording, SqueezeBreakoutProvider):
+    pass
+
+
+def record(period: str, out: Path, strategy: str = "s4") -> None:
     app, fcfg, bt_cfg = load_config(), load_features_config(), load_backtest_config()
     guard = make_guard(app)
     if period == "development":
@@ -69,10 +81,12 @@ def record(period: str, out: Path) -> None:
     con = open_readonly(app.data.database_path)
     market_inputs = load_feature_inputs(con, app, start=app.data.history_start, end=from_ms(window.end_ms))
     con.close()
-    provider = RecordingProvider(market_inputs.bars[Timeframe.H1], market_inputs.bars[Timeframe.M15], market_inputs.bars[Timeframe.H4])
+    provider = (RecordingS4 if strategy == "s4" else RecordingS5)(market_inputs.bars[Timeframe.H1], market_inputs.bars[Timeframe.M15], market_inputs.bars[Timeframe.H4])
     clock = WindowEventClock(app.market.symbol, (Timeframe.M15,), window.start_ms, window.end_ms)
-    EventBacktester(app, bt_cfg, window, inputs.market, inputs.features).run(clock, {Timeframe.M15: provider})
-    out.write_text(json.dumps({"period": period, "window": [window.start_ms, window.end_ms], "signals": provider.recorded}))
+    result = EventBacktester(app, bt_cfg, window, inputs.market, inputs.features).run(clock, {Timeframe.M15: provider})
+    metrics = compute_metrics(result, bt_cfg)
+    print("ENGINE", strategy, period, {k: metrics.get(k) for k in ("n_trades", "win_rate", "total_return", "max_drawdown", "sharpe", "final_equity")})
+    out.write_text(json.dumps({"strategy": strategy, "period": period, "window": [window.start_ms, window.end_ms], "signals": provider.recorded}))
     print("recorded", len(provider.recorded), "signals ->", out)
 
 
@@ -161,17 +175,18 @@ def evaluate(paths: list[Path]) -> None:
         window = guard.resolve(period)
         market = load_inputs(app, fcfg, window).market
         print(f"\n=== {data['period']}  signals={len(data['signals'])}")
+        variants = VARIANTS if data.get("strategy", "s4") == "s4" else ("V0",)  # only S4's variants were pre-registered
         for name, costs in profiles.items():
             for stress in (False, True):
                 print(f"-- {name}  stress={stress}")
-                for v in VARIANTS:
+                for v in variants:
                     print(f"   {v}: {summarize(replay(data['signals'], v, market, costs, stress))}")
 
 
 if __name__ == "__main__":
     if len(sys.argv) >= 4 and sys.argv[1] == "record":
-        record(sys.argv[2], Path(sys.argv[3]))
+        record(sys.argv[2], Path(sys.argv[3]), sys.argv[4] if len(sys.argv) > 4 else "s4")
     elif len(sys.argv) >= 3 and sys.argv[1] == "evaluate":
         evaluate([Path(p) for p in sys.argv[2:]])
     else:
-        raise SystemExit("usage: s4_variant_study.py record <development|validation> <out.json> | evaluate <signals.json>...")
+        raise SystemExit("usage: s4_variant_study.py record <development|validation> <out.json> [s4|s5] | evaluate <signals.json>...")
