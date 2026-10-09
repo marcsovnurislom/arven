@@ -27,6 +27,7 @@ from arven.backtest.provider import DecisionContext
 from arven.backtest.metrics import compute_metrics
 from arven.backtest.strategy_s4_provider import ImpulseRetestProvider
 from arven.backtest.strategy_s5_provider import SqueezeBreakoutProvider
+from arven.backtest.strategy_s6_provider import TrendPullbackProvider
 from arven.core.backtest_config import load_backtest_config
 from arven.core.config import CostsConfig, load_config
 from arven.engine.grading import Grade
@@ -68,6 +69,10 @@ class RecordingS5(_Recording, SqueezeBreakoutProvider):
     pass
 
 
+class RecordingS6(_Recording, TrendPullbackProvider):
+    pass
+
+
 def record(period: str, out: Path, strategy: str = "s4") -> None:
     app, fcfg, bt_cfg = load_config(), load_features_config(), load_backtest_config()
     guard = make_guard(app)
@@ -81,7 +86,7 @@ def record(period: str, out: Path, strategy: str = "s4") -> None:
     con = open_readonly(app.data.database_path)
     market_inputs = load_feature_inputs(con, app, start=app.data.history_start, end=from_ms(window.end_ms))
     con.close()
-    provider = (RecordingS4 if strategy == "s4" else RecordingS5)(market_inputs.bars[Timeframe.H1], market_inputs.bars[Timeframe.M15], market_inputs.bars[Timeframe.H4])
+    provider = {"s4": RecordingS4, "s5": RecordingS5, "s6": RecordingS6}[strategy](market_inputs.bars[Timeframe.H1], market_inputs.bars[Timeframe.M15], market_inputs.bars[Timeframe.H4])
     clock = WindowEventClock(app.market.symbol, (Timeframe.M15,), window.start_ms, window.end_ms)
     result = EventBacktester(app, bt_cfg, window, inputs.market, inputs.features).run(clock, {Timeframe.M15: provider})
     metrics = compute_metrics(result, bt_cfg)
@@ -189,4 +194,4 @@ if __name__ == "__main__":
     elif len(sys.argv) >= 3 and sys.argv[1] == "evaluate":
         evaluate([Path(p) for p in sys.argv[2:]])
     else:
-        raise SystemExit("usage: s4_variant_study.py record <development|validation> <out.json> [s4|s5] | evaluate <signals.json>...")
+        raise SystemExit("usage: s4_variant_study.py record <development|validation> <out.json> [s4|s5|s6] | evaluate <signals.json>...")

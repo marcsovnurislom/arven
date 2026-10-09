@@ -1,6 +1,6 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-09 (Signal-product build-out: Strategy S5 added and evaluated (negative); Phase 7b, part 2c: exit-variant study + CFD cost profile; part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
+_Last updated: 2026-10-09 (Signal-product build-out: Strategies S5 and S6 added and evaluated (no reliable edge); Phase 7b, part 2c: exit-variant study + CFD cost profile; part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
 
 ## Phase
 
@@ -1813,7 +1813,16 @@ range middle -/+ 0.25 ATR, targets 1.0/1.5/2.0 x range width). Code: `engine/str
 - **Result, unchanged v1**: development 208 trades (1.1/week), win 35.6 %, **-42.0 %**, maxDD 43.5 % (engine, perp costs); -26 %
   with CFD costs. Validation 97 trades (1.2/week), win 45.4 %, **-8.1 %** (engine); +1.4 % with CFD costs, -4.6 % under stress.
 - **Verdict**: signals are frequent but the average trade loses even with cheap CFD costs; no edge shown; EXPERIMENTAL.
-  No tuning. Next in the agreed order: S6 (pullback to a moving average in a trend) - to be started only on the owner's go.
+  No tuning.
+
+**Strategy S6 "Trend-Pullback" (done, 2026-10-09; third strategy of the expansion).** Spec `docs/strategy_trend_pullback.md` first
+(fixed: 4h slope direction, pullback of the last 8 1h bars to EMA(20) within 0.25 ATR while the close holds on the trend
+side, 15m close beyond the previous 4 bars' extreme, 8 h cooldown, stop under the pullback low and never tighter
+than 1 ATR, targets 1.5/2.5/4.0 R). Code `engine/strategy_s6.py`, `backtest/strategy_s6_provider.py`, 28 new tests.
+- **Result, unchanged v1**: development 342 trades (1.9/week), win 40.9 %, **-22.6 %** (engine, perp costs), **+5.7 %** with CFD costs;
+  validation 211 trades (2.7/week), win 41.7 %, **-13.5 %**, **+4.1 %** with CFD costs; about zero or slightly negative under spread stress.
+- **Verdict**: the most frequent signal so far (closest to the owner's 3-4/week) but the edge is ~+0.025 R per trade on CFD costs,
+  inside noise; EXPERIMENTAL. Next in the agreed order: S7 (mean reversion in ranges) and an ML signal filter - owner's go required.
 
 ## Full backfill results (per yearly chunk)
 
@@ -2501,3 +2510,4 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-09 | Unchanged S4 v1.1 run on validation (+0.73 %, 40 trades, 17.5 % win rate, max DD 19.7 %) and forward (4 trades, +0.46 %); sealed test deliberately not run (needs explicit owner go, would be spent for later S4 variants); S4 stays EXPERIMENTAL | recorded (Phase 7b part 2b) |
 | 2026-10-09 | Owner trades BTCUSD CFD on JustMarkets MT5: added `config/costs_cfd_justmarkets.yaml` (~2.5 bps round-trip spread, swap-free; unverified on owner's terminal) beside the untouched perp profile; pre-registered exit variants V0/A/B/C/D, `track_signal` gained `breakeven_at_r`; selection rule picked V0 (exits unchanged); breakeven worsened results; V0 under CFD costs +7.7 % dev / +18.3 % val but ~0 under spread stress; sealed test untouched | recorded (Phase 7b part 2c) |
 | 2026-10-09 | Owner asked for more strategies in order S5 -> S6 -> S7 -> ML filter; S5 Squeeze-Breakout specified first (fixed parameters), implemented and evaluated once on development/validation: development -42 % (CFD -26 %), validation -8.1 % (CFD +1.4 %); no tuning, EXPERIMENTAL; S6 awaits the owner's go | recorded (S5) |
+| 2026-10-09 | S6 Trend-Pullback specified (fixed parameters), implemented and evaluated once: development -22.6 % engine / +5.7 % CFD costs, validation -13.5 % / +4.1 %; 1.9-2.7 signals per week; edge ~+0.025 R per trade, inside noise; no tuning; EXPERIMENTAL; S7 and the ML filter await the owner's go | recorded (S6) |

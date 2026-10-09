@@ -35,7 +35,8 @@ LOOP = SRC / "backtest" / "event_engine.py"
 TRACKER = SRC / "backtest" / "paper_tracker.py"
 S4_PROVIDER = SRC / "backtest" / "strategy_s4_provider.py"
 S5_PROVIDER = SRC / "backtest" / "strategy_s5_provider.py"
-NEW_MODULES = (LOOP, TRACKER, S4_PROVIDER, S5_PROVIDER)
+S6_PROVIDER = SRC / "backtest" / "strategy_s6_provider.py"
+NEW_MODULES = (LOOP, TRACKER, S4_PROVIDER, S5_PROVIDER, S6_PROVIDER)
 
 
 def _import_nodes(path: Path):
@@ -82,8 +83,8 @@ def test_legacy_backtest_modules_never_import_the_engine_or_the_loop():
         bad = [
             m
             for m, n in _import_nodes(path)
-            if m.startswith(("arven.engine", "arven.backtest.event_engine", "arven.backtest.paper_tracker", "arven.backtest.strategy_s4_provider", "arven.backtest.strategy_s5_provider"))
-            or (m == "arven.backtest" and n in ("event_engine", "paper_tracker", "strategy_s4_provider", "strategy_s5_provider"))
+            if m.startswith(("arven.engine", "arven.backtest.event_engine", "arven.backtest.paper_tracker", "arven.backtest.strategy_s4_provider", "arven.backtest.strategy_s5_provider", "arven.backtest.strategy_s6_provider"))
+            or (m == "arven.backtest" and n in ("event_engine", "paper_tracker", "strategy_s4_provider", "strategy_s5_provider", "strategy_s6_provider"))
         ]
         assert not bad, f"{path.name}: {bad}"
 
