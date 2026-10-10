@@ -11,9 +11,10 @@ const Strategies = lazy(() => import("./pages/Strategies").then((m) => ({ defaul
 const Journal = lazy(() => import("./pages/Journal").then((m) => ({ default: m.Journal })));
 const Lab = lazy(() => import("./pages/Lab").then((m) => ({ default: m.Lab })));
 const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
+const S7Review = lazy(() => import("./pages/S7Review").then((m) => ({ default: m.S7Review })));
 const Tour = lazy(() => import("./Tour").then((m) => ({ default: m.Tour })));
 
-const PAGES = ["home", "overview", "signals", "screener", "charts", "strategies", "journal", "lab", "settings"] as const;
+const PAGES = ["home", "overview", "signals", "screener", "charts", "strategies", "journal", "lab", "s7review", "settings"] as const;
 type Page = (typeof PAGES)[number];
 
 function pageFromHash(): Page {
@@ -77,7 +78,7 @@ function Shell() {
 
   const view = {
     home: <Home go={go} startTour={() => setTour(true)} />, overview: <Overview />, signals: <Signals />, screener: <Screener />, charts: <Charts />,
-    strategies: <Strategies />, journal: <Journal />, lab: <Lab />, settings: <Settings theme={theme} setTheme={setTheme} />,
+    strategies: <Strategies />, journal: <Journal />, lab: <Lab />, s7review: <S7Review />, settings: <Settings theme={theme} setTheme={setTheme} />,
   }[page];
 
   const nav = (p: Page) => (

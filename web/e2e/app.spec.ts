@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const PAGES = ["home", "overview", "signals", "screener", "charts", "strategies", "journal", "lab", "settings"] as const;
+const PAGES = ["home", "overview", "signals", "screener", "charts", "strategies", "journal", "lab", "s7review", "settings"] as const;
 
 function collectErrors(page: Page): string[] {
   const errors: string[] = [];
@@ -143,6 +143,21 @@ test("charts: dragging back in time loads older history on demand", async ({ pag
     await page.mouse.up();
   }
   await expect.poll(() => olderRequests.length, { timeout: 10_000 }).toBeGreaterThan(0);
+});
+
+test("S7 check: verdicts are saved through the API (the fixture server is shared by both projects)", async ({ page, request }) => {
+  const review = await (await request.get("/api/s7/review?tf=1h")).json();
+  const [first, second] = review.setups.map((x: { id: string }) => x.id);
+  await open(page, "s7review");
+  await expect(page.getByText(/\d \/ 2 reviewed/)).toBeVisible();
+  await expect(page.locator("main canvas").first()).toBeVisible();
+  await page.getByRole("button", { name: "My pattern (Y)" }).click();
+  await expect(page.getByText("#2")).toBeVisible(); // moved on to the next setup
+  await page.keyboard.press("n");
+  await expect(page.getByText("2 / 2 reviewed")).toBeVisible();
+  const labels = (await (await request.get("/api/s7/labels?tf=1h")).json()).labels;
+  expect(labels[first].verdict).toBe("yes");
+  expect(labels[second].verdict).toBe("no");
 });
 
 test("offline: when the API is unreachable the page says so instead of inventing data", async ({ page }) => {

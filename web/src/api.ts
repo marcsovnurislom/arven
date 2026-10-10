@@ -100,6 +100,30 @@ export type JournalStats = { trades: number; with_r: number; total_r: number; ex
 
 export type TelegramStatus = { dry_run: boolean; token_configured: boolean; allowed_chats: number; outbox: Record<string, number> };
 
+export type S7Point = { timeMs: number; price: number };
+export type S7Zone = { kind: string; low: number; high: number; index: number; timeMs: number };
+export type S7Setup = {
+  id: string;
+  timeframe: string;
+  side: 1 | -1;
+  arm_time_ms: number;
+  line: { points: S7Point[] };
+  touches: S7Point[];
+  h_last: number;
+  cross_time_ms: number;
+  break_time_ms: number;
+  range: { start_ms: number; end_ms: number; top: number; bottom: number } | null;
+  level0: S7Point;
+  level1: S7Point;
+  fib: Record<string, number>;
+  zone: { low: number; high: number };
+  confluence: S7Zone[];
+  confluence_score: number;
+  candles: Candle[];
+};
+export type S7Review = { timeframe: string; total_setups: number; setups: S7Setup[]; note?: string; git_commit?: string | null };
+export type S7Label = { verdict: "yes" | "no" | "unsure"; note: string; at_ms: number };
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -141,4 +165,8 @@ export const api = {
     request<JournalEntry>("/api/journal", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
   deleteJournal: (id: string) => request<{ deleted: string }>(`/api/journal/${id}`, { method: "DELETE" }),
   telegram: () => request<TelegramStatus>("/api/telegram"),
+  s7Review: (tf: string) => request<S7Review>(`/api/s7/review?tf=${tf}`),
+  s7Labels: (tf: string) => request<{ labels: Record<string, S7Label> }>(`/api/s7/labels?tf=${tf}`),
+  s7Label: (setup_id: string, verdict: string, note: string) =>
+    request<{ saved: string; count: number }>("/api/s7/labels", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ setup_id, verdict, note }) }),
 };

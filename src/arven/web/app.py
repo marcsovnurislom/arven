@@ -141,6 +141,34 @@ def create_app(cfg: AppConfig, config_dir: Path | str | None = None, dist_dir: P
             raise HTTPException(status_code=404, detail="unknown journal entry")
         return {"deleted": entry_id}
 
+    review_dir = data_dir / "s7_review"
+    review_tfs = ("15m", "1h", "4h")
+
+    @app.get("/api/s7/review")
+    def s7_review(tf: str = Query("1h")) -> dict[str, Any]:
+        if tf not in review_tfs:
+            raise HTTPException(status_code=422, detail=f"tf must be one of {review_tfs}")
+        payload = svc.read_json(review_dir / f"setups_{tf}.json")
+        return payload if payload is not None else {"timeframe": tf, "setups": [], "total_setups": 0}
+
+    @app.get("/api/s7/labels")
+    def s7_labels(tf: str = Query("1h")) -> dict[str, Any]:
+        if tf not in review_tfs:
+            raise HTTPException(status_code=422, detail=f"tf must be one of {review_tfs}")
+        return {"labels": svc.read_json(review_dir / f"labels_{tf}.json") or {}}
+
+    @app.post("/api/s7/labels")
+    def s7_label(payload: jr.ReviewLabelIn) -> dict[str, Any]:
+        tf = payload.setup_id.split("-", 1)[0]
+        if tf not in review_tfs:
+            raise HTTPException(status_code=422, detail="unknown setup id")
+        path = review_dir / f"labels_{tf}.json"
+        labels = svc.read_json(path) or {}
+        labels[payload.setup_id] = {"verdict": payload.verdict, "note": payload.note, "at_ms": to_ms(utc_now())}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(labels, indent=1, sort_keys=True), encoding="utf-8")
+        return {"saved": payload.setup_id, "count": len(labels)}
+
     @app.get("/api/telegram")
     def telegram() -> dict[str, Any]:
         tcfg = load_telegram_config(config_dir)

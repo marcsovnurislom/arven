@@ -58,8 +58,8 @@ def test_health_and_read_only_surface(env):
     paths = {r.path for r in client.app.routes}
     assert not any("order" in p or "trade/" in p for p in paths)
     assert methods <= {"GET", "POST", "DELETE", "HEAD", "OPTIONS"}
-    market_writers = [r.path for r in client.app.routes if "POST" in getattr(r, "methods", set())]
-    assert market_writers == ["/api/journal"]  # the journal is the only write path
+    writers = sorted(r.path for r in client.app.routes if "POST" in getattr(r, "methods", set()))
+    assert writers == ["/api/journal", "/api/s7/labels"]  # only the owner's own journal and review notes are writable
 
 
 def test_overview_reports_fresh_data_and_missing_runtime_honestly(env):
@@ -168,3 +168,18 @@ def test_built_frontend_is_served_from_dist_when_present(env, tmp_path):
     client = TestClient(create_app(cfg, dist_dir=dist))
     assert "ARVEN" in client.get("/").text
     assert client.get("/api/health").json()["status"] == "ok"  # API routes still win over the static mount
+
+
+def test_s7_review_returns_the_export_and_stores_owner_labels(env):
+    cfg, client, _ = env
+    assert client.get("/api/s7/review").json()["setups"] == []
+    review = cfg.data.data_dir / "s7_review"
+    review.mkdir(parents=True)
+    (review / "setups_1h.json").write_text(json.dumps({"timeframe": "1h", "total_setups": 1, "setups": [{"id": "1h-1000-L"}]}))
+    assert client.get("/api/s7/review", params={"tf": "1h"}).json()["setups"][0]["id"] == "1h-1000-L"
+    assert client.get("/api/s7/review", params={"tf": "2h"}).status_code == 422
+    ok = client.post("/api/s7/labels", json={"setup_id": "1h-1000-L", "verdict": "yes", "note": "clean break"})
+    assert ok.status_code == 200 and ok.json()["count"] == 1
+    assert client.get("/api/s7/labels").json()["labels"]["1h-1000-L"]["verdict"] == "yes"
+    assert client.post("/api/s7/labels", json={"setup_id": "1h-1000-L", "verdict": "maybe"}).status_code == 422
+    assert client.post("/api/s7/labels", json={"setup_id": "../../etc", "verdict": "yes"}).status_code == 422

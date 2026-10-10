@@ -1,12 +1,14 @@
 import {
-  CandlestickSeries, ColorType, LineStyle, createChart, createSeriesMarkers,
+  CandlestickSeries, ColorType, LineSeries, LineStyle, createChart, createSeriesMarkers,
   type IChartApi, type IPriceLine, type ISeriesApi, type ISeriesMarkersPluginApi, type Time, type UTCTimestamp,
 } from "lightweight-charts";
 import { useEffect, useRef } from "react";
 import type { Candle } from "./api";
 
 export type ChartLine = { price: number; color: string; title: string; dashed?: boolean };
-export type ChartMarker = { timeMs: number; side: 1 | -1; text: string };
+export type ChartMarker = { timeMs: number; side: 1 | -1; text: string; shape?: "circle" | "square"; color?: string; position?: "aboveBar" | "belowBar" };
+/** A free line drawn through time/price points (trendlines, range edges). */
+export type ChartOverlay = { points: { timeMs: number; price: number }[]; color: string; width?: number; dashed?: boolean };
 
 const css = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const LOAD_MORE_WHEN_BARS_LEFT = 25;
@@ -20,16 +22,18 @@ type Props = {
   focusTimeMs?: number;
   /** Called when the user pans close to the oldest loaded bar - the parent should prepend older candles. */
   onNeedOlder?: () => void;
+  overlays?: ChartOverlay[];
 };
 
 /** Candlestick chart that keeps its view when older bars are prepended, so panning left keeps loading history. */
-export function CandleChart({ candles, lines = [], markers = [], height = 420, focusTimeMs, onNeedOlder }: Props) {
+export function CandleChart({ candles, lines = [], markers = [], height = 420, focusTimeMs, onNeedOlder, overlays = [] }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const priceLines = useRef<IPriceLine[]>([]);
   const firstT = useRef<number | null>(null);
+  const overlaySeries = useRef<ISeriesApi<"Line">[]>([]);
   const needOlder = useRef(onNeedOlder);
   needOlder.current = onNeedOlder;
 
@@ -59,6 +63,7 @@ export function CandleChart({ candles, lines = [], markers = [], height = 420, f
       chart.remove();
       chartRef.current = seriesRef.current = markersRef.current = null;
       priceLines.current = [];
+      overlaySeries.current = [];
       firstT.current = null;
     };
   }, [height]);
@@ -92,6 +97,18 @@ export function CandleChart({ candles, lines = [], markers = [], height = 420, f
   }, [lines]);
 
   useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    for (const ls of overlaySeries.current) chart.removeSeries(ls);
+    overlaySeries.current = overlays.map((o) => {
+      const ls = chart.addSeries(LineSeries, { color: o.color, lineWidth: (o.width ?? 2) as 1 | 2 | 3 | 4, lineStyle: o.dashed ? LineStyle.Dashed : LineStyle.Solid, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+      const pts = [...o.points].sort((a, b) => a.timeMs - b.timeMs).filter((p, i, arr) => i === 0 || p.timeMs !== arr[i - 1].timeMs);
+      ls.setData(pts.map((p) => ({ time: Math.floor(p.timeMs / 1000) as UTCTimestamp, value: p.price })));
+      return ls;
+    });
+  }, [overlays]);
+
+  useEffect(() => {
     const plugin = markersRef.current;
     if (!plugin) return;
     plugin.setMarkers(
@@ -99,9 +116,9 @@ export function CandleChart({ candles, lines = [], markers = [], height = 420, f
         .sort((a, b) => a.timeMs - b.timeMs)
         .map((m) => ({
           time: Math.floor(m.timeMs / 1000) as UTCTimestamp,
-          position: m.side === 1 ? ("belowBar" as const) : ("aboveBar" as const),
-          color: m.side === 1 ? css("--up") || "#34d399" : css("--down") || "#f4607a",
-          shape: m.side === 1 ? ("arrowUp" as const) : ("arrowDown" as const),
+          position: m.position ?? (m.side === 1 ? ("belowBar" as const) : ("aboveBar" as const)),
+          color: m.color ?? (m.side === 1 ? css("--up") || "#34d399" : css("--down") || "#f4607a"),
+          shape: m.shape ?? (m.side === 1 ? ("arrowUp" as const) : ("arrowDown" as const)),
           text: m.text,
         })),
     );

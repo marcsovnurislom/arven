@@ -1918,6 +1918,19 @@ win 35.9 %, profit factor 0.87, **gross -11.1 % before costs**), validation **-9
 So even before costs they show no edge. (Trade count differs from the old 111 because cheaper costs keep the equity path above the risk
 engine's halts; same code, different cost path.) Sealed test untouched.
 
+**Strategy S7 "Trend-Break Fib Retest" - the owner's own method: spec + detector + review page (2026-10-10; no backtest yet).**
+The owner explained his real method (chat + annotated TradingView screenshots; his older screenshots in `Pictures/Screenshots` were
+sampled to understand it - many are unrelated; nothing from them was used as data). Spec `docs/strategy_s7_trend_break_fib.md` (approved):
+descending line with clustered touches -> break that closes at/above the last touch high (and, after a sideways range, above the range top
+as well; the two closes may be different candles) -> Fibonacci from the last low before the break (0) to the highest close of the break leg
+(1), level 1 frozen at the first 0.236 pullback -> entry zone 0.5-0.618 -> confluence score from order block / FVG / iFVG / prior swing levels.
+10 pre-registered variant questions (25 variants) for the later evaluation. Implemented: `src/arven/engine/strategy_s7.py` (pure, causal state
+machine; shorts are the mirror; 7 hand-built tests incl. truncation-causality and the range rules), `scripts/s7_review_export.py` (development
+setups with candles only up to the arming bar), API `/api/s7/review` + `/api/s7/labels` (owner verdicts, the second write path next to the
+journal), web page "S7 check" (chart with line, touches, range, Fibonacci, zone; Y/N/U verdicts, notes). Detector development counts after two
+significance rules: 4h 45, 1h 248, 15m 955 setups. **Next: the owner marks the exported setups; only after that the entry/stop/target logic
+and the backtest.**
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -2613,3 +2626,4 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-10 | Phase 8c done with the owner's OK for Playwright: 51 browser tests (desktop + phone), Lighthouse perf>=95 / a11y>=95 / best-practices 100 / SEO 100 on all pages, screenshots committed (fixture data, labelled); mobile performance fixed via lazy loading and by dropping Framer Motion for CSS transitions; Phase 8 complete | implemented (Phase 8c) |
 | 2026-10-10 | Web app redesign for the defence audience: Home page with animated hero/pipeline/honesty cards/real equity curve, guided tour, animated command centre; dark default; forward summary gained a `trades` series; 59 browser tests pass; Lighthouse perf>=92, a11y>=95; real-data screenshots committed | implemented (web redesign) |
 | 2026-10-10 | Owner asked why only S4-S6 appear: S1-S3 are the Stage 5 voting pipeline (different system); added a combined S1+S2+S3 card to Overview/Strategies and re-ran the pipeline under CFD costs: development -17.4 % (gross -11.1 %), validation -9.9 % (gross -1.6 %) - no edge even before costs; sealed test untouched | recorded (S1-S3 in UI + CFD re-run) |
+| 2026-10-10 | Owner's own method formalised as S7 (spec approved), detector + owner review page built; S4 kept unchanged as the control; backtest of S7 deferred until the owner has checked the detector's setups | implemented (S7 detector) |

@@ -86,6 +86,22 @@ def seed(data_dir: Path):
         ],
         "note": "fixture",
     }))
+    review = data_dir / "s7_review"
+    review.mkdir(parents=True)
+    candles = [{"t": now - (80 - i) * HOUR, "o": price(i), "h": price(i) + 120, "l": price(i) - 120, "c": price(i) + 30, "v": 0, "complete": True} for i in range(80)]
+    fx_setups = []
+    for k, side in ((1, 1), (2, -1)):
+        arm = now - k * HOUR
+        fx_setups.append({
+            "id": f"1h-{arm}-{'L' if side == 1 else 'S'}", "timeframe": "1h", "side": side, "arm_time_ms": arm,
+            "line": {"points": [{"timeMs": now - 70 * HOUR, "price": 81000}, {"timeMs": now - 10 * HOUR, "price": 80200}]},
+            "touches": [{"timeMs": now - 70 * HOUR, "price": 81000}, {"timeMs": now - 40 * HOUR, "price": 80600}],
+            "h_last": 80600, "cross_time_ms": now - 10 * HOUR, "break_time_ms": now - 9 * HOUR, "range": None,
+            "level0": {"timeMs": now - 20 * HOUR, "price": 79500}, "level1": {"timeMs": now - 5 * HOUR, "price": 81500},
+            "fib": {"0.0": 79500, "0.5": 80500, "0.618": 80264, "1.0": 81500, "1.272": 82044, "1.618": 82736, "2.0": 83500},
+            "zone": {"low": 80264, "high": 80500}, "confluence": [], "confluence_score": 0, "candles": candles[: 80 - k],
+        })
+    (review / "setups_1h.json").write_text(json.dumps({"timeframe": "1h", "total_setups": 2, "setups": fx_setups}))
     # fixture heartbeat is dated in the future so it never reads as stale during a test run
     (paper / "heartbeat.json").write_text(json.dumps({"checked_at_ms": now + 7 * 86_400_000, "status": "ok"}))
     return cfg
