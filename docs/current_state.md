@@ -1,6 +1,6 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-11 (S7 evaluation stage: entry/stop/targets + simulator built, development selection run - selected config CFD +47.6 R / 167 trades in-sample, validation awaits the owner's go; earlier: S7 owner check round 2 done, variants 12/13 added, labelling stopped; earlier: S7 detector v2 from the owner's round-1 check of 100 setups; earlier: Signal-product build-out Phase 8 complete (8a API, 8b React app, 8c browser tests/Lighthouse); earlier: Strategies S5 and S6 and an ML signal filter (no value) added and evaluated; forward evaluation of S4/S5/S6 wired (first 14 weeks negative); Phase 7b, part 2c: exit-variant study + CFD cost profile; part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
+_Last updated: 2026-10-11 (S7 validation run once: CFD -3.05 R / 102 trades, inside the random-entry control - the development result did not replicate, S7 EXPERIMENTAL; earlier: S7 evaluation stage, development selection CFD +47.6 R / 167 trades in-sample; earlier: S7 owner check round 2 done, variants 12/13 added, labelling stopped; earlier: S7 detector v2 from the owner's round-1 check of 100 setups; earlier: Signal-product build-out Phase 8 complete (8a API, 8b React app, 8c browser tests/Lighthouse); earlier: Strategies S5 and S6 and an ML signal filter (no value) added and evaluated; forward evaluation of S4/S5/S6 wired (first 14 weeks negative); Phase 7b, part 2c: exit-variant study + CFD cost profile; part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
 
 ## Phase
 
@@ -1962,8 +1962,11 @@ legacy-module boundary list; an independent re-derivation matched all 42 baselin
   win 55.7 %, mean +0.285 R, +47.6 R (+58.5 % at 1 % risk, max DD 8.5 %); CFD spread x4: +23.4 R; perp: +9.9 R; perp stress: -7.2 R.
   Random-entry control (same geometry, 200 draws) mean -0.039 R, 95th pct +0.110 R; buy-and-hold +323.7 %. The baseline config (1h,
   all defaults) had only 42 trades (+4.7 R CFD). In-sample best-of-21 and cost-sensitive: **not evidence of profitability**.
-- **Next: the single, unchanged validation run (2023-07 -> 2025-01) of the selected configuration - awaiting the owner's go.** Then
-  forward paper; sealed test untouched.
+- **Validation (2026-10-11, run once with the owner's go, commit `0ce16d6`, clean tree; spec §11):** 102 trades, win 44.1 %, mean
+  -0.030 R, **-3.05 R** under CFD costs (-3.8 % at 1 % risk, max DD 14.3 %); CFD spread x4 -20.8 R; perp -30.1 R; perp stress -35.0 R.
+  Random-entry control mean -0.056 R (95th pct +0.148 R); buy-and-hold +207.1 %. **The development result did not replicate**; S7
+  stays EXPERIMENTAL, nothing is re-tuned after validation (pre-registered rule). Every run is logged in `data/s7_study/evaluations.log`.
+  Sealed test untouched. Realistic conclusion, as for S4-S6: no reliable edge shown.
 
 ## Full backfill results (per yearly chunk)
 
@@ -2664,3 +2667,4 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-10 | S7 detector v2 from the owner's round-1 labels: straightness rule, zone-broken-by-impulse rule (1 ATR / 2x volume, analyst's thresholds, owner: "don't know, continue"), variant 11 (leg beyond the line's first anchor, baseline skip), entry search from the arming bar; round-2 sample exported for the owner | implemented (S7 detector v2) |
 | 2026-10-11 | S7 owner check round 2: labelling stopped ("unsure" 74 %); variants 12 (break = first line close) and 13 (line from the major high) pre-registered, owner chose "test both"; baseline unchanged | implemented (S7 variants 12/13) |
 | 2026-10-11 | S7 evaluation stage: plan + simulator + study; entry search from the arming close (look-ahead fix, spec §3 design change); variant 14 zone convention (owner: test both); development selection (21 configs) picked 15m/FVG/0.382/E3/S1/shallow zone, CFD +47.6 R / 167 trades in-sample; validation awaits the owner | implemented (S7 evaluation, development) |
+| 2026-10-11 | S7 validation run once (owner: "commit and run validation"): CFD -3.05 R / 102 trades, mean R inside the random-entry control; development result not replicated; S7 EXPERIMENTAL, no post-validation tuning | recorded (S7 validation) |

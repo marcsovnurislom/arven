@@ -219,6 +219,7 @@ cannot reach the 100-trade minimum of §6 on development.
 | 2026-10-10 | detector v2 (owner's check round 1, §2.7/§8) | wick straightness 0.8 ATR, zone broken by impulse (wick through the zone + bearish body >= 1 ATR or volume >= 2x 20-bar median), skip legs beyond the line's first anchor (variant 11 baseline), `zone_touched_at_arm` flag. From the owner's labels of pictures only, no outcome data. Keeps 21/23 "yes", 4/13 "no". Development counts: 4h 21, 1h 128, 15m 560. | current |
 | 2026-10-11 | variants 12 (break = first close beyond the line) and 13 (line from the major high) added after round 2, owner's choice "test both"; baseline unchanged | counts in §8 | pre-registered |
 | 2026-10-11 | evaluation stage: entry/stop/targets (§3-5), re-arming (§2.9), variants 3-FVG and 14 implemented; development selection run (§10) | selected 15m/FVG/0.382/E3/S1/shallow zone: CFD +47.6 R on 167 trades (in-sample, best of 21) | selected for validation |
+| 2026-10-11 | validation run of the selected configuration, once, unchanged (§11) | CFD -3.05 R on 102 trades (mean -0.030 R, inside the random-entry control); perp -30.1 R | not replicated; S7 EXPERIMENTAL |
 
 ## 10. Development results (2026-10-11, `scripts/s7_study.py`, `data/s7_study/development.json`)
 
@@ -309,3 +310,24 @@ with the spread stressed x4 the total halves, and under perp costs it is +9.9 R 
 risk it returned far less than buy-and-hold in this strongly rising period. Every selected trade has
 `zone_touched_at_arm = True` by construction (freeze at 0.382 = the shallow zone's near edge). Not evidence of
 profitability; the decisive step is the single, unchanged run on validation (2023-07 -> 2025-01), awaiting the owner's go.
+
+## 11. Validation result (2026-10-11, run once, `data/s7_study/validation.json`, commit `0ce16d6`, clean tree)
+
+The development-selected configuration, unchanged, on validation 2023-07-01 -> 2025-01-01 (logged in `data/s7_study/evaluations.log`).
+
+| Costs | Development trades | Development total R | Validation trades | Win rate | Mean R | Validation total R | Return at 1 % risk | Max DD at 1 % risk |
+|---|---|---|---|---|---|---|---|---|
+| CFD | 167 | +47.56 | 102 | 44.1% | -0.030 | -3.05 | -3.8% | 14.3% |
+| CFD, spread x4 | 155 | +23.43 | 91 | 37.4% | -0.228 | -20.78 | -19.3% | 19.4% |
+| perp (5 bp taker) | 165 | +9.89 | 101 | 34.7% | -0.297 | -30.05 | -26.6% | 26.6% |
+| perp, stress | 158 | -7.21 | 95 | 32.6% | -0.369 | -35.04 | -30.1% | 30.1% |
+
+Baselines (validation): no trade 0 R; buy-and-hold **+207.1%**; random-entry control mean R -0.056 (5th-95th
+percentile -0.245 to +0.148) vs S7 **-0.030** - inside the control's distribution.
+
+**Verdict: the development result did not replicate.** Out of sample the selected configuration loses slightly under CFD
+costs (-3.1 R on 102 trades) and clearly under stressed or perp costs; its mean R is indistinguishable from random entries
+with the same trade geometry. The development figure (+47.6 R) was selection over 21 configurations plus a cost-sensitive
+edge. S7 stays EXPERIMENTAL. Per the pre-registered procedure no parameter is changed after seeing validation; any new idea
+would need a new spec, a fresh development selection and a period not yet used (forward paper), and the sealed test stays
+untouched.
