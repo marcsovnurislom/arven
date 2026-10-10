@@ -27,7 +27,7 @@ CONTEXT_BARS = 30
 SEED = 7
 
 
-def to_json(s: S7Setup, tf: str, t_ms, o, h, lo, c) -> dict:
+def to_json(s: S7Setup, tf: str, t_ms, o, h, lo, c, v) -> dict:
     first = max(0, min(s.line.a_index, s.level0_index) - CONTEXT_BARS)
     window = range(first, s.arm_index + 1)
     tm = lambda i: int(t_ms[i])  # noqa: E731
@@ -41,8 +41,9 @@ def to_json(s: S7Setup, tf: str, t_ms, o, h, lo, c) -> dict:
         "level0": {"timeMs": tm(s.level0_index), "price": s.level0}, "level1": {"timeMs": tm(s.level1_index), "price": s.level1},
         "fib": {str(r): s.fib(r) for r in (0.0, 0.5, 0.618, 1.0, 1.272, 1.618, 2.0)},
         "zone": {"low": s.zone_low, "high": s.zone_high},
+        "beyond_line_start": s.beyond_line_start, "zone_touched_at_arm": s.zone_touched_at_arm,
         "confluence": [{**asdict(z), "timeMs": tm(z.index)} for z in s.confluence], "confluence_score": s.confluence_score,
-        "candles": [{"t": tm(i), "o": float(o[i]), "h": float(h[i]), "l": float(lo[i]), "c": float(c[i]), "v": 0.0, "complete": True} for i in window],
+        "candles": [{"t": tm(i), "o": float(o[i]), "h": float(h[i]), "l": float(lo[i]), "c": float(c[i]), "v": float(v[i]), "complete": True} for i in window],
     }
 
 
@@ -55,14 +56,14 @@ def main(tf: str = "1h", sample: int = 40) -> None:
     finally:
         con.close()
     params = S7Params()
-    setups = detect_setups(bars.open, bars.high, bars.low, bars.close, params)
+    setups = detect_setups(bars.open, bars.high, bars.low, bars.close, params, volume=bars.volume)
     picked = sorted(random.Random(SEED).sample(range(len(setups)), min(sample, len(setups))))
     commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False).stdout.strip() or None
     out_dir = app.data.data_dir / "s7_review"
     out_dir.mkdir(parents=True, exist_ok=True)
     payload = {
         "timeframe": tf, "period": "development", "params": asdict(params), "git_commit": commit, "total_setups": len(setups),
-        "setups": [to_json(setups[i], tf, bars.open_time_ms, bars.open, bars.high, bars.low, bars.close) for i in picked],
+        "setups": [to_json(setups[i], tf, bars.open_time_ms, bars.open, bars.high, bars.low, bars.close, bars.volume) for i in picked],
         "note": "each setup shows only the candles up to its arming bar (no future data); sample seeded with 7",
     }
     path = out_dir / f"setups_{tf}.json"

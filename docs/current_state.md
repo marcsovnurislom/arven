@@ -1,6 +1,6 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-10 (Signal-product build-out Phase 8 complete (8a API, 8b React app, 8c browser tests/Lighthouse); earlier: Strategies S5 and S6 and an ML signal filter (no value) added and evaluated; forward evaluation of S4/S5/S6 wired (first 14 weeks negative); Phase 7b, part 2c: exit-variant study + CFD cost profile; part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
+_Last updated: 2026-10-11 (S7 evaluation stage: entry/stop/targets + simulator built, development selection run - selected config CFD +47.6 R / 167 trades in-sample, validation awaits the owner's go; earlier: S7 owner check round 2 done, variants 12/13 added, labelling stopped; earlier: S7 detector v2 from the owner's round-1 check of 100 setups; earlier: Signal-product build-out Phase 8 complete (8a API, 8b React app, 8c browser tests/Lighthouse); earlier: Strategies S5 and S6 and an ML signal filter (no value) added and evaluated; forward evaluation of S4/S5/S6 wired (first 14 weeks negative); Phase 7b, part 2c: exit-variant study + CFD cost profile; part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
 
 ## Phase
 
@@ -1928,8 +1928,42 @@ as well; the two closes may be different candles) -> Fibonacci from the last low
 machine; shorts are the mirror; 7 hand-built tests incl. truncation-causality and the range rules), `scripts/s7_review_export.py` (development
 setups with candles only up to the arming bar), API `/api/s7/review` + `/api/s7/labels` (owner verdicts, the second write path next to the
 journal), web page "S7 check" (chart with line, touches, range, Fibonacci, zone; Y/N/U verdicts, notes). Detector development counts after two
-significance rules: 4h 45, 1h 248, 15m 955 setups. **Next: the owner marks the exported setups; only after that the entry/stop/target logic
-and the backtest.**
+significance rules: 4h 45, 1h 248, 15m 955 setups.
+
+**S7 owner check, round 1 -> detector v2 (2026-10-10).** The owner marked all 100 exported setups (yes 23 / no 13 / unsure 64, with
+notes; archived in `data/s7_review/round1/`). Turned into rules (spec §2.1, §2.7, §3, §8, variant log): crooked lines rejected (no wick
+more than 0.8 ATR through the line); a bar running through the whole entry zone with a bearish body >= 1 ATR or volume >= 2x the 20-bar
+median cancels the setup (owner's rule, thresholds the analyst's - the owner had no exact numbers; `detect_setups` now takes optional
+`volume`); legs that rise above the line's first anchor ("all previous highs broken" - the owner is unsure) are skipped by default and
+pre-registered as variant 11 (27 variants in total now); `zone_touched_at_arm` flag, and the entry search will start inside the arming bar.
+Long ranges were *not* made a rule (present in many "yes" setups too). v2 keeps 21/23 "yes" and 4/13 "no" (three crooked lines and one
+"not it" remain). Development counts: 4h 21, 1h 128, 15m 560. 5 new hand-built tests (12 S7 tests in total). Round-2 sample exported
+(4h 21 = all, 1h 40, 15m 30; seed 7, volume now in the candles).
+
+**S7 owner check, round 2 (2026-10-11).** 91 setups marked yes 17 / no 7 / unsure 67; "unsure" did not shrink, so labelling stopped - the
+evaluation decides the rest. Two contradictions with the spec, both kept as pre-registered variants by the owner's choice: variant 12 (the
+break is the first close beyond the line) and variant 13 (the line starts at the window's major high); 29 variants in total. "Late entry"
+notes are covered by the entry search inside the arming bar; ranges and "the high kept updating" become analysis dimensions, not rules.
+Development counts baseline 4h 21 / 1h 128 / 15m 560 (variant 12: 16 / 94 / 395; variant 13: 21 / 126 / 496); 4h cannot reach the
+100-trade minimum. 14 S7 tests. Round-2 labels in `data/s7_review/labels_*.json`.
+
+**S7 evaluation stage (2026-10-11; owner: "start").** New: `src/arven/engine/strategy_s7_plan.py` (pure plan: E1-E4 entries, S1-S3
+stops, TP1 fib 1.0 / TP2 nearest swing resistance in fib 1.272-1.618 / TP3 fib 2.0 at 50/30/20 %, pre-entry cancellations),
+`src/arven/backtest/strategy_s7_sim.py` (execution: entries only after the arming close, conservative limit fills that must trade
+through the spread, stop-in-fill-bar = loss, exits via the existing 1m `paper_tracker`, one trade at a time), `scripts/s7_study.py`
+(pre-registered one-at-a-time selection, CFD/perp/stress, random-entry control, breakdowns; full record incl. source SHA-256 in
+`data/s7_study/development.json`). Detector additions: re-arming after a close above level 1, variant 3 (FVG), variant 14 (zone
+convention - the owner chose "test both" after an inconsistency was found: the detector's zone was the 50-61.8 % retracement while the
+spec's own fib definition and the review page's lines meant 38.2-50 %), recorded `atr`/`limit_618`/`level1_moves`. **Design change**
+(spec §3): the entry search starts at the arming *close*, not inside the arming bar - otherwise arming-bar rules evaluated at its close
+would discard losing intrabar entries with hindsight. S7 tests now: detector 17, plan 6, simulator 15, boundaries 3 (41), plus the
+legacy-module boundary list; an independent re-derivation matched all 42 baseline E1 entries; full suite 2256 passed / 13 skipped.
+- **Development result** (spec §10): 21 configurations; selected 15m / FVG / freeze 0.382 / E3 / S1 / shallow zone. CFD: 167 trades,
+  win 55.7 %, mean +0.285 R, +47.6 R (+58.5 % at 1 % risk, max DD 8.5 %); CFD spread x4: +23.4 R; perp: +9.9 R; perp stress: -7.2 R.
+  Random-entry control (same geometry, 200 draws) mean -0.039 R, 95th pct +0.110 R; buy-and-hold +323.7 %. The baseline config (1h,
+  all defaults) had only 42 trades (+4.7 R CFD). In-sample best-of-21 and cost-sensitive: **not evidence of profitability**.
+- **Next: the single, unchanged validation run (2023-07 -> 2025-01) of the selected configuration - awaiting the owner's go.** Then
+  forward paper; sealed test untouched.
 
 ## Full backfill results (per yearly chunk)
 
@@ -2627,3 +2661,6 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-10 | Web app redesign for the defence audience: Home page with animated hero/pipeline/honesty cards/real equity curve, guided tour, animated command centre; dark default; forward summary gained a `trades` series; 59 browser tests pass; Lighthouse perf>=92, a11y>=95; real-data screenshots committed | implemented (web redesign) |
 | 2026-10-10 | Owner asked why only S4-S6 appear: S1-S3 are the Stage 5 voting pipeline (different system); added a combined S1+S2+S3 card to Overview/Strategies and re-ran the pipeline under CFD costs: development -17.4 % (gross -11.1 %), validation -9.9 % (gross -1.6 %) - no edge even before costs; sealed test untouched | recorded (S1-S3 in UI + CFD re-run) |
 | 2026-10-10 | Owner's own method formalised as S7 (spec approved), detector + owner review page built; S4 kept unchanged as the control; backtest of S7 deferred until the owner has checked the detector's setups | implemented (S7 detector) |
+| 2026-10-10 | S7 detector v2 from the owner's round-1 labels: straightness rule, zone-broken-by-impulse rule (1 ATR / 2x volume, analyst's thresholds, owner: "don't know, continue"), variant 11 (leg beyond the line's first anchor, baseline skip), entry search from the arming bar; round-2 sample exported for the owner | implemented (S7 detector v2) |
+| 2026-10-11 | S7 owner check round 2: labelling stopped ("unsure" 74 %); variants 12 (break = first line close) and 13 (line from the major high) pre-registered, owner chose "test both"; baseline unchanged | implemented (S7 variants 12/13) |
+| 2026-10-11 | S7 evaluation stage: plan + simulator + study; entry search from the arming close (look-ahead fix, spec §3 design change); variant 14 zone convention (owner: test both); development selection (21 configs) picked 15m/FVG/0.382/E3/S1/shallow zone, CFD +47.6 R / 167 trades in-sample; validation awaits the owner | implemented (S7 evaluation, development) |
