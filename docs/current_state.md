@@ -2067,8 +2067,8 @@ how to change/add strategies: `docs/LIVE_SIGNALS.md`. Strategy rules were not ch
   (4 screenshot tests skipped as before).
 - **Not done, needs the owner:**
   - No real Telegram token/chat id yet: alerts are queued, but nothing is sent until `.env` + `dry_run: false`.
-  - The always-on Task Scheduler entry ('ARVEN Live', replacing the hourly 'ARVEN Paper Run') is documented, not
-    installed.
+  - (Done with the owner's go, 2026-10-11 14:43 UTC: Task Scheduler 'ARVEN Live' installed - at log-on, restart on failure -
+    and 'ARVEN Paper Run' disabled; the scheduled process resumed from the saved state and evaluated the 14:45 close `ok`.)
   - The master prompt's 14-day continuous forward-operation gate has not been run.
 
 ## Full backfill results (per yearly chunk)
@@ -2778,4 +2778,4 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-11 | S7 SMC-zone entry filter (owner: "try your idea"; scripts/research/s7_zone_filter.py, selected config unchanged, one trade at a time re-applied, CFD): A = iFVG in zone: dev +30.95 R (71), val +8.89 R (44; x4 -0.31, perp -4.76), forward -4.02 R (5, 1 win); B = 3+ zone types: dev +27.68 R (59), val +5.61 R (37), forward -0.24 R (6); no filter forward -7.28 R (21). Idea came from dev+val, so forward is the only clean check and does not confirm it; samples tiny - lead only, not a rule | recorded (S7 zone filter) |
 | 2026-10-11 | Owner: finish the project to real-time signals, strategies unchanged, keep them changeable. Built `src/arven/live/` + `config/live.yaml` (registry of strategy kinds, per-strategy enabled/version/params), `arven live run|tick|status|heartbeat`, `scripts/run_live.bat`; live adapters reuse the research code and reproduced every forward S7 and Crowded Shorts research trade bit-identically | implemented (live signal loop) |
 | 2026-10-11 | Stage 8 D2 changed: open interest is REST-tailed (public futures/data endpoints, verified against bulk metrics: identical OI, REST timestamp = bulk create_time + 5 min) because Crowded Shorts needs oi_z; architecture.md updated | implemented |
-| 2026-10-11 | The live process also runs the Stage 8 hourly paper run (one DuckDB writer); switching Task Scheduler from 'ARVEN Paper Run' to 'ARVEN Live' is left to the owner (recipe in docs/LIVE_SIGNALS.md) | open (owner) |
+| 2026-10-11 | The live process also runs the Stage 8 hourly paper run (one DuckDB writer); owner approved switching Task Scheduler: 'ARVEN Live' installed (at log-on, restart on failure), 'ARVEN Paper Run' disabled | approved, done |
