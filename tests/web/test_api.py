@@ -205,3 +205,16 @@ def test_s7_trade_labels_store_the_owners_verdicts(env):
     assert got["verdict"] == "wrong" and got["note"] == "entry too early"
     assert client.post("/api/s7/trade_labels", json={"trade_id": "15m-1-S", "verdict": "maybe"}).status_code == 422
     assert client.post("/api/s7/trade_labels", json={"trade_id": "../x", "verdict": "ok"}).status_code == 422
+
+
+def test_strategy_trades_index_and_files_read_only(env):
+    cfg, client, _ = env
+    assert client.get("/api/strategy_trades/index").json() == {"entries": []}
+    root = cfg.data.data_dir / "strategy_trades"
+    (root / "s6_trend_pullback").mkdir(parents=True)
+    (root / "index.json").write_text(json.dumps([{"strategy": "s6_trend_pullback", "period": "forward"}]))
+    (root / "s6_trend_pullback" / "forward.json").write_text(json.dumps({"strategy": "s6_trend_pullback", "trades": [{"n": 1}], "summary": {}}))
+    assert client.get("/api/strategy_trades/index").json()["entries"][0]["period"] == "forward"
+    assert client.get("/api/strategy_trades", params={"strategy": "s6_trend_pullback", "period": "forward"}).json()["trades"] == [{"n": 1}]
+    assert client.get("/api/strategy_trades", params={"strategy": "../etc", "period": "forward"}).status_code == 422
+    assert client.get("/api/strategy_trades", params={"strategy": "s6_trend_pullback", "period": "x"}).status_code == 422

@@ -1,97 +1,12 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type S7Trade, type S7TradeLabel } from "../api";
-import type { ChartLine, ChartMarker, ChartOverlay } from "../CandleChart";
 import { useI18n } from "../i18n";
 import { useLoad } from "../hooks";
-import { Card, ChartFrame, Chip, Empty, ErrorBox, PageTitle, SidePill, Skeleton, Stat, fmt, fmtPct, fmtR, fmtTime, signClass } from "../ui";
+import { EquityCurve, TradeChart, ZONE_STYLE, usd } from "../TradesViewer";
+import { Card, Chip, Empty, ErrorBox, PageTitle, SidePill, Skeleton, Stat, fmt, fmtPct, fmtR, fmtTime, signClass } from "../ui";
 
-const CandleChart = lazy(() => import("../CandleChart").then((m) => ({ default: m.CandleChart })));
-const usd = (x: number) => `${x < 0 ? "-" : ""}$${Math.abs(x).toFixed(2)}`;
-const ZONE_STYLE: Record<string, { color: string; label: string }> = {
-  order_block: { color: "#a78bfa", label: "Order block" },
-  fvg: { color: "#60a5fa", label: "FVG" },
-  ifvg: { color: "#22d3ee", label: "iFVG" },
-  level: { color: "#94a3b8", label: "SnR level" },
-};
 type Filter = "all" | "wins" | "losses" | "unmarked" | "wrong";
 type Verdict = S7TradeLabel["verdict"];
-
-/** Balance after each trade, with the starting balance as a dashed reference line. */
-function EquityCurve({ values, start, label, marked }: { values: number[]; start: number; label: string; marked: number }) {
-  const W = 1000, H = 160, pad = 8;
-  const min = Math.min(start, ...values), max = Math.max(start, ...values);
-  const span = max - min || 1;
-  const x = (i: number) => (i / Math.max(1, values.length - 1)) * W;
-  const y = (v: number) => pad + (1 - (v - min) / span) * (H - 2 * pad);
-  const pts = values.map((v, i) => `${x(i)},${y(v)}`).join(" ");
-  const up = values[values.length - 1] >= start;
-  return (
-    <div>
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="h-40 w-full" role="img" aria-label={label}>
-        <defs>
-          <linearGradient id="eqfill" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor={up ? "var(--up)" : "var(--down)"} stopOpacity="0.28" />
-            <stop offset="100%" stopColor={up ? "var(--up)" : "var(--down)"} stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <polygon points={`0,${H} ${pts} ${W},${H}`} fill="url(#eqfill)" />
-        <line x1={0} x2={W} y1={y(start)} y2={y(start)} stroke="currentColor" strokeOpacity={0.35} strokeDasharray="6 6" vectorEffect="non-scaling-stroke" />
-        <polyline points={pts} fill="none" stroke={up ? "var(--up)" : "var(--down)"} strokeWidth={2} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-        {marked > 0 && marked < values.length && <circle cx={x(marked)} cy={y(values[marked])} r={5} fill="var(--gold)" vectorEffect="non-scaling-stroke" />}
-      </svg>
-      <div className="mt-1 flex justify-between text-xs faint num"><span>min {usd(Math.min(...values))}</span><span>start {usd(start)}</span><span>max {usd(Math.max(...values))}</span></div>
-    </div>
-  );
-}
-
-function TradeChart({ tr }: { tr: S7Trade }) {
-  const { t } = useI18n();
-  const lines = useMemo<ChartLine[]>(
-    () => [
-      { price: tr.entry, color: "#eceff4", title: t("s7tEntry") },
-      { price: tr.stop, color: "#f87171", title: t("s7tStop") },
-      ...tr.targets.map((p, k) => ({ price: p, color: "#34d399", title: `TP${k + 1}`, dashed: true })),
-      { price: tr.zone.low, color: "#d9b256", title: "", dashed: true },
-      { price: tr.zone.high, color: "#d9b256", title: "", dashed: true },
-    ],
-    [tr, t],
-  );
-  const overlays = useMemo<ChartOverlay[]>(() => {
-    const c = tr.candles;
-    const snap = (ms: number) => {
-      let lo = 0;
-      for (let k = 0; k < c.length; k++) if (c[k].t <= ms) lo = k;
-      return c[lo].t;
-    };
-    const end = snap(tr.exit_time_ms);
-    const o: ChartOverlay[] = [{ points: tr.line.points, color: "#f5d061", width: 2 }];
-    for (const z of tr.smc_zones ?? []) {
-      const st = ZONE_STYLE[z.kind] ?? ZONE_STYLE.level;
-      const from = snap(Math.max(z.timeMs, c[0].t));
-      if (from >= end) continue;
-      o.push({ points: [{ timeMs: from, price: z.high }, { timeMs: end, price: z.high }], color: st.color, width: 1 });
-      if (z.low !== z.high) o.push({ points: [{ timeMs: from, price: z.low }, { timeMs: end, price: z.low }], color: st.color, width: 1, dashed: true });
-    }
-    return o;
-  }, [tr]);
-  const markers = useMemo<ChartMarker[]>(
-    () => [
-      { timeMs: tr.entry_time_ms, side: tr.side, text: t("s7tEntry") },
-      { timeMs: tr.exit_time_ms, side: tr.side === 1 ? -1 : 1, text: `${t("s7tExit")} ${fmtR(tr.net_r)}`, shape: "square" as const, color: tr.net_r >= 0 ? "#34d399" : "#f87171" },
-    ],
-    [tr, t],
-  );
-  const range = useMemo(() => ({ fromMs: Math.min(tr.line.points[0].timeMs, tr.level0.timeMs), toMs: tr.exit_time_ms }), [tr]);
-  return (
-    <ChartFrame height={500} labels={{ fit: t("chartFit"), full: t("chartFull"), exit: t("chartExit") }}>
-      {({ fill, fitKey }) => (
-        <Suspense fallback={<Skeleton h={500} />}>
-          <CandleChart key={tr.id} candles={tr.candles} lines={lines} overlays={overlays} markers={markers} range={range} fitKey={fitKey} fill={fill} />
-        </Suspense>
-      )}
-    </ChartFrame>
-  );
-}
 
 export function S7Trades() {
   const { t } = useI18n();

@@ -148,6 +148,17 @@ export type S7Trade = {
   smc_zones?: { kind: string; low: number; high: number; timeMs: number }[];
   candles: Candle[];
 };
+/** One backtested/forward trade of any strategy (scripts/strategy_trades_export.py); the S7 drawing fields are optional. */
+export type TradeRec = {
+  n: number; id: string; side: 1 | -1; entry_time_ms: number; exit_time_ms: number; entry: number; stop: number; targets: number[];
+  exit_reasons: string[]; net_r: number; size_btc: number; risk_usd: number; pnl_usd: number; equity_after: number; skipped: string | null;
+  candles: Candle[];
+  line?: { points: S7Point[] }; level0?: S7Point; level1?: S7Point; zone?: { low: number; high: number };
+  smc_zones?: { kind: string; low: number; high: number; timeMs: number }[];
+};
+export type StrategyTradesSummary = { trades: number; win_rate: number; total_r: number; account: S7AccountSummary };
+export type StrategyTradesEntry = { strategy: string; title: string; period: string; period_label: string; summary: StrategyTradesSummary };
+export type StrategyTradesFile = StrategyTradesEntry & { costs: string; trades: TradeRec[] };
 export type S7TradeLabel = { verdict: "ok" | "wrong" | "unsure"; note: string; at_ms: number };
 export type S7AccountSummary = {
   start_equity: number; final_equity: number; return: number; trades: number; skipped: number; wins: number; losses: number;
@@ -204,6 +215,8 @@ export const api = {
   telegram: () => request<TelegramStatus>("/api/telegram"),
   s7Review: (tf: string) => request<S7Review>(`/api/s7/review?tf=${tf}`),
   s7Trades: (period: string) => request<S7Trades>(`/api/s7/trades?period=${period}`),
+  strategyTradesIndex: () => request<{ entries: StrategyTradesEntry[] }>("/api/strategy_trades/index"),
+  strategyTrades: (strategy: string, period: string) => request<StrategyTradesFile>(`/api/strategy_trades?strategy=${strategy}&period=${period}`),
   s7TradeLabels: () => request<{ labels: Record<string, S7TradeLabel> }>("/api/s7/trade_labels"),
   s7TradeLabel: (trade_id: string, verdict: string, note: string) =>
     request<{ saved: string; count: number }>("/api/s7/trade_labels", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ trade_id, verdict, note }) }),

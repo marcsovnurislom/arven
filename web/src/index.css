@@ -335,3 +335,10 @@ kbd { font-family: "JetBrains Mono", Consolas, monospace; font-size: 11px; paddi
 @media (prefers-reduced-motion: reduce) { .page-in, .drawer, .palette, .chart-full { animation: none !important; } .side-link:hover { transform: none; } }
 /* the custom display rules above are unlayered and would beat Tailwind's lg:hidden - hide mobile-only chrome explicitly */
 @media (min-width: 1024px) { .bottombar, .drawer-backdrop { display: none; } }
+
+/* strategy picker on the Strategies page */
+.strategy-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.strategy-card { display: flex; flex-direction: column; text-align: left; padding: 14px; border-radius: 14px; border: 1px solid var(--border); background: var(--card);
+  color: var(--text); cursor: pointer; transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s; }
+.strategy-card:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--gold) 40%, var(--border)); }
+.strategy-card.on { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold-soft), 0 10px 30px var(--gold-soft); }

@@ -172,3 +172,30 @@ def test_simulate_setup_ignores_bars_before_the_arming_close():
     market = make_market(16, path, base_price=105.0, start_ms=T0)
     ctx = make_context(aggregate(market, 15), aggregate(market, 5), market, zero_cost_app().costs, S7Params(), S7TradeParams(entry="E2"))
     assert simulate_setup(ctx, setup(), 0).status == "expired"
+
+
+# --- trade management variants (owner, 2026-10-11) ---
+
+
+def test_ladder_moves_the_stop_to_entry_after_tp1():
+    # E1 buy at 101, TP1 110 at M+25 (half out), then the drop to 89 exits the other half at the entry (breakeven), not at 89.5
+    (out,) = run(E1_PATH, S7TradeParams(management="LADDER"))
+    assert out.legs[0].reasons == ("TP1", "STOP_BREAKEVEN")
+    assert out.net_r == pytest.approx(0.5 * 9 / 11.5)
+
+
+def test_runner_holds_the_last_tenth_to_fib3_with_the_stop_at_tp2():
+    # E2 at 97.64: TP1 110 (50 %), TP2 122.36 (30 %), fib 2.0 = 130 (10 %); then a fall to 100 stops the runner at TP2 = 122.36
+    path = dict(LIMIT_PATH) | {M + 80: (130.0, 130.0, 100.0, 100.0)}
+    (out,) = run(path, S7TradeParams(entry="E2", management="RUNNER"))
+    assert out.legs[0].reasons == ("TP1", "TP2", "TP3", "STOP_TRAIL")
+    risk = 97.64 - STOP
+    assert out.net_r == pytest.approx((0.5 * (110 - 97.64) + 0.3 * (122.36 - 97.64) + 0.1 * (130 - 97.64) + 0.1 * (122.36 - 97.64)) / risk)
+
+
+def test_pre_breakeven_protects_a_trade_that_nearly_reached_tp1():
+    # E1 buy at 101 (TP1 110): price reaches 107.5 (> 70 % of the way = 107.3) then collapses -> out at the entry, not at the stop
+    path = {M + 5: (105.0, 105.0, 99.5, 101.0), M + 25: (101.0, 107.5, 101.0, 107.0), M + 45: (107.0, 107.0, 89.0, 89.0)}
+    assert run(path, S7TradeParams())[0].net_r == pytest.approx(-1.0)
+    (out,) = run(path, S7TradeParams(management="PRE_BE_LADDER"))
+    assert out.legs[0].reasons == ("STOP_BREAKEVEN",) and out.net_r == pytest.approx(0.0)

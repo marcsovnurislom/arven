@@ -69,7 +69,7 @@ QUESTIONS: list[tuple[str, str, list[Any]]] = [
 ]
 DETECTOR_KEYS = {"min_touches", "freeze_pullback", "count_every_touch", "level0_range_bottom", "skip_beyond_line_start",
                  "break_on_cross", "line_from_major_high", "shallow_zone"}
-TRADE_KEYS = {"entry", "stop", "breakeven_after_tp1", "min_tp1_r"}
+TRADE_KEYS = {"entry", "stop", "breakeven_after_tp1", "min_tp1_r", "management"}
 
 
 def split(cfg: dict[str, Any]) -> tuple[str, S7Params, S7TradeParams]:
@@ -85,13 +85,20 @@ def key(cfg: dict[str, Any]) -> str:
 
 class Study:
     def __init__(self, period: BacktestPeriod = BacktestPeriod.DEVELOPMENT) -> None:
-        if period not in (BacktestPeriod.DEVELOPMENT, BacktestPeriod.VALIDATION):
-            raise SystemExit("only development or validation (the sealed test is not available here)")
+        if period not in (BacktestPeriod.DEVELOPMENT, BacktestPeriod.VALIDATION, BacktestPeriod.FORWARD):
+            raise SystemExit("only development, validation or forward (the sealed test is not available here)")
         self.period = period
         self.app, fcfg = load_config(), load_features_config()
-        self.window = make_guard(self.app).resolve(period)
         t0 = time.time()
-        self.market = load_inputs(self.app, fcfg, self.window).market
+        if period == BacktestPeriod.FORWARD:
+            # forward: the paper loader (features built in memory); the detector's bars below start at history_start, so
+            # earlier bars (including the already-evaluated test period) are only its warm-up - setups count from forward_start
+            from arven.paper.runs import latest_forward_window_end_ms, load_paper_inputs
+            self.window = make_guard(self.app).resolve(period, end_ms=latest_forward_window_end_ms(self.app))
+            self.market = load_paper_inputs(self.app, fcfg, self.window).market
+        else:
+            self.window = make_guard(self.app).resolve(period)
+            self.market = load_inputs(self.app, fcfg, self.window).market
         con = open_readonly(self.app.data.database_path)
         try:
             self.bars = load_feature_inputs(con, self.app, start=self.app.data.history_start, end=from_ms(self.window.end_ms)).bars

@@ -169,3 +169,31 @@ def test_breakeven_not_triggered_below_the_threshold_and_short_side_symmetric():
     market2 = make_market(1, bars2, base_price=100.0, start_ms=T0)
     res2 = track_signal(short, T0, 100.0, market2, zero_cost_app().costs, breakeven_at_r=1.0).resolution
     assert res2.legs[0].exit_reason == "STOP_BREAKEVEN" and res2.r_multiple == pytest.approx(0.0)
+
+
+def test_stop_ladder_moves_the_stop_after_each_rung_from_the_next_bar():
+    # TP1 102 at bar 1 -> stop to 100 (entry) from bar 2; TP2 104 at bar 3 -> stop to 102 (TP1) from bar 4; bar 5 falls to 101.5
+    bars = {0: flat_bar(100.0), 1: (100.0, 102.5, 100.0, 102.0), 3: (102.0, 104.5, 102.0, 104.0), 5: (104.0, 104.0, 101.5, 101.5)}
+    market = make_market(1, bars, base_price=100.0, start_ms=T0)
+    res = track_signal(make_signal(), T0, 100.0, market, zero_cost_app().costs, stop_after_tp=(100.0, 102.0)).resolution
+    assert [leg.exit_reason for leg in res.legs] == ["TP1", "TP2", "STOP_TRAIL"]
+    assert res.r_multiple == pytest.approx(0.5 * 1 + 0.3 * 2 + 0.2 * 1)  # the last 20 % leaves at 102 = +1 R
+
+
+def test_stop_ladder_step_is_not_active_in_the_bar_that_earned_it_and_never_loosens():
+    # bar 1 reaches TP1 (102) and also dips to 99.5 - the ladder stop (100) only applies from bar 2, so no exit in bar 1
+    bars = {0: flat_bar(100.0), 1: (100.0, 102.5, 99.5, 101.0), 2: (101.0, 101.0, 99.8, 99.9)}
+    market = make_market(1, bars, base_price=100.0, start_ms=T0)
+    res = track_signal(make_signal(), T0, 100.0, market, zero_cost_app().costs, stop_after_tp=(100.0,)).resolution
+    assert [leg.exit_reason for leg in res.legs] == ["TP1", "STOP_BREAKEVEN"]
+    loose = track_signal(make_signal(), T0, 100.0, make_market(1, {0: flat_bar(100.0), 1: (100.0, 102.5, 100.0, 102.0), 2: (102.0, 102.0, 97.9, 98.0)},
+                         base_price=100.0, start_ms=T0), zero_cost_app().costs, stop_after_tp=(90.0,)).resolution
+    assert loose.legs[-1].exit_reason == "STOP" and loose.legs[-1].exit_price == pytest.approx(98.0)  # 90 would loosen: ignored
+
+
+def test_without_a_ladder_nothing_changes():
+    bars = {0: flat_bar(100.0), 1: (100.0, 102.5, 100.0, 102.0), 2: (102.0, 102.0, 97.0, 97.0)}
+    market = make_market(1, bars, base_price=100.0, start_ms=T0)
+    a = track_signal(make_signal(), T0, 100.0, market, zero_cost_app().costs).resolution
+    b = track_signal(make_signal(), T0, 100.0, market, zero_cost_app().costs, stop_after_tp=None).resolution
+    assert a.r_multiple == b.r_multiple and [leg.exit_reason for leg in a.legs] == ["TP1", "STOP"]

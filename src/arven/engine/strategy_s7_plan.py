@@ -21,6 +21,11 @@ import numpy as np
 from arven.engine.strategy_s7 import S7Params, S7Setup, zone_broken_by_impulse
 
 ENTRIES = ("E1", "E2", "E3", "E4")
+# trade management after entry (owner, 2026-10-11: "trades that nearly reached TP then hit the stop", "trades that ran 2-3x
+# past TP3"): V0 = as evaluated; BE_TP1 = stop to entry after TP1; LADDER = stop to entry after TP1 and to TP1 after TP2;
+# PRE_BE_LADDER = LADDER plus a breakeven move once price has covered 70 % of the way to TP1; RUNNER = LADDER with the last
+# 20 % split 10 % at fib 2.0 and 10 % at fib 3.0 (stop to TP2 after fib 2.0)
+MANAGEMENTS = ("V0", "BE_TP1", "LADDER", "PRE_BE_LADDER", "RUNNER")
 STOPS = ("S1", "S2", "S3")
 TP_FRACTIONS = (0.5, 0.3, 0.2)
 
@@ -36,8 +41,13 @@ class S7TradeParams:
     s3_hard_atr: float = 1.0  # S3: hard stop at level 0 minus 1 ATR (plus the close-based exit)
     tp2_band: tuple[float, float] = (1.272, 1.618)  # TP2: nearest resistance inside this fib band, else its far end
     tp3_fib: float = 2.0
+    management: str = "V0"
+    pre_be_fraction: float = 0.7  # PRE_BE_LADDER: breakeven once price covered this share of the way to TP1
+    runner_fib: float = 3.0  # RUNNER: the last rung
 
     def __post_init__(self) -> None:
+        if self.management not in MANAGEMENTS:
+            raise ValueError(f"management must be one of {MANAGEMENTS}")
         if self.entry not in ENTRIES:
             raise ValueError(f"entry must be one of {ENTRIES}")
         if self.stop not in STOPS:
@@ -130,6 +140,23 @@ def targets(s: S7Setup, tp: S7TradeParams, resistances: np.ndarray) -> tuple[tup
     tp2 = s.fib(tp.tp2_band[1]) if inside.size == 0 else k * float(inside.min())
     prices = (s.fib(1.0), tp2, s.fib(tp.tp3_fib))
     return tuple(zip(prices, TP_FRACTIONS, strict=True))
+
+
+def management_plan(s: S7Setup, tp: S7TradeParams, fill: float, prices: tuple[float, ...], fracs: tuple[float, ...]) -> tuple[tuple[float, ...], tuple[float, ...], tuple[float | None, ...] | None, float | None]:
+    """``(target prices, close fractions, stop after each rung, breakeven trigger in R or None)`` for ``tp.management``.
+    ``prices``/``fracs`` are the plain TP1-TP3 plan; the breakeven trigger is in R of the actual fill (for the tracker)."""
+    if tp.management == "V0":
+        return prices, fracs, None, None
+    if tp.management == "BE_TP1":
+        return prices, fracs, (fill, None, None), None
+    ladder = (fill, prices[0], None)
+    if tp.management == "LADDER":
+        return prices, fracs, ladder, None
+    if tp.management == "PRE_BE_LADDER":
+        risk = abs(fill - stop_price(s, tp))
+        return prices, fracs, ladder, tp.pre_be_fraction * abs(prices[0] - fill) / risk
+    # RUNNER
+    return (prices[0], prices[1], s.fib(tp.tp3_fib), s.fib(tp.runner_fib)), (0.5, 0.3, 0.1, 0.1), (fill, prices[0], prices[1], None), None
 
 
 def ladder_r(fill: float, stop: float, side: int, prices: tuple[float, ...]) -> tuple[float, ...] | None:

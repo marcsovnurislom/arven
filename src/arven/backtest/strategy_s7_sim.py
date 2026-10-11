@@ -50,6 +50,7 @@ from arven.engine.strategy_s7_plan import (
     e1_trigger,
     ladder_r,
     limit_orders,
+    management_plan,
     orient,
     oriented_bars,
     s3_exit_index,
@@ -206,6 +207,10 @@ def _track_leg(ctx: _Context, s: S7Setup, os_: OrientedSetup, weight: float, fil
         return "skipped:invalid_geometry"
     if tp.min_tp1_r is not None and rs[0] < tp.min_tp1_r:
         return "skipped:tp1_below_min_r"
+    prices, fracs, stop_ladder, be_at_r = management_plan(s, tp, fill, prices, fracs)
+    rs = ladder_r(fill, stop, side, prices)
+    if rs is None:
+        return "skipped:invalid_geometry"
     risk = side * (fill - stop)
     fee_rate = taker_fee_rate(ctx.costs)
     entry_fee_r = fill * fee_rate / risk
@@ -238,7 +243,8 @@ def _track_leg(ctx: _Context, s: S7Setup, os_: OrientedSetup, weight: float, fil
             max_minutes = (exit_ms - start_ms) // MINUTE_MS
 
     sig = _engine_signal(s, fill, stop, prices, rs, fracs, start_ms, max_minutes)
-    tracked = track_signal(sig, start_ms, fill, m, ctx.costs, stress=ctx.stress, move_stop_to_breakeven_after_first_tp=tp.breakeven_after_tp1)
+    tracked = track_signal(sig, start_ms, fill, m, ctx.costs, stress=ctx.stress, move_stop_to_breakeven_after_first_tp=tp.breakeven_after_tp1,
+                           stop_after_tp=stop_ladder, breakeven_at_r=be_at_r)
     res = tracked.resolution
     if res is None or not res.fully_closed:
         return "unresolved"

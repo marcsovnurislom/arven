@@ -4,6 +4,7 @@ import { LegacyPipelineCard } from "../Legacy";
 import { useI18n } from "../i18n";
 import { useLoad } from "../hooks";
 import { Card, Chip, Empty, ErrorBox, PageTitle, Skeleton, fmt, fmtPct, fmtR, signClass } from "../ui";
+import { StrategyTrades } from "../TradesViewer";
 
 // Static reference: the offline studies recorded in docs/ (unchanged v1 strategies). Labelled with its source on the page.
 const STUDIES = [
@@ -46,6 +47,7 @@ export function Strategies() {
   return (
     <>
       <PageTitle sub={t("honesty")}>{t("nav_strategies")}</PageTitle>
+      <StrategyTrades />
       {error && !data && <ErrorBox error={error} onRetry={reload} />}
       {loading && !data && <Skeleton h={160} />}
       {data && (

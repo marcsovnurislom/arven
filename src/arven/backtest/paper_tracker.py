@@ -65,6 +65,7 @@ def track_signal(
     stress: bool = False,
     move_stop_to_breakeven_after_first_tp: bool = False,
     breakeven_at_r: float | None = None,
+    stop_after_tp: tuple[float | None, ...] | None = None,
 ) -> PaperTrackResult:
     """Resolve ``signal`` from its real fill forward, on ``market``'s 1m bars.
 
@@ -76,6 +77,10 @@ def track_signal(
     reaching ``entry_fill_price +/- r * |entry_fill_price - stop|``), the stop moves to the entry fill price -
     effective from the *next* 1m bar, so a bar that both reaches the trigger and then reverses can never be
     credited with a breakeven exit it could not have had (the same "assume the worse outcome" rule).
+
+    ``stop_after_tp``: a stop ladder - after rung ``k`` fills, the stop moves to ``stop_after_tp[k]`` (``None`` = keep it),
+    effective from the next 1m bar for the same reason; a ladder step never loosens the stop. Exits at a moved stop that
+    is not the entry are tagged ``STOP_TRAIL``.
     """
     side = signal.side
     stop_price = signal.stop
@@ -93,6 +98,7 @@ def track_signal(
     risk_per_unit = abs(entry_fill_price - stop_price)
     breakeven_waiting = breakeven_at_r is not None  # trigger not yet reached
     breakeven_armed = False  # trigger reached on an earlier bar; stop moves at the start of the next one
+    ladder_pending: float | None = None  # a stop-ladder step earned on an earlier bar, applied at the next one
     legs: list[ClosedLeg] = []
     updates: list[TrackedUpdate] = []
 
@@ -114,13 +120,19 @@ def track_signal(
             effective_stop = entry_fill_price
             breakeven_armed = False
             updates.append(TrackedUpdate(t, SignalUpdateKind.STOP_MOVED, f"new_stop={entry_fill_price:.8f}"))
+        if ladder_pending is not None:
+            tighter = max(effective_stop, ladder_pending) if side == 1 else min(effective_stop, ladder_pending)
+            if tighter != effective_stop:
+                effective_stop = tighter
+                updates.append(TrackedUpdate(t, SignalUpdateKind.STOP_MOVED, f"new_stop={effective_stop:.8f}"))
+            ladder_pending = None
 
         stop_touched = (lo <= effective_stop) if side == 1 else (h >= effective_stop)
         if stop_touched:
             sigma = slippage_fraction(o, h, lo, costs, stress)
             exit_price = adverse_price(effective_stop, -side, sigma)
             fee = remaining * exit_price * fee_rate
-            reason = "STOP" if effective_stop == stop_price else "STOP_BREAKEVEN"
+            reason = "STOP" if effective_stop == stop_price else ("STOP_BREAKEVEN" if effective_stop == entry_fill_price else "STOP_TRAIL")
             legs.append(ClosedLeg(remaining, exit_price, fee, reason))
             updates.append(TrackedUpdate(t, SignalUpdateKind.CLOSED, f"reason={reason};fraction={remaining:.8f}"))
             remaining = 0.0
@@ -145,6 +157,8 @@ def track_signal(
                 updates.append(TrackedUpdate(t, SignalUpdateKind.TP_HIT, f"level={tag};fraction={frac:.8f};price={exit_price:.8f}"))
                 remaining -= frac
                 next_level += 1
+                if stop_after_tp is not None and next_level - 1 < len(stop_after_tp) and stop_after_tp[next_level - 1] is not None:
+                    ladder_pending = stop_after_tp[next_level - 1]
                 if next_level == 1 and move_stop_to_breakeven_after_first_tp and remaining > 1e-9:
                     effective_stop = entry_fill_price
                     updates.append(TrackedUpdate(t, SignalUpdateKind.STOP_MOVED, f"new_stop={entry_fill_price:.8f}"))

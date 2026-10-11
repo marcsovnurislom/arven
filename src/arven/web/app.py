@@ -179,6 +179,21 @@ def create_app(cfg: AppConfig, config_dir: Path | str | None = None, dist_dir: P
         payload = svc.read_json(data_dir / "s7_study" / f"trades_{period}.json")
         return payload if payload is not None else {"period": period, "trades": [], "summary": None}
 
+    strategy_trades_dir = data_dir / "strategy_trades"
+    trade_periods = ("development", "validation", "devval", "test", "forward")
+
+    @app.get("/api/strategy_trades/index")
+    def strategy_trades_index() -> dict[str, Any]:
+        """Which strategies and periods have exported trades (``scripts/strategy_trades_export.py``), with summaries."""
+        return {"entries": svc.read_json(strategy_trades_dir / "index.json") or []}
+
+    @app.get("/api/strategy_trades")
+    def strategy_trades(strategy: str = Query(..., pattern=r"^[a-z0-9_]{1,40}$"), period: str = Query("development")) -> dict[str, Any]:
+        if period not in trade_periods:
+            raise HTTPException(status_code=422, detail=f"period must be one of {trade_periods}")
+        payload = svc.read_json(strategy_trades_dir / strategy / f"{period}.json")
+        return payload if payload is not None else {"strategy": strategy, "period": period, "trades": [], "summary": None}
+
     trade_labels_path = data_dir / "s7_study" / "trade_labels.json"
 
     @app.get("/api/s7/trade_labels")
