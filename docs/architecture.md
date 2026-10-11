@@ -136,6 +136,20 @@ Driving loop:
 > NaN-tolerant feature group, see `data/adapters/binance_rest.py`); a CLI/Streamlit view beyond
 > `arven paper run/show/status` is not built (CLI first, per A9 - matches the architecture's own ordering).
 
+> **Live signal loop (2026-10-11, `src/arven/live/`, `config/live.yaml`; operations in `docs/LIVE_SIGNALS.md`).** The
+> signal-product strategies (S4-S7, Crowded Shorts) run in one always-on process, `arven live run`. It is a composition
+> layer on top of everything else: nothing below imports it, and it has no order code. Each strategy is a small adapter
+> with `scan`/`resolve` (`live/base.py`), registered by `kind` (`live/registry.py`) and enabled and parameterised in
+> `config/live.yaml`. The adapters call the research code itself (detectors, providers, `track_signal`, the S7
+> simulator, the Crowded Shorts rules), so backtest and live are one code path (CLAUDE.md rule 8). On the forward
+> period, the live adapters reproduced every S7 and Crowded Shorts research trade bit-identically. A 15m close is
+> evaluated only once its 1m data is complete, and stale data stops the tick (rule 5). The process also runs the
+> Stage 8 hourly paper run, so it is the only DuckDB writer.
+> **Changed decision (Stage 8 D2):** open interest *is* now REST-tailed, from the public `futures/data/*` endpoints,
+> on request (`include_open_interest`, used by the live loop). Reason: Crowded Shorts needs `oi_z`. The REST rows were
+> verified against the bulk `metrics` files and are stored under the bulk timestamp convention, so they form one
+> series with history.
+
 > **As implemented in Stage 10** (`src/arven/dashboard/`; details in `current_state.md`): the Streamlit
 > dashboard deferred at Stage 8 (A9's own ordering, above) is now built. It is a read-only presentation
 > layer - `src/arven/dashboard/data.py` only reads artifacts earlier stages already wrote (`run.json`,
@@ -184,6 +198,10 @@ arven/
 │   ├── backtest/                 # event loop, execution & cost model, portfolio, metrics, reports
 │   ├── signals/                  # Signal model, persistence, explanation payload
 │   ├── paper/                    # the paper-signal loop (Stage 8) - named `paper/`, not `live/`
+│   ├── engine/                   # signal-product engine: specs, multi-TF view, EngineSignal, S4-S7 + Crowded Shorts rules
+│   ├── live/                     # the always-on live signal loop over every enabled strategy (config/live.yaml)
+│   ├── telegram/                 # Telegram alerts, outbox, bot commands
+│   ├── web/                      # read-only FastAPI for the React app in web/
 │   ├── llm/                      # Anthropic client (Stage 9b); provider-agnostic interface, explanation/chat not yet built
 │   └── cli.py                    # entry points: ingest, backtest, train, signal
 ├── tests/

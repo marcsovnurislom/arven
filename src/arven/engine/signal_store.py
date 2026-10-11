@@ -56,6 +56,8 @@ def _signal_from_dict(d: dict) -> EngineSignal:
         risk_checks=tuple(d["risk_checks"]),
         versions=SignalVersions(v["feature_version"], v["config_hash"], v["git_commit"], v.get("data_fingerprint")),
         max_holding_minutes=d["max_holding_minutes"],
+        entry_type=d.get("entry_type", "market"),
+        valid_until_ms=d.get("valid_until_ms"),
     )
     if sig.signal_id != d["signal_id"]:
         raise ValueError(f"stored signal_id {d['signal_id']} does not match its own recomputed content hash {sig.signal_id}")

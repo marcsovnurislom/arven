@@ -14,6 +14,7 @@ class SignalUpdateKind(StrEnum):
     STOP_MOVED = "STOP_MOVED"  # e.g. moved to break-even after TP1
     CLOSED = "CLOSED"  # fully closed (stop, time stop, or a final rung) - the signal's life ends here
     CANCELLED = "CANCELLED"  # never filled (e.g. price never reached the planned entry)
+    FILLED = "FILLED"  # a resting (limit) entry was filled - market-entry signals are filled at once and never get one
 
 
 @dataclass(frozen=True, slots=True)

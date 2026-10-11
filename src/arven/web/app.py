@@ -23,7 +23,7 @@ from arven.core.time import to_ms, utc_now
 from arven.web import journal as jr
 from arven.web import service as svc
 
-HEARTBEAT_MAX_AGE_MS = 5 * 60_000
+HEARTBEAT_MAX_AGE_MS = 5 * 60_000  # a live tick can take a couple of minutes; longer than this without a check-in = stale
 DATA_STALE_MS = 3 * 3_600_000
 
 
@@ -44,10 +44,13 @@ def create_app(cfg: AppConfig, config_dir: Path | str | None = None, dist_dir: P
             raise HTTPException(status_code=503, detail=f"market database busy, retry in a moment ({exc})") from exc
 
     def heartbeat_state() -> dict[str, Any]:
-        hb = svc.read_json(paper_root / "heartbeat.json")
+        """The live signal process's heartbeat (``arven live run``), else the older Phase 5 paper runtime's."""
+        live_hb, paper_hb = svc.read_json(data_dir / "live" / "heartbeat.json"), svc.read_json(paper_root / "heartbeat.json")
+        hb = max((h for h in (live_hb, paper_hb) if h), key=lambda h: h.get("checked_at_ms", 0), default=None)
         now_ms = to_ms(utc_now())
         stale = hb is None or now_ms - hb.get("checked_at_ms", 0) > HEARTBEAT_MAX_AGE_MS
-        return {"present": hb is not None, "stale": stale, "heartbeat": hb}
+        source = None if hb is None else ("live" if hb is live_hb else "paper_runtime")
+        return {"present": hb is not None, "stale": stale, "heartbeat": hb, "source": source}
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
@@ -73,7 +76,7 @@ def create_app(cfg: AppConfig, config_dir: Path | str | None = None, dist_dir: P
             "data_stale": last_bar is None or now_ms - last_bar > DATA_STALE_MS,
             "runtime": heartbeat_state(),
             "signals_total": len(signals), "signals_last_24h": sum(1 for s in signals if s["event_time_ms"] >= day_ago),
-            "signals_open": sum(1 for s in signals if s["status"] != "closed"), "strategies": ids,
+            "signals_open": sum(1 for s in signals if s["status"] in ("open", "partial", "pending")), "strategies": ids,
             "strategies_summary": svc.read_json(paper_root / "strategies_summary.json"),
             "note": "paper simulation on real market data; not an exchange account and not evidence of profitability",
         }

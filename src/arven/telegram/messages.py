@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from arven.core.time import from_ms
 from arven.engine.signal import EngineSignal
 from arven.engine.signal_events import SignalUpdate, SignalUpdateKind
 
@@ -18,6 +19,7 @@ _UPDATE_VERB = {
     SignalUpdateKind.STOP_MOVED: "Stop moved",
     SignalUpdateKind.CLOSED: "Closed",
     SignalUpdateKind.CANCELLED: "Cancelled",
+    SignalUpdateKind.FILLED: "Entry filled",
 }
 
 
@@ -25,16 +27,31 @@ def _side_word(side: int) -> str:
     return "LONG" if side == 1 else "SHORT"
 
 
+def _version(v: str) -> str:
+    return v if v.startswith("v") else f"v{v}"
+
+
+def _utc(ms: int) -> str:
+    return from_ms(ms).strftime("%Y-%m-%d %H:%M UTC")
+
+
 def format_new_signal(signal: EngineSignal) -> str:
     tp_lines = "\n".join(
         f"  TP{i + 1}: {lvl.price:.2f} ({lvl.r_multiple:.2f}R, close {lvl.close_fraction:.0%})"
         for i, lvl in enumerate(signal.tp_ladder)
     )
+    if not signal.tp_ladder and signal.max_holding_minutes is not None:
+        tp_lines = f"  No take-profit: time exit after {signal.max_holding_minutes / 60:g} h"
+    if signal.entry_type == "limit":
+        until = f" (valid until {_utc(signal.valid_until_ms)})" if signal.valid_until_ms else ""
+        entry = f"Entry: LIMIT {signal.entry_reference:.2f}{until}"
+    else:
+        entry = f"Entry (ref): {signal.entry_reference:.2f}"
     reasons = "; ".join(signal.reasons[:3]) if signal.reasons else "(none recorded)"
     return (
         f"NEW SIGNAL [{signal.grade.value}]\n"
-        f"{signal.symbol} {_side_word(signal.side)}  ({signal.strategy_id} v{signal.strategy_version})\n"
-        f"Entry (ref): {signal.entry_reference:.2f}\n"
+        f"{signal.symbol} {_side_word(signal.side)}  ({signal.strategy_id} {_version(signal.strategy_version)})  {_utc(signal.event_time_ms)}\n"
+        f"{entry}\n"
         f"Stop: {signal.stop:.2f}\n"
         f"{tp_lines}\n"
         f"Risk: {signal.risk_fraction:.2%} of equity   Confidence: {signal.confidence:.0%}\n"
@@ -46,7 +63,8 @@ def format_new_signal(signal: EngineSignal) -> str:
 def format_signal_update(signal: EngineSignal, update: SignalUpdate) -> str:
     verb = _UPDATE_VERB[update.kind]
     return (
-        f"{verb}: {signal.symbol} {_side_word(signal.side)} ({signal.strategy_id})\n"
+        f"{verb}: {signal.symbol} {_side_word(signal.side)} ({signal.strategy_id})  {_utc(update.time_ms)}\n"
+        f"Signal of {_utc(signal.event_time_ms)}, entry {signal.entry_reference:.2f}, stop {signal.stop:.2f}\n"
         f"{update.detail}\n\n{DISCLAIMER}"
     )
 

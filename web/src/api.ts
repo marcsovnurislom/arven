@@ -18,14 +18,21 @@ export type Signal = {
   regime: string;
   reasons: string[];
   risk_checks: string[];
-  status: "open" | "partial" | "closed";
+  status: "pending" | "open" | "partial" | "closed" | "cancelled";
+  entry_type?: "market" | "limit";
+  valid_until_ms?: number | null;
+  max_holding_minutes?: number | null;
   updates: SignalUpdate[];
 };
 
 export type StrategyStats = {
+  title?: string;
   signals: number;
   closed: number;
   open: number;
+  pending?: number;
+  cancelled?: number;
+  error?: string | null;
   signals_per_week: number | null;
   total_r: number;
   mean_r: number | null;

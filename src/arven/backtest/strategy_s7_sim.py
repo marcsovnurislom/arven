@@ -37,12 +37,13 @@ import numpy as np
 
 from arven.backtest.costs import adverse_price, slippage_fraction, taker_fee_rate
 from arven.backtest.marketdata import MarketData
-from arven.backtest.paper_tracker import track_signal
+from arven.backtest.paper_tracker import TrackedUpdate, track_signal
 from arven.core.config import CostsConfig
 from arven.core.series import BarSeries
 from arven.engine.grading import Grade
 from arven.engine.ladder import ClosedLeg, resolve_legs
 from arven.engine.signal import EngineSignal, SignalVersions, TPLevel
+from arven.engine.signal_events import SignalUpdateKind
 from arven.engine.strategy_s7 import S7Params, S7Setup, atr, swing_highs, swing_lows
 from arven.engine.strategy_s7_plan import (
     OrientedSetup,
@@ -98,11 +99,28 @@ class S7Leg:
 
 
 @dataclass(frozen=True, slots=True)
+class S7Fill:
+    """One filled leg as the live loop reports it: the fill, the plan it was tracked with, and every tracked event so
+    far (also for a leg that is still open, which :class:`S7Leg` cannot describe)."""
+
+    weight: float
+    time_ms: int
+    price: float
+    stop: float
+    targets: tuple[float, ...]
+    fractions: tuple[float, ...]
+    events: tuple[TrackedUpdate, ...]
+    closed: bool
+
+
+@dataclass(frozen=True, slots=True)
 class S7Outcome:
     setup_index: int
     status: str  # "trade" | "busy" | "cancelled:<reason>" | "expired" | "skipped:<reason>" | "no_data" | "unresolved" | "end_of_data"
     legs: tuple[S7Leg, ...] = ()
     entry_time_ms: int | None = None
+    status_time_ms: int | None = None  # when a cancellation / expiry was decided (the TF bar close), for the live loop
+    fills: tuple[S7Fill, ...] = ()  # every filled leg with its events (also for "unresolved"), for the live loop
 
     @property
     def net_r(self) -> float:
@@ -161,6 +179,12 @@ def _resistances(ctx: _Context, s: S7Setup, known_at_ms: int, lookback_ms: int) 
     return np.concatenate(out)
 
 
+def planned_targets(ctx: _Context, s: S7Setup) -> tuple[tuple[float, float], ...]:
+    """TP1-TP3 ``(raw price, close fraction)`` as planned at the close of the arming bar (resistances known by then)."""
+    known_ms = int(ctx.tf.time_ms[s.arm_index]) + ctx.tf.tf_ms
+    return targets(s, ctx.tp, _resistances(ctx, s, known_ms, ctx.p.lookback_bars * ctx.tf.tf_ms))
+
+
 def _bar_at(market: MarketData, t_ms: int) -> int | None:
     i = market.first_at_or_after(t_ms)
     return i if i < len(market) and int(market.time_ms[i]) == t_ms else None
@@ -194,39 +218,43 @@ def _engine_signal(s: S7Setup, fill: float, stop: float, prices: tuple[float, ..
     )
 
 
-def _track_leg(ctx: _Context, s: S7Setup, os_: OrientedSetup, weight: float, fill_i: int, fill: float, market_order: bool) -> S7Leg | str:
-    """Resolve one filled leg; returns the leg or a status string (``skipped:...`` / ``unresolved``)."""
+def _track_leg(ctx: _Context, s: S7Setup, os_: OrientedSetup, weight: float, fill_i: int, fill: float, market_order: bool) -> tuple[S7Leg | str, S7Fill | None]:
+    """Resolve one filled leg; returns the leg or a status string (``skipped:...`` / ``unresolved``), and the fill as
+    the live loop reports it (``None`` if the leg was skipped)."""
     m, tp, side = ctx.market, ctx.tp, s.side
     stop = stop_price(s, tp)
-    known_ms = int(ctx.tf.time_ms[s.arm_index]) + ctx.tf.tf_ms
-    tgt = targets(s, tp, _resistances(ctx, s, known_ms, ctx.p.lookback_bars * ctx.tf.tf_ms))
+    tgt = planned_targets(ctx, s)
     prices = tuple(px for px, _ in tgt)
     fracs = tuple(f for _, f in tgt)
     rs = ladder_r(fill, stop, side, prices)
     if rs is None:
-        return "skipped:invalid_geometry"
+        return "skipped:invalid_geometry", None
     if tp.min_tp1_r is not None and rs[0] < tp.min_tp1_r:
-        return "skipped:tp1_below_min_r"
+        return "skipped:tp1_below_min_r", None
     prices, fracs, stop_ladder, be_at_r = management_plan(s, tp, fill, prices, fracs)
     rs = ladder_r(fill, stop, side, prices)
     if rs is None:
-        return "skipped:invalid_geometry"
+        return "skipped:invalid_geometry", None
     risk = side * (fill - stop)
     fee_rate = taker_fee_rate(ctx.costs)
     entry_fee_r = fill * fee_rate / risk
     fill_ms = int(m.time_ms[fill_i])
+
+    def as_fill(events: tuple[TrackedUpdate, ...], closed: bool) -> S7Fill:
+        return S7Fill(weight, fill_ms, fill, stop, prices, fracs, events, closed)
 
     if not market_order:
         o, h, lo = float(m.open[fill_i]), float(m.high[fill_i]), float(m.low[fill_i])
         if (lo <= stop) if side == 1 else (h >= stop):  # stop also touched in the fill bar: assume the worse order
             exit_px = adverse_price(stop, -side, slippage_fraction(o, h, lo, ctx.costs, ctx.stress))
             res = resolve_legs(fill, stop, side, [ClosedLeg(1.0, exit_px, exit_px * fee_rate, "STOP")])
-            return S7Leg(weight, fill_ms, fill, stop, res.r_multiple - entry_fee_r, fill_ms, fill_ms, ("STOP",), rs)
+            ev = (TrackedUpdate(fill_ms, SignalUpdateKind.CLOSED, "reason=STOP;fraction=1.00000000"),)
+            return S7Leg(weight, fill_ms, fill, stop, res.r_multiple - entry_fee_r, fill_ms, fill_ms, ("STOP",), rs), as_fill(ev, True)
         start_i = fill_i + 1
     else:
         start_i = fill_i
     if start_i >= len(m):
-        return "unresolved"
+        return "unresolved", as_fill((), False)
     start_ms = int(m.time_ms[start_i])
 
     max_minutes = None
@@ -239,7 +267,8 @@ def _track_leg(ctx: _Context, s: S7Setup, os_: OrientedSetup, weight: float, fil
                 o, h, lo = float(m.open[start_i]), float(m.high[start_i]), float(m.low[start_i])
                 exit_px = adverse_price(o, -side, slippage_fraction(o, h, lo, ctx.costs, ctx.stress))
                 res = resolve_legs(fill, stop, side, [ClosedLeg(1.0, exit_px, exit_px * fee_rate, "S3_CLOSE")])
-                return S7Leg(weight, fill_ms, fill, stop, res.r_multiple - entry_fee_r, start_ms, start_ms, ("S3_CLOSE",), rs)
+                ev = (TrackedUpdate(start_ms, SignalUpdateKind.CLOSED, "reason=S3_CLOSE;fraction=1.00000000"),)
+                return S7Leg(weight, fill_ms, fill, stop, res.r_multiple - entry_fee_r, start_ms, start_ms, ("S3_CLOSE",), rs), as_fill(ev, True)
             max_minutes = (exit_ms - start_ms) // MINUTE_MS
 
     sig = _engine_signal(s, fill, stop, prices, rs, fracs, start_ms, max_minutes)
@@ -247,9 +276,10 @@ def _track_leg(ctx: _Context, s: S7Setup, os_: OrientedSetup, weight: float, fil
                            stop_after_tp=stop_ladder, breakeven_at_r=be_at_r)
     res = tracked.resolution
     if res is None or not res.fully_closed:
-        return "unresolved"
+        return "unresolved", as_fill(tracked.updates, False)
     closes = [u.time_ms for u in tracked.updates if u.kind.name in ("TP_HIT", "CLOSED")]
-    return S7Leg(weight, fill_ms, fill, stop, res.r_multiple - entry_fee_r, max(closes), min(closes), tuple(lg.exit_reason for lg in res.legs), rs)
+    leg = S7Leg(weight, fill_ms, fill, stop, res.r_multiple - entry_fee_r, max(closes), min(closes), tuple(lg.exit_reason for lg in res.legs), rs)
+    return leg, as_fill(tracked.updates, True)
 
 
 def simulate_setup(ctx: _Context, s: S7Setup, index: int) -> S7Outcome:
@@ -266,20 +296,19 @@ def simulate_setup(ctx: _Context, s: S7Setup, index: int) -> S7Outcome:
         w0 = int(tf.time_ms[j])
         w1 = w0 + tf.tf_ms
         if not math.isfinite(c_tf[j]):
-            return S7Outcome(index, "no_data")
+            return S7Outcome(index, "no_data", status_time_ms=w1)
         if not orders:  # E1 on the lower timeframe
             k0, k1 = (int(x) for x in np.searchsorted(lower.time_ms, [w0, w1]))
             k, touched = e1_trigger(os_, lo_lw[k0:k1], c_lw[k0:k1], touched)
             if k is not None:
                 entry_ms = int(lower.time_ms[k0 + k]) + lower.tf_ms
                 if entry_ms >= w1 and (reason := tf_cancel_reason(os_, j, o_tf, lo_tf, c_tf, tf.volume, ctx.tf_atr, ctx.p)):
-                    return S7Outcome(index, f"cancelled:{reason}")
+                    return S7Outcome(index, f"cancelled:{reason}", status_time_ms=w1)
                 i = _bar_at(m, entry_ms)
                 if i is None:
-                    return S7Outcome(index, "no_data")
+                    return S7Outcome(index, "no_data", status_time_ms=entry_ms)
                 fill = adverse_price(float(m.open[i]), side, _sigma(ctx, i))
-                leg = _track_leg(ctx, s, os_, 1.0, i, fill, market_order=True)
-                return _outcome(index, entry_ms, (leg,))
+                return _outcome(index, entry_ms, (_track_leg(ctx, s, os_, 1.0, i, fill, market_order=True),))
         else:
             i0, i1 = m.first_at_or_after(w0), m.first_at_or_after(w1)
             first = _limit_fill(ctx, side, orders[0][0], i0, i1)
@@ -287,14 +316,17 @@ def simulate_setup(ctx: _Context, s: S7Setup, index: int) -> S7Outcome:
                 return _limit_entry(ctx, s, os_, index, orders, first)
         reason = tf_cancel_reason(os_, j, o_tf, lo_tf, c_tf, tf.volume, ctx.tf_atr, ctx.p)
         if reason:
-            return S7Outcome(index, f"cancelled:{reason}")
-    return S7Outcome(index, "expired" if last_j < len(tf) - 1 else "end_of_data")
+            return S7Outcome(index, f"cancelled:{reason}", status_time_ms=w1)
+    if last_j < len(tf) - 1:
+        return S7Outcome(index, "expired", status_time_ms=int(tf.time_ms[last_j]) + tf.tf_ms)
+    return S7Outcome(index, "end_of_data")
 
 
 def _limit_entry(ctx: _Context, s: S7Setup, os_: OrientedSetup, index: int, orders: tuple[tuple[float, float], ...], first: tuple[int, float]) -> S7Outcome:
     i, px = first
-    leg1 = _track_leg(ctx, s, os_, orders[0][1], i, px, market_order=False)
-    legs: list[S7Leg | str] = [leg1]
+    first_leg = _track_leg(ctx, s, os_, orders[0][1], i, px, market_order=False)
+    legs = [first_leg]
+    leg1 = first_leg[0]
     if len(orders) > 1 and isinstance(leg1, S7Leg):
         # the deeper half works until the first exit event, that bar included: if price reached the stop or TP1 in that
         # bar and also the deeper limit, the limit is assumed filled (for a stop that is the worse outcome)
@@ -305,11 +337,12 @@ def _limit_entry(ctx: _Context, s: S7Setup, os_: OrientedSetup, index: int, orde
     return _outcome(index, int(ctx.market.time_ms[i]), tuple(legs))
 
 
-def _outcome(index: int, entry_ms: int, legs: tuple[S7Leg | str, ...]) -> S7Outcome:
-    for leg in legs:
+def _outcome(index: int, entry_ms: int, legs: tuple[tuple[S7Leg | str, S7Fill | None], ...]) -> S7Outcome:
+    fills = tuple(f for _, f in legs if f is not None)
+    for leg, _ in legs:
         if isinstance(leg, str):
-            return S7Outcome(index, leg, entry_time_ms=entry_ms)
-    return S7Outcome(index, "trade", tuple(legs), entry_ms)  # type: ignore[arg-type]
+            return S7Outcome(index, leg, entry_time_ms=entry_ms, fills=fills)
+    return S7Outcome(index, "trade", tuple(leg for leg, _ in legs), entry_ms, fills=fills)  # type: ignore[misc]
 
 
 def run_setups(ctx: _Context, setups: list[S7Setup]) -> list[S7Outcome]:

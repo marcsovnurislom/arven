@@ -91,3 +91,10 @@ def test_format_daily_summary_with_sections():
 def test_format_daily_summary_with_no_sections():
     text = format_daily_summary("2026-10-08", ())
     assert "No signals today." in text
+
+
+def test_limit_entry_and_time_exit_are_spelled_out():
+    lim = format_new_signal(make_signal(entry_type="limit", valid_until_ms=3_600_000))
+    assert "Entry: LIMIT 100.00 (valid until 1970-01-01 01:00 UTC)" in lim
+    timed = format_new_signal(make_signal(tp_ladder=(), max_holding_minutes=1440))
+    assert "No take-profit: time exit after 24 h" in timed and "TP1" not in timed

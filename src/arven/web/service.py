@@ -57,12 +57,18 @@ def screener_row(con: duckdb.DuckDBPyConnection, symbol: str) -> dict[str, Any] 
     }
 
 
-def _signal_status(updates: list) -> str:
+def _signal_status(updates: list, entry_type: str = "market") -> str:
+    """closed / cancelled (a resting entry withdrawn unfilled) / partial (a TP filled) / open / pending (a resting
+    limit entry not filled yet)."""
     kinds = {u.kind for u in updates}
     if SignalUpdateKind.CLOSED in kinds:
         return "closed"
+    if SignalUpdateKind.CANCELLED in kinds:
+        return "cancelled"
     if SignalUpdateKind.TP_HIT in kinds:
         return "partial"
+    if entry_type == "limit" and SignalUpdateKind.FILLED not in kinds:
+        return "pending"
     return "open"
 
 
@@ -74,7 +80,8 @@ def list_signals(root: Path, strategy_ids: list[str], limit: int = 100, strategy
             updates_by_id.setdefault(u.signal_id, []).append(u)
         for s in read_signals(root, sid):
             ups = updates_by_id.get(s.signal_id, [])
-            out.append({**s.to_dict(), "status": _signal_status(ups), "updates": [u.to_dict() for u in ups]})
+            out.append({**s.to_dict(), "entry_type": s.entry_type, "valid_until_ms": s.valid_until_ms,
+                        "status": _signal_status(ups, s.entry_type), "updates": [u.to_dict() for u in ups]})
     out.sort(key=lambda d: d["event_time_ms"], reverse=True)
     return out[: max(1, min(limit, 1000))]
 

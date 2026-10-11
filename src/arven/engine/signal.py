@@ -51,9 +51,11 @@ def tp_ladder_from_r_multiples(
     return tuple(TPLevel.from_r_multiple(r, f, entry=entry, stop=stop, side=side) for r, f in levels)
 
 
-def _validate_ladder(tp_ladder: tuple[TPLevel, ...], side: int, entry: float, stop: float) -> None:
+def _validate_ladder(tp_ladder: tuple[TPLevel, ...], side: int, entry: float, stop: float, time_exit: bool = False) -> None:
     if not tp_ladder:
-        raise ValueError("tp_ladder must have at least one level")
+        if time_exit:
+            return  # a plan that exits on time or at the stop only (e.g. "Crowded Shorts": out 24 h after the last signal)
+        raise ValueError("tp_ladder must have at least one level (or the signal must have a time exit)")
     total = sum(level.close_fraction for level in tp_ladder)
     if total > 1.0 + 1e-9:
         raise ValueError(f"tp_ladder close_fractions must not sum to more than 1.0, got {total}")
@@ -99,6 +101,11 @@ class EngineSignal:
     risk_checks: tuple[str, ...]
     versions: SignalVersions
     max_holding_minutes: int | None = None
+    # a resting limit entry at ``entry_reference`` (``"limit"``) instead of a market entry at once (``"market"``), and
+    # the time the unfilled order is withdrawn (``None``: no fixed expiry, or a market entry). Both are left out of the
+    # hash at their defaults, so every signal stored before they existed keeps its ``signal_id``.
+    entry_type: str = "market"
+    valid_until_ms: int | None = None
     signal_id: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -114,13 +121,17 @@ class EngineSignal:
             raise ValueError("stop must be finite and positive")
         if (self.side == 1 and self.stop >= self.entry_reference) or (self.side == -1 and self.stop <= self.entry_reference):
             raise ValueError("stop must be on the losing side of entry_reference")
-        _validate_ladder(self.tp_ladder, self.side, self.entry_reference, self.stop)
+        _validate_ladder(self.tp_ladder, self.side, self.entry_reference, self.stop, self.max_holding_minutes is not None)
         if not (math.isfinite(self.risk_fraction) and self.risk_fraction > 0):
             raise ValueError("risk_fraction must be finite and positive")
         if not (math.isfinite(self.confidence) and 0.0 <= self.confidence <= 1.0):
             raise ValueError("confidence must be in [0, 1]")
         if self.max_holding_minutes is not None and self.max_holding_minutes < 1:
             raise ValueError("max_holding_minutes must be >= 1")
+        if self.entry_type not in ("market", "limit"):
+            raise ValueError("entry_type must be 'market' or 'limit'")
+        if self.valid_until_ms is not None and self.valid_until_ms <= self.event_time_ms:
+            raise ValueError("valid_until_ms must be after event_time_ms")
         object.__setattr__(self, "signal_id", self._compute_signal_id())
 
     @property
@@ -151,7 +162,9 @@ class EngineSignal:
                 "data_fingerprint": self.versions.data_fingerprint,
             },
             "max_holding_minutes": self.max_holding_minutes,
-        }
+        } | ({} if self.entry_type == "market" else {"entry_type": self.entry_type}) | (
+            {} if self.valid_until_ms is None else {"valid_until_ms": self.valid_until_ms}
+        )
 
     def _compute_signal_id(self) -> str:
         canonical = json.dumps(self._canonical_dict(), sort_keys=True, separators=(",", ":"))

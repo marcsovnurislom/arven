@@ -106,3 +106,21 @@ def test_to_dict_round_trips_through_json_safe_types():
     d = make().to_dict()
     json.dumps(d)  # must not raise
     assert d["tp_ladder"] == [[1.0, 0.5, 102.0], [2.0, 0.5, 104.0]]
+
+
+def test_empty_ladder_is_allowed_only_with_a_time_exit():
+    sig = make(tp_ladder=(), max_holding_minutes=24 * 60)
+    assert sig.tp_ladder == () and sig.r_plan == ()
+    with pytest.raises(ValueError):
+        make(tp_ladder=(), max_holding_minutes=None)
+
+
+def test_limit_entry_fields_are_hashed_only_when_set():
+    market = make()
+    assert "entry_type" not in market.to_dict() and "valid_until_ms" not in market.to_dict()
+    limit = make(entry_type="limit", valid_until_ms=market.event_time_ms + 60_000)
+    assert limit.to_dict()["entry_type"] == "limit" and limit.signal_id != market.signal_id
+    with pytest.raises(ValueError):
+        make(entry_type="stop")
+    with pytest.raises(ValueError):
+        make(valid_until_ms=market.event_time_ms)

@@ -7,7 +7,7 @@ import { useI18n } from "../i18n";
 import { useLoad, useOverviewStream } from "../hooks";
 import { Card, Chip, Empty, ErrorBox, PageTitle, Skeleton, fmt, fmtPct, fmtR, signClass, fmtTime } from "../ui";
 
-const COLOR: Record<string, string> = { s4_impulse_retest: "#d9b256", s5_squeeze_breakout: "#6aa8ff", s6_trend_pullback: "#34d399" };
+const COLOR: Record<string, string> = { s4_impulse_retest: "#d9b256", s5_squeeze_breakout: "#6aa8ff", s6_trend_pullback: "#34d399", s7_trend_break_fib: "#c084fc", crowded_shorts: "#f59e7a" };
 
 export function Overview() {
   const { t } = useI18n();

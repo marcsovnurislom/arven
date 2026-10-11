@@ -69,3 +69,16 @@ def test_a_tampered_stored_signal_is_rejected_on_read(tmp_path):
 
     with pytest.raises(ValueError):
         read_signals(tmp_path, "s4")
+
+
+def test_limit_and_time_exit_signals_round_trip(tmp_path):
+    import dataclasses
+
+    from arven.engine.signal_store import append_signal, read_signals
+
+    base = make_signal()
+    lim = dataclasses.replace(base, entry_type="limit", valid_until_ms=base.event_time_ms + 3_600_000)
+    timed = dataclasses.replace(base, tp_ladder=(), max_holding_minutes=1440)
+    append_signal(tmp_path, lim)
+    append_signal(tmp_path, timed)
+    assert read_signals(tmp_path, base.strategy_id) == [lim, timed]

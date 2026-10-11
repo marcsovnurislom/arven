@@ -5,9 +5,10 @@ market-data history, not a separate "live" copy); only the source differs. One `
 REST page (``rest/<symbol>/<dataset>/<page_start_ms>``), so a re-run safely replaces exactly the rows that
 page covers (``DELETE`` + ``INSERT OR REPLACE``, same idiom ``ingestion.py`` uses per bulk file).
 
-Open interest / top-trader / taker long-short ratios are not updated here (see ``binance_rest``'s module
-docstring) - they simply go stale/NaN for the live period, which the existing staleness policy already
-handles safely.
+Open interest and the long/short ratios are tailed only on request (``tail(..., include_open_interest=True)``, used by
+the live signal loop): Binance serves them for the latest 30 days only, so an older gap stays a gap (NaN features,
+the existing staleness policy). Stored under the bulk ``create_time`` convention (see ``binance_rest``) with the same
+``available_at_ms = ts_ms + open_interest_availability_delay_seconds`` as the bulk loader.
 """
 
 from __future__ import annotations
@@ -22,12 +23,24 @@ import duckdb
 
 from arven.core.config import AppConfig
 from arven.core.timeframes import Timeframe
-from arven.data.adapters.binance_rest import RestFunding, RestKline, fetch_funding_rate, fetch_klines
+from arven.data.adapters.binance_rest import (
+    OI_COLUMNS,
+    REST_STATS_LIMIT,
+    STATS_PERIOD_MS,
+    RestFunding,
+    RestKline,
+    RestOpenInterest,
+    fetch_funding_rate,
+    fetch_klines,
+    fetch_open_interest_stats,
+)
 from arven.data.download import Downloader, RetryPolicy
 from arven.data.storage.db import now_ms
 
 FUNDING_GRID_MS = 3_600_000
 FUNDING_MAX_DRIFT_MS = 1_000
+OI_REST_HISTORY_MS = 29 * 86_400_000  # Binance keeps 30 days of these statistics; stay a day inside that
+OI_REFETCH_MS = 1_800_000
 
 
 def _sql_path(path: Path) -> str:
@@ -71,6 +84,8 @@ class RestTailSummary:
     klines_written: int = 0
     funding_fetched: int = 0
     funding_written: int = 0
+    oi_fetched: int = 0
+    oi_written: int = 0
     pages: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -131,6 +146,19 @@ def _write_funding(
     return len(normalized)
 
 
+def _write_open_interest(
+    con: duckdb.DuckDBPyConnection, symbol: str, rows: list[RestOpenInterest], source_key: str, delay_ms: int,
+) -> int:
+    ingested_at = now_ms()
+    con.execute("DELETE FROM open_interest WHERE source_key = ?", [source_key])
+    cols = ["symbol", "ts_ms", "available_at_ms", *OI_COLUMNS, "source_key", "ingested_at_ms"]
+    types = {"symbol": "VARCHAR", "ts_ms": "BIGINT", "available_at_ms": "BIGINT", **{c: "DOUBLE" for c in OI_COLUMNS},
+             "source_key": "VARCHAR", "ingested_at_ms": "BIGINT"}
+    data = [(symbol, r.ts_ms, r.ts_ms + delay_ms, *(r.values[c] for c in OI_COLUMNS), source_key, ingested_at) for r in rows]
+    _bulk_insert_or_replace(con, "open_interest", cols, types, data)
+    return len(rows)
+
+
 class RestIngestor:
     def __init__(self, cfg: AppConfig, con: duckdb.DuckDBPyConnection, downloader: Downloader | None = None) -> None:
         self.cfg = cfg
@@ -139,12 +167,43 @@ class RestIngestor:
         self.symbol = cfg.market.symbol
         self.base_url = cfg.download.rest_base_url
 
-    def tail(self, end_ms: int) -> RestTailSummary:
-        """Fetch and store every closed 1m bar and funding settlement in ``(last stored, end_ms)``."""
+    def tail(self, end_ms: int, *, include_open_interest: bool = False) -> RestTailSummary:
+        """Fetch and store every closed 1m bar and funding settlement in ``(last stored, end_ms)`` (and, if asked, the
+        5-minute open-interest statistics)."""
         summary = RestTailSummary()
         self._tail_klines(end_ms, summary)
         self._tail_funding(end_ms, summary)
+        if include_open_interest:
+            self._tail_open_interest(end_ms, summary)
         return summary
+
+    def _tail_open_interest(self, end_ms: int, summary: RestTailSummary) -> None:
+        last = _last_stored_ms(self.con, "open_interest", "ts_ms", self.symbol)
+        if last is None:
+            return  # no history at all: the bulk backfill's job, as for klines
+        # re-read the last half hour of REST rows too (an endpoint can publish a 5-minute row a little later than the
+        # others); never re-read rows that came from a bulk file (more decimals than the REST ratios)
+        row = self.con.execute(
+            "SELECT max(ts_ms) FROM open_interest WHERE symbol = ? AND source_key NOT LIKE 'rest/%'", [self.symbol]
+        ).fetchone()
+        last_bulk = int(row[0]) if row and row[0] is not None else last
+        resume = max(min(last, last - OI_REFETCH_MS), last_bulk) + STATS_PERIOD_MS
+        cursor = max(resume, (end_ms - OI_REST_HISTORY_MS) // STATS_PERIOD_MS * STATS_PERIOD_MS)
+        delay_ms = self.cfg.data.open_interest_availability_delay_seconds * 1000
+        while cursor < end_ms:
+            page_end = min(end_ms, cursor + REST_STATS_LIMIT * STATS_PERIOD_MS)
+            try:
+                page = fetch_open_interest_stats(self.downloader, self.base_url, self.symbol, cursor, page_end)
+            except Exception as exc:  # noqa: BLE001 - recorded, not swallowed
+                summary.errors.append(f"openInterest@{cursor}: {exc}")
+                return
+            summary.pages += 1
+            summary.oi_fetched += len(page)
+            if page:
+                summary.oi_written += _write_open_interest(self.con, self.symbol, page, f"rest/{self.symbol}/openInterest/{cursor}", delay_ms)
+            elif page_end >= end_ms:
+                return
+            cursor = page_end
 
     def _tail_klines(self, end_ms: int, summary: RestTailSummary) -> None:
         tf_ms = Timeframe.M1.ms

@@ -59,6 +59,7 @@ def latest_forward_window_end_ms(app: AppConfig, now=None) -> int:
 
 def update_market_data(
     app: AppConfig, con: duckdb.DuckDBPyConnection, end_ms: int, downloader: Downloader | None = None, now=None,
+    *, include_open_interest: bool = False,
 ) -> RestTailSummary:
     """REST-tail 1m klines and funding up to the latest fully-closed 1m bar, then resample exactly the range
     the new 1m bars could affect: from a small buffer before whatever was already stored (so the bucket
@@ -70,12 +71,12 @@ def update_market_data(
     which starved every feature after it of derived bars and produced zero decisions all period). Open
     interest is not updated here (Stage 8 scope decision, see ``data.adapters.binance_rest``'s module
     docstring): it simply goes stale/NaN for the forward period, which the existing staleness policy already
-    handles. ``downloader`` is injectable so tests never touch the real network (mirrors ``Ingestor``'s own
+    handles - unless ``include_open_interest`` (the live signal loop, which needs ``oi_z``). ``downloader`` is injectable so tests never touch the real network (mirrors ``Ingestor``'s own
     constructor parameter). ``now`` must be the *same* wall-clock reading ``run_paper_tick`` used for
     ``end_ms`` (never read independently here), so one tick never mixes two different ideas of "now"."""
     last_before_tail = _last_stored_1m_ms(con, app.market.symbol)
     m1_end_ms = to_ms(now or utc_now()) // Timeframe.M1.ms * Timeframe.M1.ms  # last fully-closed 1m bar
-    summary = RestIngestor(app, con, downloader).tail(max(m1_end_ms, end_ms))
+    summary = RestIngestor(app, con, downloader).tail(max(m1_end_ms, end_ms), include_open_interest=include_open_interest)
     if summary.klines_written:
         anchor = last_before_tail if last_before_tail is not None else m1_end_ms
         lo = max(to_ms(app.data.history_start), anchor - RESAMPLE_BOUNDARY_BUFFER_MS)

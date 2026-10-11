@@ -1,0 +1,235 @@
+"""One tick of the live signal loop (the composition root - all database / network / file I/O lives here).
+
+1. REST-update the market data (1m klines, funding and - for Crowded Shorts - open interest), resample.
+2. Decide how far the data is complete: ``through_ms`` = the last 15m close whose 1m bars are all stored (and at least
+   ``event_delay_seconds`` old). If the newest 1m bar is older than ``max_data_age_seconds`` the data is **stale**: the
+   tick stops here - no strategy is asked for anything (CLAUDE.md rule 5: stale data => NO_TRADE), cursors stay put,
+   and the next fresh tick catches up (catch-up signals are stored, but alerted only if recent).
+3. Every enabled strategy (``config/live.yaml``) scans the decision times since its own cursor; new signals are
+   appended to the signal store (``<data_dir>/signals/<strategy_id>/``), never twice.
+4. Every stored signal is replayed on the 1m data (fill, TP hits, stop moves, cancellation, close) and its new updates
+   are appended; recent new signals and updates are queued for Telegram (the outbox de-duplicates).
+5. A summary for the web app / bot (``<data_dir>/paper/strategies_summary.json``).
+
+Idempotent and restart-safe: cursors are persisted per strategy (``<data_dir>/paper/strategies_cursor.json``, the
+same file the forward evaluation of S4-S6 has always used, so their history continues); a strategy whose scan fails
+keeps its cursor and is retried next tick, the others carry on. Nothing here places an order (CLAUDE.md rule 12).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import yaml
+
+from arven.backtest.marketdata import MarketData, align_funding
+from arven.core.config import AppConfig, CostsConfig
+from arven.core.features_config import FeaturesConfig
+from arven.core.live_config import LiveConfig
+from arven.core.splitguard import BacktestPeriod, SplitViolation
+from arven.core.time import to_ms, utc_now
+from arven.core.timeframes import Timeframe
+from arven.data.reader import load_1m_bars, load_feature_inputs, load_funding_window, open_readonly
+from arven.data.rest_ingestion import RestTailSummary
+from arven.data.storage.db import connect, git_commit
+from arven.engine.signal import EngineSignal
+from arven.engine.signal_store import append_signal, append_update, read_signals, read_updates
+from arven.live.base import LiveContext, LiveOutcome, LiveStrategy
+from arven.live.registry import build_strategies, needs_features
+from arven.live.strategies import natural_key
+from arven.paper.runs import latest_forward_window_end_ms, load_paper_inputs, paper_dir, update_market_data
+from arven.paper.strategies_forward import SignalOutcome, agreement_summary, trade_log
+from arven.runs import make_guard
+
+MIN15 = Timeframe.M15.ms
+MIN1 = Timeframe.M1.ms
+HOUR_MS = 3_600_000
+WEEK_MS = 7 * 86_400_000
+
+
+def load_costs(config_dir: Path, name: str) -> CostsConfig:
+    return CostsConfig.model_validate(yaml.safe_load((config_dir / name).read_text(encoding="utf-8")))
+
+
+def complete_through_ms(last_1m_open_ms: int | None, now_ms: int, event_delay_ms: int) -> int | None:
+    """The last 15m close covered by stored 1m data and at least ``event_delay_ms`` in the past (None: no data)."""
+    if last_1m_open_ms is None:
+        return None
+    by_data = (last_1m_open_ms + MIN1) // MIN15 * MIN15
+    by_clock = (now_ms - event_delay_ms) // MIN15 * MIN15
+    return min(by_data, by_clock)
+
+
+@dataclass
+class StrategyTick:
+    new_signals: list[EngineSignal] = field(default_factory=list)
+    new_updates: int = 0
+    outcomes: list[LiveOutcome] = field(default_factory=list)
+    error: str | None = None
+
+
+@dataclass
+class LiveTickOutcome:
+    status: str  # "ok" | "stale" | "not_started" | "no_data" | "error"
+    rest: RestTailSummary | None
+    through_ms: int | None = None
+    last_1m_ms: int | None = None
+    strategies: dict[str, StrategyTick] = field(default_factory=dict)
+    queued_alerts: int = 0
+    summary: dict[str, Any] | None = None
+    detail: str = ""
+
+    @property
+    def errors(self) -> list[str]:
+        out = list(self.rest.errors) if self.rest else []
+        out += [f"{sid}: {st.error}" for sid, st in self.strategies.items() if st.error]
+        return out
+
+
+def _read_json(path: Path, default: Any) -> Any:
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
+
+
+def _update_event_type(u: Any) -> str:
+    digest = hashlib.sha256(f"{u.time_ms}|{u.kind.value}|{u.detail}".encode()).hexdigest()[:16]
+    return f"update:{u.kind.value}:{digest}"
+
+
+def summarize(outcomes: Sequence[LiveOutcome], weeks: float) -> dict[str, Any]:
+    closed = [o.net_r for o in outcomes if o.state == "closed" and o.net_r is not None]
+    states = [o.state for o in outcomes]
+    return {
+        "signals": len(outcomes), "closed": len(closed), "open": states.count("open"), "pending": states.count("pending"),
+        "cancelled": states.count("cancelled"), "signals_per_week": len(outcomes) / weeks if weeks > 0 else None,
+        "total_r": float(np.sum(closed)) if closed else 0.0, "mean_r": float(np.mean(closed)) if closed else None,
+        "win_rate": float(np.mean(np.array(closed) > 0)) if closed else None,
+    }
+
+
+def run_live_tick(
+    app: AppConfig, fcfg: FeaturesConfig, live: LiveConfig, config_dir: Path, *, now: datetime | None = None, downloader=None,
+    chat_ids: frozenset[str] = frozenset(), strategies: list[LiveStrategy] | None = None, telegram_enqueue=None,
+) -> LiveTickOutcome:
+    """One tick (see the module docstring). ``telegram_enqueue(con, signal_id, event_type, chat_id, text, now_ms)``
+    is injectable for tests; by default the real outbox."""
+    from arven.telegram.messages import format_new_signal, format_signal_update
+    from arven.telegram.outbox import enqueue
+
+    now = now or utc_now()
+    now_ms = to_ms(now)
+    strategies = strategies if strategies is not None else build_strategies(live)
+    costs = load_costs(config_dir, live.cost_profile)
+    signals_root = app.data.data_dir / "signals"
+    root = paper_dir(app)
+    root.mkdir(parents=True, exist_ok=True)
+    cursor_path, summary_path = root / "strategies_cursor.json", root / "strategies_summary.json"
+
+    end_ms = latest_forward_window_end_ms(app, now)
+    with connect(app.data.database_path) as con:
+        rest = update_market_data(app, con, end_ms, downloader, now, include_open_interest=live.include_open_interest)
+    try:
+        window = make_guard(app).resolve(BacktestPeriod.FORWARD, end_ms=end_ms)
+    except SplitViolation:
+        return LiveTickOutcome("not_started", rest, detail="forward_start has not arrived yet")
+
+    con = open_readonly(app.data.database_path)
+    try:
+        bars = load_feature_inputs(con, app, end=now).bars
+        ranges: list[dict[str, Any]] = []
+        m1 = load_1m_bars(con, app.market.symbol, window, ranges)
+        f_t, f_r = load_funding_window(con, app.market.symbol, window, ranges)
+    finally:
+        con.close()
+    if len(m1["time_ms"]) == 0:
+        return LiveTickOutcome("no_data", rest, detail="no 1m bars in the forward window")
+    interval_ms = app.costs.funding.default_interval_hours * HOUR_MS
+    ft, fr = align_funding(f_t, f_r, window.start_ms, window.end_ms, interval_ms)
+    market = MarketData(m1["time_ms"], m1["open"], m1["high"], m1["low"], m1["close"], window.start_ms, window.end_ms, ft, fr, interval_ms)
+
+    last_1m = int(m1["time_ms"][-1])
+    through = complete_through_ms(last_1m, now_ms, live.event_delay_seconds * 1000)
+    m15 = bars[Timeframe.M15]
+    through = min(through, int(m15.open_time_ms[-1]) + MIN15) if len(m15) else through
+    stale = now_ms - (last_1m + MIN1) > live.max_data_age_seconds * 1000
+    features_loader = (lambda: load_paper_inputs(app, fcfg, window).features) if needs_features(live) else None
+    ctx = LiveContext(app, fcfg, costs, window, bars, market, through, fcfg.version, fcfg.config_hash(), git_commit(), features_loader)
+    outcome = LiveTickOutcome("stale" if stale else "ok", rest, through, last_1m,
+                              detail=f"newest 1m bar is {(now_ms - last_1m - MIN1) / 1000:.0f}s old" if stale else "")
+    if stale:
+        return outcome
+
+    cursors: dict[str, int] = _read_json(cursor_path, {})
+    alerts: list[tuple[str, str, str]] = []  # (signal_id, event_type, text)
+    recency_ms = int(live.alert_recency_hours * HOUR_MS)
+    for strat in strategies:
+        sid = strat.strategy_id
+        st = outcome.strategies[sid] = StrategyTick()
+        try:
+            stored = read_signals(signals_root, sid)
+            after = cursors.get(sid, window.start_ms - 1)
+            known = {natural_key(s) for s in stored}
+            for s in strat.scan(ctx, after, through, stored):
+                if natural_key(s) in known:
+                    continue
+                known.add(natural_key(s))
+                append_signal(signals_root, s)
+                st.new_signals.append(s)
+                if now_ms - s.event_time_ms <= recency_ms:
+                    alerts.append((s.signal_id, "new_signal", format_new_signal(s)))
+            cursors[sid] = max(after, through)
+            have = {(u.signal_id, u.time_ms, u.kind.value, u.detail) for u in read_updates(signals_root, sid)}
+            for s in [*stored, *st.new_signals]:
+                res = strat.resolve(ctx, s)
+                if res is None:
+                    continue
+                st.outcomes.append(res)
+                for u in res.updates:
+                    if (u.signal_id, u.time_ms, u.kind.value, u.detail) in have:
+                        continue
+                    append_update(signals_root, sid, u)
+                    st.new_updates += 1
+                    if live.telegram.send_updates and now_ms - u.time_ms <= recency_ms:
+                        alerts.append((s.signal_id, _update_event_type(u), format_signal_update(s, u)))
+        except Exception as exc:  # noqa: BLE001 - one strategy's failure must not stop the others
+            st.error = f"{type(exc).__name__}: {exc}"
+    cursor_path.write_text(json.dumps(cursors, sort_keys=True), encoding="utf-8")
+
+    if live.telegram.enabled and chat_ids and alerts:
+        put = telegram_enqueue or (lambda c, signal_id, event_type, chat_id, text, now_ms: enqueue(
+            c, signal_id=signal_id, event_type=event_type, chat_id=chat_id, text=text, now_ms=now_ms))
+        with connect(app.data.database_path) as con2:
+            for signal_id, event_type, text in alerts:
+                for chat in sorted(chat_ids):
+                    put(con2, signal_id, event_type, chat, text, now_ms)
+                    outcome.queued_alerts += 1
+
+    weeks = max((through - window.start_ms) / WEEK_MS, 1e-9)
+    as_forward = {sid: [SignalOutcome(o.signal, o.state == "closed", o.net_r, o.updates) for o in st.outcomes] for sid, st in outcome.strategies.items()}
+    outcome.summary = {
+        "generated_at": now.isoformat(), "forward_start_ms": window.start_ms, "data_through_ms": through, "last_1m_ms": last_1m,
+        "status": outcome.status, "cost_profile": f"config/{live.cost_profile}", "git_commit": ctx.git_commit,
+        "strategies": {sid: summarize(st.outcomes, weeks) | {"title": next((s.title for s in strategies if s.strategy_id == sid), sid), "error": st.error}
+                       for sid, st in outcome.strategies.items()},
+        "agreement_hypothesis": agreement_summary([o for v in as_forward.values() for o in v]),
+        "trades": trade_log(as_forward),
+        "closed_signals": sorted(
+            ({"signal_id": o.signal.signal_id, "strategy": sid, "closed_ms": max(u.time_ms for u in o.updates), "r": o.net_r}
+             for sid, st in outcome.strategies.items() for o in st.outcomes if o.state == "closed" and o.updates),
+            key=lambda d: d["closed_ms"]),
+        "note": "paper signals on live data, each tracked on its own (as if the account were flat); not evidence of profitability",
+    }
+    summary_path.write_text(json.dumps(outcome.summary, indent=2, sort_keys=True), encoding="utf-8")
+    if outcome.errors and outcome.status == "ok":
+        outcome.status = "error"
+        outcome.detail = "; ".join(outcome.errors)[:500]
+    return outcome
+
+
+__all__ = ["LiveTickOutcome", "StrategyTick", "complete_through_ms", "load_costs", "run_live_tick", "summarize"]

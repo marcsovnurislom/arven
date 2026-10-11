@@ -17,10 +17,18 @@ Response shapes (documented here since there is no local schema file for them, u
   (``current_state.md``'s "Final verification"), so callers pass the configured
   ``costs.funding.default_interval_hours`` rather than a value this module invents.
 
-Open interest / top-trader / taker long-short ratios ("metrics" in the bulk layout) are deliberately **not**
-fetched here (Stage 8 scope decision): they are optional, NaN-tolerant features throughout the stack
-(``oi_available``), so the forward period simply carries stale/NaN OI exactly as the existing staleness
-policy already handles for any other gap.
+- ``GET /futures/data/openInterestHist`` / ``topLongShortAccountRatio`` / ``topLongShortPositionRatio`` /
+  ``globalLongShortAccountRatio`` (``period=5m``): arrays of ``{"timestamp", ...}`` with ``sumOpenInterest`` /
+  ``sumOpenInterestValue`` or ``longShortRatio``; ``takerlongshortRatio``: ``{"timestamp", "buySellRatio", ...}``.
+  Binance serves only the latest 30 days, at most 500 rows per call.
+
+Open interest and the long/short ratios ("metrics" in the bulk layout) were not fetched in Stage 8 (scope decision
+D2); the live signal loop needs them (strategy "Crowded Shorts" uses ``oi_z``), so :func:`fetch_open_interest_stats`
+adds them. **Timestamp mapping, measured, not assumed** (2026-10-11, 241 overlapping 5-minute rows of 2026-10-09
+compared with the stored bulk ``metrics`` file): the bulk row with ``create_time = T`` equals the REST rows of
+``openInterestHist`` / ``top*`` / ``globalLongShortAccountRatio`` stamped ``T + 5 min`` (open interest bit-identical,
+ratios equal to the REST's 4 decimals) and the ``takerlongshortRatio`` row stamped ``T`` (equal to 4 decimals). The
+rows are therefore stored under the bulk convention (``ts_ms = T``), so live and historical data are one series.
 """
 
 from __future__ import annotations
@@ -81,6 +89,49 @@ def fetch_klines(
             continue  # defensive: Binance's endTime is inclusive, never trust it past our own bound
         out.append(k)
     return out
+
+
+REST_STATS_LIMIT = 500
+STATS_PERIOD_MS = 300_000
+STATS_SHIFT_MS = 300_000  # REST open-interest/ratio timestamp = bulk create_time + 5 min (see the module docstring)
+_STATS_ENDPOINTS = (  # (path, field, bulk column, timestamp shift)
+    ("openInterestHist", "sumOpenInterest", "sum_open_interest", STATS_SHIFT_MS),
+    ("openInterestHist", "sumOpenInterestValue", "sum_open_interest_value", STATS_SHIFT_MS),
+    ("topLongShortAccountRatio", "longShortRatio", "count_toptrader_long_short_ratio", STATS_SHIFT_MS),
+    ("topLongShortPositionRatio", "longShortRatio", "sum_toptrader_long_short_ratio", STATS_SHIFT_MS),
+    ("globalLongShortAccountRatio", "longShortRatio", "count_long_short_ratio", STATS_SHIFT_MS),
+    ("takerlongshortRatio", "buySellRatio", "sum_taker_long_short_vol_ratio", 0),
+)
+OI_COLUMNS = tuple(dict.fromkeys(col for _, _, col, _ in _STATS_ENDPOINTS))
+
+
+@dataclass(frozen=True, slots=True)
+class RestOpenInterest:
+    ts_ms: int  # bulk convention (create_time), see the module docstring
+    values: dict[str, float | None]  # OI_COLUMNS -> value (None if that endpoint had no row)
+
+
+def fetch_open_interest_stats(
+    downloader: Downloader, base_url: str, symbol: str, start_ms: int, end_ms: int, limit: int = REST_STATS_LIMIT,
+) -> list[RestOpenInterest]:
+    """5-minute open interest + long/short ratios with bulk ``ts_ms`` in ``[start_ms, end_ms)``, oldest first. A row is
+    returned only if its open interest exists; a missing ratio is ``None`` (NULL, the features are NaN-tolerant)."""
+    by_ts: dict[int, dict[str, float | None]] = {}
+    fetched: dict[str, list] = {}
+    for path, field, col, shift in _STATS_ENDPOINTS:
+        key = f"{path}:{shift}"
+        if key not in fetched:
+            fetched[key] = list(_get(downloader, base_url, f"/futures/data/{path}", {  # type: ignore[arg-type]
+                "symbol": symbol, "period": "5m", "startTime": start_ms + shift, "endTime": end_ms + shift - 1, "limit": limit,
+            }))
+        for row in fetched[key]:
+            ts = int(row["timestamp"]) - shift
+            if start_ms <= ts < end_ms and ts % STATS_PERIOD_MS == 0:
+                by_ts.setdefault(ts, {})[col] = float(row[field])
+    return [
+        RestOpenInterest(ts, {c: vals.get(c) for c in OI_COLUMNS})
+        for ts, vals in sorted(by_ts.items()) if vals.get("sum_open_interest") is not None
+    ]
 
 
 def fetch_funding_rate(

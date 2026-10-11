@@ -37,7 +37,8 @@ S4_PROVIDER = SRC / "backtest" / "strategy_s4_provider.py"
 S5_PROVIDER = SRC / "backtest" / "strategy_s5_provider.py"
 S6_PROVIDER = SRC / "backtest" / "strategy_s6_provider.py"
 S7_SIM = SRC / "backtest" / "strategy_s7_sim.py"
-NEW_MODULES = (LOOP, TRACKER, S4_PROVIDER, S5_PROVIDER, S6_PROVIDER, S7_SIM)
+CS_SIM = SRC / "backtest" / "crowded_shorts_sim.py"  # signal-product execution, like the S4-S7 adapters
+NEW_MODULES = (LOOP, TRACKER, S4_PROVIDER, S5_PROVIDER, S6_PROVIDER, S7_SIM, CS_SIM)
 
 
 def _import_nodes(path: Path):
@@ -84,7 +85,7 @@ def test_legacy_backtest_modules_never_import_the_engine_or_the_loop():
         bad = [
             m
             for m, n in _import_nodes(path)
-            if m.startswith(("arven.engine", "arven.backtest.event_engine", "arven.backtest.paper_tracker", "arven.backtest.strategy_s4_provider", "arven.backtest.strategy_s5_provider", "arven.backtest.strategy_s6_provider", "arven.backtest.strategy_s7_sim"))
+            if m.startswith(("arven.engine", "arven.backtest.event_engine", "arven.backtest.paper_tracker", "arven.backtest.strategy_s4_provider", "arven.backtest.strategy_s5_provider", "arven.backtest.strategy_s6_provider", "arven.backtest.strategy_s7_sim", "arven.backtest.crowded_shorts_sim"))
             or (m == "arven.backtest" and n in ("event_engine", "paper_tracker", "strategy_s4_provider", "strategy_s5_provider", "strategy_s6_provider", "strategy_s7_sim"))
         ]
         assert not bad, f"{path.name}: {bad}"

@@ -27,7 +27,7 @@ def test_plan_is_pure_engine_code():
 
 def test_simulator_uses_only_the_engine_vocabulary_it_needs():
     used = {m for m in _modules(SIM) if m.startswith("arven.engine")}
-    allowed = {"arven.engine.grading", "arven.engine.ladder", "arven.engine.signal", "arven.engine.strategy_s7", "arven.engine.strategy_s7_plan"}
+    allowed = {"arven.engine.grading", "arven.engine.ladder", "arven.engine.signal", "arven.engine.signal_events", "arven.engine.strategy_s7", "arven.engine.strategy_s7_plan"}
     assert used and used <= allowed, used
     assert not [m for m in _modules(SIM) if m.startswith(FORBIDDEN)]
 

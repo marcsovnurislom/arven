@@ -4,7 +4,7 @@ import { useI18n } from "./i18n";
 
 export type TradePoint = { t: number; strategy: string; side: number; r: number };
 
-const COLORS: Record<string, string> = { s4_impulse_retest: "#d9b256", s5_squeeze_breakout: "#6aa8ff", s6_trend_pullback: "#34d399" };
+const COLORS: Record<string, string> = { s4_impulse_retest: "#d9b256", s5_squeeze_breakout: "#6aa8ff", s6_trend_pullback: "#34d399", s7_trend_break_fib: "#c084fc", crowded_shorts: "#f59e7a" };
 const colorOf = (sid: string) => COLORS[sid] ?? "#9aa3b2";
 
 /** Running total of closed paper signals in R: one line per strategy plus the combined line, drawn in with an animation. */

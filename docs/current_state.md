@@ -1,8 +1,10 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-11 (every strategy's trades on the Strategies page; S7 trade-management study - no variant helps, S7 forward -7.3 R; earlier: Crowded Shorts sealed test run once: CONFIRMED by the pre-registered rule but weak - CFD +1.68 R / 25 trades, PF 1.27; earlier: web redesign v2: grouped sidebar/drawer/Ctrl+K, chart fit/full-screen/OHLC legend, S7 trade verdicts + SMC zones on the trades page; SMC-zone breakdown of S7 trades; earlier: S7 trades page + $1000 account replay + cost check; owner: no more new strategies; earlier: S7 validation run once: CFD -3.05 R / 102 trades, inside the random-entry control - the development result did not replicate, S7 EXPERIMENTAL; earlier: S7 evaluation stage, development selection CFD +47.6 R / 167 trades in-sample; earlier: S7 owner check round 2 done, variants 12/13 added, labelling stopped; earlier: S7 detector v2 from the owner's round-1 check of 100 setups; earlier: Signal-product build-out Phase 8 complete (8a API, 8b React app, 8c browser tests/Lighthouse); earlier: Strategies S5 and S6 and an ML signal filter (no value) added and evaluated; forward evaluation of S4/S5/S6 wired (first 14 weeks negative); Phase 7b, part 2c: exit-variant study + CFD cost profile; part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
+_Last updated: 2026-10-11 (live signal loop: `arven live run` runs all five strategies in real time, configurable in config/live.yaml, open interest REST-tailed, Telegram-ready; earlier: every strategy's trades on the Strategies page; S7 trade-management study - no variant helps, S7 forward -7.3 R; earlier: Crowded Shorts sealed test run once: CONFIRMED by the pre-registered rule but weak - CFD +1.68 R / 25 trades, PF 1.27; earlier: web redesign v2: grouped sidebar/drawer/Ctrl+K, chart fit/full-screen/OHLC legend, S7 trade verdicts + SMC zones on the trades page; SMC-zone breakdown of S7 trades; earlier: S7 trades page + $1000 account replay + cost check; owner: no more new strategies; earlier: S7 validation run once: CFD -3.05 R / 102 trades, inside the random-entry control - the development result did not replicate, S7 EXPERIMENTAL; earlier: S7 evaluation stage, development selection CFD +47.6 R / 167 trades in-sample; earlier: S7 owner check round 2 done, variants 12/13 added, labelling stopped; earlier: S7 detector v2 from the owner's round-1 check of 100 setups; earlier: Signal-product build-out Phase 8 complete (8a API, 8b React app, 8c browser tests/Lighthouse); earlier: Strategies S5 and S6 and an ML signal filter (no value) added and evaluated; forward evaluation of S4/S5/S6 wired (first 14 weeks negative); Phase 7b, part 2c: exit-variant study + CFD cost profile; part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
 
 ## Phase
+
+**Current: real-time signals work** - `arven live run` (docs/LIVE_SIGNALS.md) evaluates every enabled strategy of `config/live.yaml` at each 15m close on fresh Binance data and stores, tracks and alerts the signals; see "Live signal loop" below.
 
 **The 10-stage thesis-core roadmap (Stages 0-10) is complete.** The owner has since approved a larger,
 separate build-out described in `docs/ARVEN_MASTER_PROMPT.md` - a multi-timeframe event-driven engine, a
@@ -2000,6 +2002,75 @@ to see results in dollars and to see S7's trades on the site.
 - **Next (proposal, not started):** "when does S7 work" as a walk-forward study - rules learned only from the past, applied to the next
   unseen window, repeated through 2020-2024 - rather than re-testing on the same validation period.
 
+**Live signal loop - every strategy in real time (2026-10-11; owner: "finish the project to the point where it gives signals
+in real time, leave the strategies as they are, keep it possible to change strategies later").** Operations, Telegram set-up and
+how to change/add strategies: `docs/LIVE_SIGNALS.md`. Strategy rules were not changed; this is plumbing around them.
+
+- **One process, `arven live run`** (`src/arven/live/`).
+  - Every 20 s it REST-updates the data. At each 15m close (5 s later, and only once the close's 1m bars are stored) it lets
+    every enabled strategy scan, stores new signals once, replays every stored signal on 1m bars (filled / TP / stop moved /
+    cancelled / closed, net R, CFD costs), and queues Telegram alerts (only for signals/updates < 6 h old).
+  - It writes `strategies_summary.json`, runs the Stage 8 hourly paper run itself (one DuckDB writer), drains the Telegram
+    outbox, answers bot commands, and queues a daily summary and system alerts (start / stale data / 3 failed ticks).
+  - Heartbeat `data/live/heartbeat.json`, state `data/live/state.json`, log `data/live/live.jsonl`.
+  - Stale data (newest 1m bar > 180 s old) stops the tick before any strategy is asked (rule 5).
+  - Restart-safe: per-strategy cursors, persisted loop state, catch-up after downtime. A failing strategy keeps its cursor while
+    the others carry on.
+  - CLI: `arven live run|tick|status|heartbeat`. `arven paper strategies` is now an alias of `arven live tick`, and the old
+    `run_strategies_tick` is removed. `scripts/run_live.bat` plus a Task Scheduler recipe are in `docs/LIVE_SIGNALS.md`.
+- **Changeable strategies.**
+  - `config/live.yaml` lists every strategy: `id`, `kind`, `enabled`, `version`, `params` (validated at start-up; an unknown
+    kind or key is an error).
+  - `src/arven/live/registry.py` maps `kind` to the code. A strategy is a small class with `scan` / `resolve`
+    (`src/arven/live/base.py`).
+  - S7 takes the S7 study's configuration keys (the development selection is in the file). Crowded Shorts takes its four
+    pre-registered values. S4-S6 keep their pre-registered constants in code.
+  - Signals carry the strategy version and a hash of its params.
+- **Adapters reuse the research code** (rule 8; a static test checks it).
+  - S4-S6: their providers, exactly as the forward evaluation used them, with the same signal store and cursor file, so their
+    history continues.
+  - S7: the detector over all 15m bars since 2020. A setup is announced at its arming close as a **limit** signal (fib 0.5,
+    stop S1, TP ladder, expiry) and resolved by `simulate_setup`.
+  - Crowded Shorts: new pure rules in `src/arven/engine/strategy_crowded_shorts.py` plus execution in
+    `src/arven/backtest/crowded_shorts_sim.py`. A test reproduces the research script's block logic verbatim on random data.
+  - **Verified on real data (forward 2026-07-01 -> 2026-10-11):** the live code reproduced all 21 S7 research trades and all
+    3 Crowded Shorts trades with bit-identical net R. Live S7 has 26 closed and 6 cancelled signals, -10.48 R. The research
+    table's -7.28 R applies one-trade-at-a-time; live tracks every signal on its own, like S4-S6.
+- **Open interest is now REST-tailed** (changes Stage 8 D2; `architecture.md` updated). Crowded Shorts needs `oi_z`.
+  - Source: Binance public `futures/data/openInterestHist` and the long/short ratio endpoints; 30 days of history, 500 rows a
+    call.
+  - Measured on 500 overlapping rows against the bulk `metrics` files: open interest identical, ratios equal to the REST's
+    4 decimals. The REST timestamps are bulk `create_time` + 5 min (taker ratio: same time), so rows are stored under the
+    bulk convention and never overwrite bulk rows.
+  - After the first tick `oi_available` = 1 on every forward hour and live `oi_z` is finite.
+- **Small additive core changes.**
+  - `EngineSignal` gained `entry_type` (`market` | `limit`) and `valid_until_ms`. Both are left out of the hash at their
+    defaults, so all 201 stored S4-S6 signals keep their ids (checked).
+  - `EngineSignal` also allows an empty TP ladder when the signal has a time exit (Crowded Shorts).
+  - `SignalUpdateKind.FILLED` added.
+  - The S7 simulator's outcomes now also carry the fills with their tracked events and the time of a cancellation (research
+    numbers unchanged; S7 tests pass).
+  - Web API statuses: pending / open / partial / closed / cancelled, plus entry type and expiry; the Signals page shows them
+    (EN/RU).
+  - Telegram texts spell out limit entries with their expiry and time exits, and show times. Also fixed the old "vv1" version
+    display.
+  - README rewritten (it still said "Stage 1").
+- **Tests:** 31 new in `tests/live/` (rules, execution hand-computed, research parity, config/registry, S7 outcome mapping, the
+  tick on a synthetic DB with fake strategies, the loop with fake dependencies, module boundaries), plus REST open interest (3),
+  signal object (3), web status (1), Telegram text (1).
+- **First real run:**
+  - `arven live tick`: all five strategies ran. S7 back-filled its 32 forward signals and Crowded Shorts its 3; no new live
+    signal yet; tick ~85 s, mostly the S7 detector.
+  - Then `arven live run` ran as a soak test in this session: every 15m close evaluated once, each tick `ok` in ~85-110 s
+    (slower while the test suite ran), the hourly paper run done inside the process, heartbeat every 20 s.
+- **Verification:** full suite **2312 passed, 13 skipped** (2271 + 41); web typecheck/build OK; Playwright **68 passed**
+  (4 screenshot tests skipped as before).
+- **Not done, needs the owner:**
+  - No real Telegram token/chat id yet: alerts are queued, but nothing is sent until `.env` + `dry_run: false`.
+  - The always-on Task Scheduler entry ('ARVEN Live', replacing the hourly 'ARVEN Paper Run') is documented, not
+    installed.
+  - The master prompt's 14-day continuous forward-operation gate has not been run.
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -2705,3 +2776,6 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-11 | S7 trade management (owner's breakeven/ladder/runner ideas): paper tracker gained an optional stop ladder (tested, default off); 5 variants pre-registered, chosen on development (PRE_BE_LADDER +48.7 R vs V0 +47.6) - validation -8.0 vs -3.1, forward (S7's first run on 2026-07..10) -6.3 vs -7.3 R: no variant fixes S7, the entry has no out-of-sample edge. Risk check: stops never moved; planned risk 0.5-1.86 % of equity because of 0.01-lot rounding / the minimum-lot rule, 0 trades skipped by the 5 % limit | recorded (S7 management) |
 | 2026-10-11 | Strategies page shows every strategy's trades (S4/S5/S6 replayed from recorded and forward signals with their own ladders, S7, Crowded Shorts; CFD costs, $1000 account) via scripts/strategy_trades_export.py and read-only /api/strategy_trades; S6 is positive in all three periods (+14.0 / +7.5 / +3.1 R, forward only 8 trades) | implemented (strategy trades page) |
 | 2026-10-11 | S7 SMC-zone entry filter (owner: "try your idea"; scripts/research/s7_zone_filter.py, selected config unchanged, one trade at a time re-applied, CFD): A = iFVG in zone: dev +30.95 R (71), val +8.89 R (44; x4 -0.31, perp -4.76), forward -4.02 R (5, 1 win); B = 3+ zone types: dev +27.68 R (59), val +5.61 R (37), forward -0.24 R (6); no filter forward -7.28 R (21). Idea came from dev+val, so forward is the only clean check and does not confirm it; samples tiny - lead only, not a rule | recorded (S7 zone filter) |
+| 2026-10-11 | Owner: finish the project to real-time signals, strategies unchanged, keep them changeable. Built `src/arven/live/` + `config/live.yaml` (registry of strategy kinds, per-strategy enabled/version/params), `arven live run|tick|status|heartbeat`, `scripts/run_live.bat`; live adapters reuse the research code and reproduced every forward S7 and Crowded Shorts research trade bit-identically | implemented (live signal loop) |
+| 2026-10-11 | Stage 8 D2 changed: open interest is REST-tailed (public futures/data endpoints, verified against bulk metrics: identical OI, REST timestamp = bulk create_time + 5 min) because Crowded Shorts needs oi_z; architecture.md updated | implemented |
+| 2026-10-11 | The live process also runs the Stage 8 hourly paper run (one DuckDB writer); switching Task Scheduler from 'ARVEN Paper Run' to 'ARVEN Live' is left to the owner (recipe in docs/LIVE_SIGNALS.md) | open (owner) |

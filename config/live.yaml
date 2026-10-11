@@ -1,0 +1,64 @@
+# ARVEN live signal loop (`arven live run`; docs/LIVE_SIGNALS.md). Decision support only - paper signals, never an order.
+# Telegram secrets (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_IDS) live in .env; sending is still governed by config/telegram.yaml.
+
+poll_seconds: 20              # how often the process wakes up (REST data, Telegram)
+event_delay_seconds: 5        # evaluate a 15m close this many seconds after it (Binance needs a moment to publish the bar)
+max_data_age_seconds: 180     # newest stored 1m bar older than this => data stale => no new signals (CLAUDE.md rule 5)
+alert_recency_hours: 6        # signals found while catching up after downtime are stored but only alerted if this recent
+cost_profile: costs_cfd_justmarkets.yaml   # costs used to track every signal in R (broker CFD, spread only)
+include_open_interest: true   # REST-tail open interest every tick (Crowded Shorts needs oi_z)
+run_legacy_paper: true        # also run the Stage 8 hourly `paper run` here, so one process is the only DuckDB writer
+
+telegram:
+  enabled: true               # queue alerts in the outbox (actual sending: config/telegram.yaml dry_run + .env)
+  send_updates: true          # entry filled / TP hit / stop moved / cancelled / closed
+  commands: true              # answer /status /signals ... from allow-listed chats
+  daily_summary_hour_utc: 0   # one summary per day at this UTC hour (null = off)
+
+# Each entry: id (signal-store folder; never reuse an id for different rules), kind (code in arven.live.registry),
+# enabled, version (bump it whenever you change the rules or params - signals carry it), params (kind-specific).
+# Changing a strategy = edit its params here and bump its version; adding one = see docs/LIVE_SIGNALS.md.
+strategies:
+  - id: s4_impulse_retest
+    kind: s4_impulse_retest   # parameters are the pre-registered constants in src/arven/engine/strategy_s4.py
+    title: S4 Impulse-Retest
+    enabled: true
+  - id: s5_squeeze_breakout
+    kind: s5_squeeze_breakout
+    title: S5 Squeeze-Breakout
+    enabled: true
+  - id: s6_trend_pullback
+    kind: s6_trend_pullback
+    title: S6 Trend-Pullback
+    enabled: true
+  - id: s7_trend_break_fib
+    kind: s7
+    title: S7 Trend-Break Fib (owner's method)
+    enabled: true
+    version: v1
+    params:                   # the configuration selected on development (data/s7_study/development.json), unchanged
+      tf: 15m
+      min_touches: 3
+      impulse: fvg
+      freeze_pullback: 0.382
+      entry: E3
+      stop: S1
+      breakeven_after_tp1: false
+      min_tp1_r: null
+      count_every_touch: false
+      level0_range_bottom: false
+      skip_beyond_line_start: true
+      break_on_cross: false
+      line_from_major_high: false
+      shallow_zone: true
+      management: V0
+  - id: crowded_shorts
+    kind: crowded_shorts
+    title: Crowded Shorts (funding + OI)
+    enabled: true
+    version: v1
+    params:                   # pre-registered in docs/strategy_crowded_shorts.md section 2, unchanged
+      fund_z_max: -1.5
+      oi_z_min: 1.0
+      hold_hours: 24
+      stop_fraction: 0.03

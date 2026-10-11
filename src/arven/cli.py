@@ -571,34 +571,147 @@ def cmd_web(cfg: AppConfig, args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_paper_strategies(cfg: AppConfig, args: argparse.Namespace) -> int:
-    """Forward paper evaluation of S4/S5/S6 under the broker (CFD) cost profile; see ``arven.paper.strategies_forward``."""
+def _config_dir(args: argparse.Namespace):
     from pathlib import Path
 
+    from arven.core.config import DEFAULT_CONFIG_DIR
+
+    return Path(args.config_dir) if args.config_dir else DEFAULT_CONFIG_DIR
+
+
+def cmd_live_tick(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """One pass of the live signal loop (every enabled strategy in config/live.yaml); see ``arven.live.service``."""
+    from arven.core.live_config import load_live_config
     from arven.core.telegram_config import allowed_chat_ids
-    from arven.paper.strategies_forward import run_strategies_tick
+    from arven.core.time import from_ms
+    from arven.live.service import run_live_tick
 
-    fcfg = load_features_config(args.config_dir)
-    config_dir = Path(args.config_dir) if args.config_dir else Path("config")
+    live = load_live_config(args.config_dir)
+    chat_ids = frozenset() if args.no_telegram or not live.telegram.enabled else allowed_chat_ids()
+    out = run_live_tick(cfg, load_features_config(args.config_dir), live, _config_dir(args), chat_ids=chat_ids)
+    rs = out.rest
+    if rs is not None:
+        print(f"REST tail: klines +{rs.klines_written}  funding +{rs.funding_written}  open interest +{rs.oi_written}  pages={rs.pages}")
+        for err in rs.errors:
+            print(f"  REST ERROR {err}")
+    print(f"status: {out.status}" + (f" ({out.detail})" if out.detail else ""))
+    if out.through_ms is not None:
+        print(f"evaluated through the 15m close {from_ms(out.through_ms).isoformat()}  (newest 1m bar {from_ms(out.last_1m_ms).isoformat()})")
+    for sid, st in out.strategies.items():
+        line = f"  {sid}: new signals {len(st.new_signals)}, new updates {st.new_updates}"
+        if out.summary:
+            sm = out.summary["strategies"][sid]
+            line += f" | total {sm['signals']} (closed {sm['closed']}, open {sm['open']}, pending {sm['pending']}, cancelled {sm['cancelled']}), net {sm['total_r']:+.2f} R"
+        print(line + (f"  ERROR {st.error}" if st.error else ""))
+        for s in st.new_signals:
+            print(f"    {from_ms(s.event_time_ms).isoformat()} {'LONG' if s.side == 1 else 'SHORT'} {s.entry_type} {s.entry_reference:.2f} stop {s.stop:.2f}")
+    if out.queued_alerts:
+        print(f"Telegram alerts queued: {out.queued_alerts}")
+    print("Paper signals on live data - not orders, not evidence of profitability (CLAUDE.md rules 6/12).")
+    return 0 if out.status in ("ok", "not_started") else 1
+
+
+def cmd_paper_strategies(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Kept for the existing scheduled task: the forward evaluation is now one pass of the live loop (every enabled strategy)."""
+    return cmd_live_tick(cfg, args)
+
+
+def cmd_live_run(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """The always-on live signal process (see ``arven.live.loop``). Ctrl+C or the --stop-file stop it between polls."""
+    import asyncio
+    from pathlib import Path
+
+    from arven.core.backtest_config import load_backtest_config
+    from arven.core.live_config import load_live_config
+    from arven.core.telegram_config import allowed_chat_ids, load_telegram_config
+    from arven.live.app import build_deps, telegram_token_configured
+    from arven.live.loop import live_dir, run_live_forever
+    from arven.paper.runtime import run_once
+
+    live = load_live_config(args.config_dir)
+    if args.poll_seconds is not None:
+        live = live.model_copy(update={"poll_seconds": args.poll_seconds})
+    fcfg, tcfg = load_features_config(args.config_dir), load_telegram_config(args.config_dir)
     chat_ids = frozenset() if args.no_telegram else allowed_chat_ids()
+    bt = load_backtest_config(args.config_dir)
+    legacy = (lambda now: run_once(cfg, fcfg, bt, lambda: _build_pipeline(cfg, args, bt), now=now)) if live.run_legacy_paper else None
+    deps = build_deps(cfg, fcfg, live, _config_dir(args), tcfg, chat_ids, legacy_tick=legacy)
+    stop_file = Path(args.stop_file) if args.stop_file else None
+    if stop_file is not None and stop_file.exists():
+        stop_file.unlink()
 
-    def progress(sid: str, done: int, total: int) -> None:
-        print(f"  {sid}: {done}/{total} decision times", flush=True)
+    async def main() -> None:
+        stop_event = asyncio.Event()
 
-    outcome = run_strategies_tick(cfg, fcfg, config_dir, chat_ids=chat_ids, on_progress=progress)
-    rs = outcome.rest_summary
-    print(f"REST tail: klines +{rs.klines_written} (of {rs.klines_fetched} fetched)  funding +{rs.funding_written}  pages={rs.pages}")
-    for err in rs.errors:
-        print(f"  REST ERROR {err}")
-    if outcome.summary is None:
-        print("forward_start has not arrived yet relative to now; nothing to decide")
-        return 0 if rs.ok else 1
-    print("new signals:", outcome.new_signals)
-    for sid, st in outcome.summary["strategies"].items():
-        print(f"  {sid}: {st}")
-    print("agreement hypothesis:", outcome.summary["agreement_hypothesis"])
-    print(outcome.summary["note"])
-    return 0 if rs.ok else 1
+        async def watch() -> None:
+            while not stop_event.is_set():
+                if stop_file is not None and stop_file.exists():
+                    print(f"stop file {stop_file} found - stopping.", flush=True)
+                    stop_event.set()
+                    return
+                await asyncio.sleep(1.0)
+
+        watcher = asyncio.create_task(watch())
+        try:
+            await run_live_forever(cfg, live, deps, stop_event=stop_event)
+        finally:
+            watcher.cancel()
+
+    enabled = ", ".join(s.id for s in live.enabled())
+    tg = ("off" if not live.telegram.enabled else "no chats configured (TELEGRAM_CHAT_IDS)" if not chat_ids else
+          f"{len(chat_ids)} chat(s), {'DRY RUN (config/telegram.yaml)' if tcfg.dry_run else 'sending'}, "
+          f"token {'set' if telegram_token_configured() else 'MISSING'}")
+    print(f"ARVEN live signals: strategies [{enabled}], poll every {live.poll_seconds:g}s, Telegram: {tg}.\n"
+          f"Heartbeat {live_dir(cfg) / 'heartbeat.json'}, log {live_dir(cfg) / 'live.jsonl'}. Ctrl+C to stop"
+          + (f", or create {stop_file}." if stop_file else "."), flush=True)
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("stopped (Ctrl+C).")
+    return 0
+
+
+def cmd_live_heartbeat(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from arven.core.live_config import load_live_config
+    from arven.core.time import from_ms, to_ms, utc_now
+    from arven.live.loop import live_dir
+    from arven.paper.runtime import is_stale, read_heartbeat
+
+    live = load_live_config(args.config_dir)
+    path = live_dir(cfg) / "heartbeat.json"
+    hb = read_heartbeat(path)
+    if hb is None:
+        print(f"no heartbeat at {path} - `arven live run` has never run")
+        return 1
+    now_ms = to_ms(utc_now())
+    stale = is_stale(hb, now_ms, max_age_ms=int(max(3 * live.poll_seconds, 60) * 1000) + 600_000)  # a tick can take minutes
+    last = from_ms(hb["last_tick_ms"]).isoformat() if hb["last_tick_ms"] else "never"
+    print(f"status={hb['status']}  checked {(now_ms - hb['checked_at_ms']) / 1000:.0f}s ago  last tick {last}")
+    if hb["detail"]:
+        print(f"  detail: {hb['detail']}")
+    if stale:
+        print("STALE: the live process has not checked in recently - it may have stopped.")
+    return 1 if stale or hb["status"] == "error" else 0
+
+
+def cmd_live_status(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from arven.core.live_config import load_live_config
+    from arven.core.time import from_ms
+    from arven.paper.runs import paper_dir
+    from arven.web.service import read_json
+
+    live = load_live_config(args.config_dir)
+    for s in live.strategies:
+        print(f"  {'ON ' if s.enabled else 'off'} {s.id:22s} kind={s.kind:20s} version={s.version}")
+    summary = read_json(paper_dir(cfg) / "strategies_summary.json")
+    if not summary:
+        print("no live summary yet; run `arven live tick`")
+        return 0
+    print(f"last tick {summary['generated_at']}  data through {from_ms(summary['data_through_ms']).isoformat()}  status {summary.get('status', 'ok')}")
+    for sid, st in summary["strategies"].items():
+        print(f"  {sid}: signals {st['signals']}, closed {st['closed']}, open {st['open']}, pending {st.get('pending', 0)}, "
+              f"cancelled {st.get('cancelled', 0)}, net {st['total_r']:+.2f} R")
+    return cmd_live_heartbeat(cfg, args) if (cfg.data.data_dir / "live" / "heartbeat.json").exists() else 0
 
 
 def cmd_paper_runtime(cfg: AppConfig, args: argparse.Namespace) -> int:
@@ -949,7 +1062,7 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("run")
     q.set_defaults(func=cmd_paper_show)
     psub.add_parser("status", help="latest ingested data and latest paper run").set_defaults(func=cmd_paper_status)
-    q = psub.add_parser("strategies", help="forward paper evaluation of S4/S5/S6 (broker/CFD costs): new signals -> signal store -> summary")
+    q = psub.add_parser("strategies", help="same as `arven live tick` (kept for the existing scheduled task)")
     q.add_argument("--no-telegram", action="store_true", help="do not queue Telegram alerts for new signals")
     q.set_defaults(func=cmd_paper_strategies)
     q = psub.add_parser("runtime", help="Phase 5: one long-running process polling for new decision times, instead of an externally-scheduled `paper run`")
@@ -959,6 +1072,19 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--random-filter-rate", type=float, help="control (D20): veto this fraction of candidates uniformly at random instead of using a model")
     q.set_defaults(func=cmd_paper_runtime)
     psub.add_parser("heartbeat", help="print the always-on runtime's last heartbeat (status/age); non-zero exit if stale or missing").set_defaults(func=cmd_paper_heartbeat)
+
+    p = sub.add_parser("live", help="live signals: every enabled strategy (config/live.yaml) on fresh Binance data, Telegram alerts")
+    lsub = p.add_subparsers(dest="live_command", required=True)
+    q = lsub.add_parser("run", help="the always-on process: new 15m closes -> strategies -> signal store -> Telegram; heartbeat")
+    q.add_argument("--poll-seconds", type=float, default=None, help="override poll_seconds from config/live.yaml")
+    q.add_argument("--stop-file", help="create this file to stop the process gracefully (checked once a second)")
+    q.add_argument("--no-telegram", action="store_true", help="do not queue Telegram alerts")
+    q.set_defaults(func=cmd_live_run)
+    q = lsub.add_parser("tick", help="one pass: update data, scan every enabled strategy, track stored signals, queue alerts")
+    q.add_argument("--no-telegram", action="store_true", help="do not queue Telegram alerts")
+    q.set_defaults(func=cmd_live_tick)
+    lsub.add_parser("status", help="enabled strategies, the last summary and the heartbeat").set_defaults(func=cmd_live_status)
+    lsub.add_parser("heartbeat", help="the live process's heartbeat; non-zero exit if stale, missing or in error").set_defaults(func=cmd_live_heartbeat)
 
     p = sub.add_parser("news", help="Stage 9b: RSS ingestion + LLM structuring into a fixed schema (never a trading decision)")
     nsub = p.add_subparsers(dest="news_command", required=True)

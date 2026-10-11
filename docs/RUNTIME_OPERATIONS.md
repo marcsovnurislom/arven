@@ -1,5 +1,9 @@
 # ARVEN — always-on paper runtime: operations (Phase 5)
 
+> **Superseded for day-to-day use (2026-10-11):** `arven live run` (`docs/LIVE_SIGNALS.md`) is the always-on process now.
+> It runs every live strategy, Telegram and this hourly paper run in one process. This document stays valid for
+> `arven paper runtime`, and its "Power settings" section applies to both.
+
 Covers `arven paper runtime` (`src/arven/paper/runtime.py`), the long-running process introduced in
 Phase 5 of `docs/ARVEN_MASTER_PROMPT.md`. It never places a real order (CLAUDE.md rule 12 - this is
 simulated paper trading on real market data, same as `arven paper run`) and is strictly additive: Stage 8's
