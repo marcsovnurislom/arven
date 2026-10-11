@@ -45,3 +45,23 @@ CFD x4, perp; buy-and-hold and a random-entry control (same entries and holding 
 **Confirmed** if, under CFD costs: total R > 0, profit factor >= 1.2, and the result stays positive with the spread x4.
 Otherwise **not confirmed**. With an expected 10-25 trades in 18 months the error bars are wide either way; a
 confirmation would justify live paper trading, not certainty. The run is logged; the period is not used again.
+
+## 4. Sealed-test result (2026-10-11, run once, commit `32b5d38`, clean tree, access logged by SplitGuard)
+
+2025-01-01 -> 2026-07-01, rules exactly as section 2 (`scripts/research/cs_sealed_test.py`, `data/research/cs_sealed_test.json`).
+
+| Costs | Trades | Win rate | Mean R | Total R | Profit factor | Avg trade | Worst | 1x compounded | Max DD 1x |
+|---|---|---|---|---|---|---|---|---|---|
+| CFD | 25 | 48% | +0.067 | +1.68 | 1.27 | +0.20 % | -3.01 % | +4.6 % | 9.9 % |
+| CFD, spread x4 | 25 | 48% | +0.044 | +1.11 | 1.17 | +0.13 % | -3.05 % | +2.8 % | 10.8 % |
+| perp + funding | 25 | 44% | +0.029 | +0.72 | 1.11 | +0.09 % | -3.18 % | +1.6 % | 11.4 % |
+
+$1000 at 1 % risk (CFD): $1036.42 (+3.6 %), max drawdown 8.0 %. Buy-and-hold over the same
+period: -37.3 %. Random-entry control (same entries and holding times, 2000 draws): mean R -0.038, 95th pct
++0.220.
+
+**Verdict by the pre-registered rule: CONFIRMED** (total R > 0, profit factor >= 1.2, positive with the spread x4). Read
+honestly: the edge was far weaker than in 2020-2024 (mean R +0.07 vs +0.84), and with 25 trades its mean R is inside the
+random-entry control's range (below the 95th percentile) - the test is passed, but it does not on its own prove a strong
+edge. It stayed positive in a period when BTC fell 37 %, with small drawdowns. Next: live paper tracking (forward data) with the
+same fixed rules; the sealed period is not used again.
