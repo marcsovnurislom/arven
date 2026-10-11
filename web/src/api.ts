@@ -123,6 +123,43 @@ export type S7Setup = {
 };
 export type S7Review = { timeframe: string; total_setups: number; setups: S7Setup[]; note?: string; git_commit?: string | null };
 export type S7Label = { verdict: "yes" | "no" | "unsure"; note: string; at_ms: number };
+export type S7Trade = {
+  n: number;
+  id: string;
+  side: 1 | -1;
+  arm_time_ms: number;
+  entry_time_ms: number;
+  exit_time_ms: number;
+  entry: number;
+  stop: number;
+  targets: number[];
+  exit_reasons: string[];
+  net_r: number;
+  size_btc: number;
+  risk_usd: number;
+  pnl_usd: number;
+  equity_after: number;
+  skipped: string | null;
+  line: { points: S7Point[] };
+  touches: S7Point[];
+  level0: S7Point;
+  level1: S7Point;
+  zone: { low: number; high: number };
+  smc_zones?: { kind: string; low: number; high: number; timeMs: number }[];
+  candles: Candle[];
+};
+export type S7TradeLabel = { verdict: "ok" | "wrong" | "unsure"; note: string; at_ms: number };
+export type S7AccountSummary = {
+  start_equity: number; final_equity: number; return: number; trades: number; skipped: number; wins: number; losses: number;
+  max_drawdown: number; best_trade_usd: number; worst_trade_usd: number;
+};
+export type S7Trades = {
+  period: string;
+  window_ms?: [number, number];
+  account_rules?: { start_equity: number; risk_fraction: number; min_lot: number; lot_step: number; max_loss_fraction: number };
+  summary: { trades: number; win_rate: number; total_r: number; account: S7AccountSummary } | null;
+  trades: S7Trade[];
+};
 
 export class ApiError extends Error {
   status: number;
@@ -166,6 +203,10 @@ export const api = {
   deleteJournal: (id: string) => request<{ deleted: string }>(`/api/journal/${id}`, { method: "DELETE" }),
   telegram: () => request<TelegramStatus>("/api/telegram"),
   s7Review: (tf: string) => request<S7Review>(`/api/s7/review?tf=${tf}`),
+  s7Trades: (period: string) => request<S7Trades>(`/api/s7/trades?period=${period}`),
+  s7TradeLabels: () => request<{ labels: Record<string, S7TradeLabel> }>("/api/s7/trade_labels"),
+  s7TradeLabel: (trade_id: string, verdict: string, note: string) =>
+    request<{ saved: string; count: number }>("/api/s7/trade_labels", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ trade_id, verdict, note }) }),
   s7Labels: (tf: string) => request<{ labels: Record<string, S7Label> }>(`/api/s7/labels?tf=${tf}`),
   s7Label: (setup_id: string, verdict: string, note: string) =>
     request<{ saved: string; count: number }>("/api/s7/labels", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ setup_id, verdict, note }) }),

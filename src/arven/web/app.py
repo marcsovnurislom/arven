@@ -169,6 +169,31 @@ def create_app(cfg: AppConfig, config_dir: Path | str | None = None, dist_dir: P
         path.write_text(json.dumps(labels, indent=1, sort_keys=True), encoding="utf-8")
         return {"saved": payload.setup_id, "count": len(labels)}
 
+    study_periods = ("development", "validation")
+
+    @app.get("/api/s7/trades")
+    def s7_trades(period: str = Query("development")) -> dict[str, Any]:
+        """Every trade of the development-selected S7 configuration (``scripts/s7_trades_export.py``), read-only."""
+        if period not in study_periods:
+            raise HTTPException(status_code=422, detail=f"period must be one of {study_periods}")
+        payload = svc.read_json(data_dir / "s7_study" / f"trades_{period}.json")
+        return payload if payload is not None else {"period": period, "trades": [], "summary": None}
+
+    trade_labels_path = data_dir / "s7_study" / "trade_labels.json"
+
+    @app.get("/api/s7/trade_labels")
+    def s7_trade_labels() -> dict[str, Any]:
+        return {"labels": svc.read_json(trade_labels_path) or {}}
+
+    @app.post("/api/s7/trade_labels")
+    def s7_trade_label(payload: jr.TradeLabelIn) -> dict[str, Any]:
+        """The owner's verdict on one trade - the third write path (next to the journal and the setup labels)."""
+        labels = svc.read_json(trade_labels_path) or {}
+        labels[payload.trade_id] = {"verdict": payload.verdict, "note": payload.note, "at_ms": to_ms(utc_now())}
+        trade_labels_path.parent.mkdir(parents=True, exist_ok=True)
+        trade_labels_path.write_text(json.dumps(labels, indent=1, sort_keys=True), encoding="utf-8")
+        return {"saved": payload.trade_id, "count": len(labels)}
+
     @app.get("/api/telegram")
     def telegram() -> dict[str, Any]:
         tcfg = load_telegram_config(config_dir)

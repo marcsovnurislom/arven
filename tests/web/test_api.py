@@ -59,7 +59,8 @@ def test_health_and_read_only_surface(env):
     assert not any("order" in p or "trade/" in p for p in paths)
     assert methods <= {"GET", "POST", "DELETE", "HEAD", "OPTIONS"}
     writers = sorted(r.path for r in client.app.routes if "POST" in getattr(r, "methods", set()))
-    assert writers == ["/api/journal", "/api/s7/labels"]  # only the owner's own journal and review notes are writable
+    # only the owner's own journal and review notes (setup labels, trade verdicts) are writable - never an order
+    assert writers == ["/api/journal", "/api/s7/labels", "/api/s7/trade_labels"]
 
 
 def test_overview_reports_fresh_data_and_missing_runtime_honestly(env):
@@ -183,3 +184,24 @@ def test_s7_review_returns_the_export_and_stores_owner_labels(env):
     assert client.get("/api/s7/labels").json()["labels"]["1h-1000-L"]["verdict"] == "yes"
     assert client.post("/api/s7/labels", json={"setup_id": "1h-1000-L", "verdict": "maybe"}).status_code == 422
     assert client.post("/api/s7/labels", json={"setup_id": "../../etc", "verdict": "yes"}).status_code == 422
+
+
+def test_s7_trades_serves_the_study_export_read_only(env):
+    cfg, client, _ = env
+    assert client.get("/api/s7/trades").json() == {"period": "development", "trades": [], "summary": None}
+    study = cfg.data.data_dir / "s7_study"
+    study.mkdir(parents=True)
+    (study / "trades_validation.json").write_text(json.dumps({"period": "validation", "summary": {"trades": 1}, "trades": [{"n": 1}]}))
+    assert client.get("/api/s7/trades", params={"period": "validation"}).json()["trades"] == [{"n": 1}]
+    assert client.get("/api/s7/trades", params={"period": "test"}).status_code == 422  # the sealed test is never served
+
+
+def test_s7_trade_labels_store_the_owners_verdicts(env):
+    _, client, _ = env
+    assert client.get("/api/s7/trade_labels").json() == {"labels": {}}
+    ok = client.post("/api/s7/trade_labels", json={"trade_id": "15m-1690000000000-S", "verdict": "wrong", "note": "entry too early"})
+    assert ok.status_code == 200 and ok.json()["count"] == 1
+    got = client.get("/api/s7/trade_labels").json()["labels"]["15m-1690000000000-S"]
+    assert got["verdict"] == "wrong" and got["note"] == "entry too early"
+    assert client.post("/api/s7/trade_labels", json={"trade_id": "15m-1-S", "verdict": "maybe"}).status_code == 422
+    assert client.post("/api/s7/trade_labels", json={"trade_id": "../x", "verdict": "ok"}).status_code == 422

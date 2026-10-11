@@ -1,6 +1,6 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-11 (S7 validation run once: CFD -3.05 R / 102 trades, inside the random-entry control - the development result did not replicate, S7 EXPERIMENTAL; earlier: S7 evaluation stage, development selection CFD +47.6 R / 167 trades in-sample; earlier: S7 owner check round 2 done, variants 12/13 added, labelling stopped; earlier: S7 detector v2 from the owner's round-1 check of 100 setups; earlier: Signal-product build-out Phase 8 complete (8a API, 8b React app, 8c browser tests/Lighthouse); earlier: Strategies S5 and S6 and an ML signal filter (no value) added and evaluated; forward evaluation of S4/S5/S6 wired (first 14 weeks negative); Phase 7b, part 2c: exit-variant study + CFD cost profile; part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
+_Last updated: 2026-10-11 (web redesign v2: grouped sidebar/drawer/Ctrl+K, chart fit/full-screen/OHLC legend, S7 trade verdicts + SMC zones on the trades page; SMC-zone breakdown of S7 trades; earlier: S7 trades page + $1000 account replay + cost check; owner: no more new strategies; earlier: S7 validation run once: CFD -3.05 R / 102 trades, inside the random-entry control - the development result did not replicate, S7 EXPERIMENTAL; earlier: S7 evaluation stage, development selection CFD +47.6 R / 167 trades in-sample; earlier: S7 owner check round 2 done, variants 12/13 added, labelling stopped; earlier: S7 detector v2 from the owner's round-1 check of 100 setups; earlier: Signal-product build-out Phase 8 complete (8a API, 8b React app, 8c browser tests/Lighthouse); earlier: Strategies S5 and S6 and an ML signal filter (no value) added and evaluated; forward evaluation of S4/S5/S6 wired (first 14 weeks negative); Phase 7b, part 2c: exit-variant study + CFD cost profile; part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
 
 ## Phase
 
@@ -1968,6 +1968,38 @@ legacy-module boundary list; an independent re-derivation matched all 42 baselin
   stays EXPERIMENTAL, nothing is re-tuned after validation (pre-registered rule). Every run is logged in `data/s7_study/evaluations.log`.
   Sealed test untouched. Realistic conclusion, as for S4-S6: no reliable edge shown.
 
+**Owner direction, cost check, $ account replay and the "S7 trades" page (2026-10-11).** The owner does not want new strategies
+added endlessly (a drafted "S8" was dropped, never committed) but to learn *when* S7 works and when not, and asked to re-check costs,
+to see results in dollars and to see S7's trades on the site.
+- **Costs re-checked** (same S7 trades under zero / CFD / perp costs): development +52.5 / +47.6 / +9.9 R; validation **+0.5** / -3.1 /
+  -30.1 R. Even with *zero* costs validation is flat, so costs did not cause the failure; the CFD spread (1.25 bp per side, an
+  unverified public estimate) costs ~0.03 R per trade; perp costs (5 bp taker + slippage per side) cost ~0.2-0.3 R per trade because
+  the median stop is only ~0.6-0.8 % of price.
+- **Dollar replay**: `src/arven/backtest/account_sim.py` (pure; 4 hand-computed tests) - $1000, 1 % of current equity at risk, size
+  rounded down to 0.01 BTC lots, minimum lot used only while its stop loss is <= 5 % of equity, else skipped (lot size/step are
+  assumptions to verify on the owner's terminal). S7 selected config, CFD: development $1000 -> $1483 (max DD 6.7 %), validation
+  $1000 -> $928 (-7.2 %, max DD 13.0 %), no trade skipped.
+- **Site**: `scripts/s7_trades_export.py` -> `data/s7_study/trades_<period>.json`; read-only `GET /api/s7/trades?period=`
+  (development|validation only; 1 test); new page "S7 trades" (`web/src/pages/S7Trades.tsx`: summary, balance curve, trade list, chart
+  with entry/stop/targets/zone/trendline and entry/exit markers; EN/RU). Typecheck/build OK, 68 browser tests pass (page added to the
+  e2e list), checked visually on real data with no console errors.
+- **SMC zones vs outcome** (zones the detector already records in the entry area; analysed, not yet a rule): trades with an
+  **iFVG** in the zone: development 69 trades +28.9 R, validation 41 trades **+11.9 R**; without iFVG: +18.7 R / **-15.0 R**. Three or
+  more zone types: +25.5 R (56) / +7.7 R (32); two or fewer: +22.1 R / -10.8 R. Plain FVG is unstable (+38.7 / -4.5 R); SnR levels
+  are present in almost every trade. Looked at *after* validation, so this is a lead to be tested (walk-forward + forward data), not
+  evidence.
+- **Web redesign v2 (owner asked for a clearer, "wow" site without breaking anything).** App shell: a fixed, grouped sidebar
+  (Home / Market / Strategy S7 / Research / Personal) instead of 11 top tabs, a slim top bar (breadcrumb, Ctrl+K page search, tour,
+  language, theme; the honesty banner stays in the header), a phone drawer + 5-button bottom bar, page transitions. Charts: "fit the
+  whole trade", full screen (Escape closes) and an OHLC crosshair legend; lines/overlays/markers are now re-applied if the chart is
+  re-created. "S7 trades": verdict buttons correct / wrong / unsure (Y/N/U) with a note, stored by the new write path
+  `POST /api/s7/trade_labels` (`data/s7_study/trade_labels.json`; the read-only-surface test lists it), filters (winners / losers /
+  not marked / marked wrong), SMC zones drawn per kind, the first view fits the whole trade. Hash routes and keyboard shortcuts are
+  unchanged. Typecheck/build OK; all 68 browser tests pass (a card-header overflow at 1280 px was found and fixed); checked visually on
+  desktop and phone with no console errors. Lighthouse was not re-run.
+- **Next (proposal, not started):** "when does S7 work" as a walk-forward study - rules learned only from the past, applied to the next
+  unseen window, repeated through 2020-2024 - rather than re-testing on the same validation period.
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -2668,3 +2700,4 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-11 | S7 owner check round 2: labelling stopped ("unsure" 74 %); variants 12 (break = first line close) and 13 (line from the major high) pre-registered, owner chose "test both"; baseline unchanged | implemented (S7 variants 12/13) |
 | 2026-10-11 | S7 evaluation stage: plan + simulator + study; entry search from the arming close (look-ahead fix, spec §3 design change); variant 14 zone convention (owner: test both); development selection (21 configs) picked 15m/FVG/0.382/E3/S1/shallow zone, CFD +47.6 R / 167 trades in-sample; validation awaits the owner | implemented (S7 evaluation, development) |
 | 2026-10-11 | S7 validation run once (owner: "commit and run validation"): CFD -3.05 R / 102 trades, mean R inside the random-entry control; development result not replicated; S7 EXPERIMENTAL, no post-validation tuning | recorded (S7 validation) |
+| 2026-10-11 | Owner: no endless new strategies (S8 draft dropped); cost check shows validation flat even at zero costs; $1000 account replay (1 % risk, 0.01 lots, stop loss <= 5 %) and the read-only "S7 trades" page added | implemented (S7 trades page) |

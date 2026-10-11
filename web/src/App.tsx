@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Aurora } from "./fx";
 import { I18nProvider, useI18n, type Key } from "./i18n";
 
@@ -12,9 +12,10 @@ const Journal = lazy(() => import("./pages/Journal").then((m) => ({ default: m.J
 const Lab = lazy(() => import("./pages/Lab").then((m) => ({ default: m.Lab })));
 const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
 const S7Review = lazy(() => import("./pages/S7Review").then((m) => ({ default: m.S7Review })));
+const S7Trades = lazy(() => import("./pages/S7Trades").then((m) => ({ default: m.S7Trades })));
 const Tour = lazy(() => import("./Tour").then((m) => ({ default: m.Tour })));
 
-const PAGES = ["home", "overview", "signals", "screener", "charts", "strategies", "journal", "lab", "s7review", "settings"] as const;
+const PAGES = ["home", "overview", "signals", "screener", "charts", "strategies", "journal", "lab", "s7review", "s7trades", "settings"] as const;
 type Page = (typeof PAGES)[number];
 
 function pageFromHash(): Page {
@@ -37,6 +38,8 @@ function Shell() {
   const [page, setPage] = useState<Page>(pageFromHash);
   const [theme, setThemeState] = useState<"dark" | "light">(storedTheme);
   const [tour, setTour] = useState(false);
+  const [drawer, setDrawer] = useState(false);
+  const [palette, setPalette] = useState(false);
 
   const setTheme = (v: "dark" | "light") => {
     setThemeState(v);
@@ -57,6 +60,7 @@ function Shell() {
   useEffect(() => {
     const onHash = () => {
       setPage(pageFromHash());
+      setDrawer(false);
       window.scrollTo({ top: 0, behavior: "auto" });
     };
     window.addEventListener("hashchange", onHash);
@@ -66,6 +70,12 @@ function Shell() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPalette((v) => !v);
+        return;
+      }
+      if (palette || drawer) return;
       if (tour || e.metaKey || e.ctrlKey || e.altKey || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName)) return;
       const n = Number(e.key);
       if (n >= 1 && n <= PAGES.length) go(PAGES[n - 1]);
@@ -78,50 +88,160 @@ function Shell() {
 
   const view = {
     home: <Home go={go} startTour={() => setTour(true)} />, overview: <Overview />, signals: <Signals />, screener: <Screener />, charts: <Charts />,
-    strategies: <Strategies />, journal: <Journal />, lab: <Lab />, s7review: <S7Review />, settings: <Settings theme={theme} setTheme={setTheme} />,
+    strategies: <Strategies />, journal: <Journal />, lab: <Lab />, s7review: <S7Review />, s7trades: <S7Trades />, settings: <Settings theme={theme} setTheme={setTheme} />,
   }[page];
 
-  const nav = (p: Page) => (
-    <a
-      key={p}
-      href={`#/${p}`}
-      aria-current={p === page ? "page" : undefined}
-      className="navlink rounded-lg px-3 py-2 text-sm"
-      style={{ color: p === page ? "var(--gold)" : "var(--muted)", background: p === page ? "var(--gold-soft)" : "transparent", textDecoration: "none" }}
-    >
-      {t(`nav_${p}` as Key)}
+  const label = (p: Page) => t(`nav_${p}` as Key);
+  const link = (p: Page, onClick?: () => void) => (
+    <a key={p} href={`#/${p}`} aria-current={p === page ? "page" : undefined} className={`side-link ${p === page ? "on" : ""}`} onClick={onClick}>
+      <Icon name={p} />
+      <span className="truncate">{label(p)}</span>
+      <kbd className="ml-auto hidden xl:inline">{PAGES.indexOf(p) + 1 <= 9 ? PAGES.indexOf(p) + 1 : ""}</kbd>
     </a>
   );
+  const groups = (onClick?: () => void) =>
+    GROUPS.map((g) => (
+      <div key={g.key} className="side-group">
+        {g.key !== "main" && <div className="side-group-label">{t(g.key as Key)}</div>}
+        {g.pages.map((p) => link(p, onClick))}
+      </div>
+    ));
+  const group = GROUPS.find((g) => g.pages.includes(page));
 
   return (
     <>
       <Aurora />
       <a className="skip-link" href="#main">{t("skip")}</a>
-      <header className="sticky top-0 z-20 border-b backdrop-blur" style={{ borderColor: "var(--border)", background: "color-mix(in srgb, var(--bg) 72%, transparent)" }}>
-        <div className="mx-auto flex max-w-7xl items-center gap-4 px-4 py-3">
-          <a href="#/home" className="flex items-center gap-2" style={{ textDecoration: "none", color: "var(--text)" }} aria-label="ARVEN home">
-            <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--card-solid)" stroke="var(--border)" /><path d="M6 24 16 6l10 18h-5l-5-9-5 9z" fill="var(--gold)" /></svg>
-            <span className="text-lg font-semibold tracking-wide">ARVEN</span>
+      <aside className="sidebar" aria-label="Main">
+        <a href="#/home" className="brand" aria-label="ARVEN home">
+          <Logo />
+          <span>
+            <span className="brand-name shine">ARVEN</span>
+            <span className="brand-sub">BTC · decision support</span>
+          </span>
+        </a>
+        <nav className="side-nav" aria-label="Pages">{groups()}</nav>
+      </aside>
+      <div className="app-col">
+        <header className="topbar">
+          <div className="topbar-row">
+            <button className="btn icon lg:hidden" onClick={() => setDrawer(true)} aria-label={t("menu")}>☰</button>
+            <div className="crumbs min-w-0">
+              {group && group.key !== "main" && <span className="faint hidden sm:inline">{t(group.key as Key)} /</span>}
+              <span className="truncate">{label(page)}</span>
+            </div>
+            <div className="ml-auto flex items-center gap-2">
+              <button className="btn search-btn" onClick={() => setPalette(true)} aria-label={t("search")}>
+                <span aria-hidden="true">⌕</span><span className="hidden md:inline">{t("search")}</span><kbd className="hidden md:inline">Ctrl K</kbd>
+              </button>
+              <button className="btn" onClick={() => setTour(true)} aria-label={t("tourTitle")}><span aria-hidden="true">✦</span><span className="hidden md:inline"> {t("tourTitle")}</span></button>
+              <button className="btn" onClick={() => setLang(lang === "en" ? "ru" : "en")} aria-label={t("language")}>{lang.toUpperCase()}</button>
+              <button className="btn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label={t("theme")}>{theme === "dark" ? "☾" : "☀"}</button>
+            </div>
+          </div>
+          <div className="honesty">{t("honesty")}</div>
+        </header>
+        <main id="main" className="mx-auto max-w-7xl px-4 pb-28 pt-6 lg:pb-12">
+          <div key={page} className="page-in">
+            <Suspense fallback={<div className="skeleton" style={{ height: 160 }} aria-hidden="true" />}>{view}</Suspense>
+          </div>
+        </main>
+      </div>
+      <nav className="bottombar lg:hidden" aria-label="Quick">
+        {QUICK.map((p) => (
+          <a key={p} href={`#/${p}`} aria-current={p === page ? "page" : undefined} className={`bottom-link ${p === page ? "on" : ""}`}>
+            <Icon name={p} /><span>{label(p)}</span>
           </a>
-          <nav className="ml-4 hidden gap-1 xl:flex" aria-label="Main">{PAGES.map(nav)}</nav>
-          <div className="ml-auto flex items-center gap-2">
-            <button className="btn" onClick={() => setTour(true)}>{t("tourTitle")}</button>
-            <button className="btn" onClick={() => setLang(lang === "en" ? "ru" : "en")} aria-label={t("language")}>{lang.toUpperCase()}</button>
-            <button className="btn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label={t("theme")}>{theme === "dark" ? "☾" : "☀"}</button>
+        ))}
+        <button className="bottom-link" onClick={() => setDrawer(true)} aria-label={t("menu")}><span className="text-lg leading-none" aria-hidden="true">☰</span><span>{t("menu")}</span></button>
+      </nav>
+      {drawer && (
+        <div className="drawer-backdrop lg:hidden" onClick={() => setDrawer(false)}>
+          <div className="drawer" role="dialog" aria-label={t("menu")} onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-center justify-between">
+              <span className="brand-name shine">ARVEN</span>
+              <button className="btn icon" onClick={() => setDrawer(false)} aria-label={t("chartExit")}>✕</button>
+            </div>
+            {groups(() => setDrawer(false))}
           </div>
         </div>
-        <div className="px-4 pb-2 text-center text-xs" style={{ color: "var(--warn)" }}>{t("honesty")}</div>
-      </header>
-      <main id="main" className="mx-auto max-w-7xl px-4 pb-28 pt-6 xl:pb-12">
-        <div key={page} className="rise">
-          <Suspense fallback={<div className="skeleton" style={{ height: 160 }} aria-hidden="true" />}>{view}</Suspense>
-        </div>
-      </main>
-      <nav className="fixed inset-x-0 bottom-0 z-20 flex justify-around overflow-x-auto border-t px-1 py-2 backdrop-blur xl:hidden" style={{ borderColor: "var(--border)", background: "color-mix(in srgb, var(--bg) 88%, transparent)" }} aria-label="Pages">
-        {PAGES.map(nav)}
-      </nav>
+      )}
+      {palette && <Palette pages={PAGES} label={label} onGo={(p) => { go(p); setPalette(false); }} onClose={() => setPalette(false)} placeholder={t("searchPh")} empty={t("searchNone")} title={t("search")} />}
       {tour && <Suspense fallback={null}><Tour onClose={() => setTour(false)} /></Suspense>}
     </>
+  );
+}
+
+const GROUPS: { key: string; pages: Page[] }[] = [
+  { key: "main", pages: ["home"] },
+  { key: "grp_market", pages: ["overview", "charts", "screener", "signals"] },
+  { key: "grp_s7", pages: ["s7trades", "s7review"] },
+  { key: "grp_research", pages: ["strategies", "lab"] },
+  { key: "grp_me", pages: ["journal", "settings"] },
+];
+const QUICK: Page[] = ["home", "charts", "signals", "s7trades"];
+
+const ICONS: Record<Page, string> = {
+  home: "M3 11 12 3l9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z",
+  overview: "M4 19h16M7 16V9m5 7V5m5 11v-4",
+  charts: "M7 3v4m0 10v4M5 7h4v10H5zM17 5v3m0 9v3m-2-12h4v9h-4z",
+  screener: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zm9 16-4-4",
+  signals: "M13 2 4 14h7l-1 8 9-12h-7z",
+  strategies: "m12 3 9 5-9 5-9-5zm-9 9 9 5 9-5M3 16l9 5 9-5",
+  lab: "M9 3h6m-5 0v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3",
+  journal: "M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3zm0 13a3 3 0 0 1 3-3h11",
+  s7review: "M4 4h16v16H4zm4 8 3 3 5-6",
+  s7trades: "M4 18 9 12l4 3 7-9M15 6h5v5",
+  settings: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm0-6v3m0 14v3M2 12h3m14 0h3M4.9 4.9 7 7m10 10 2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1",
+};
+
+function Icon({ name }: { name: Page }) {
+  return (
+    <svg className="side-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={ICONS[name]} />
+    </svg>
+  );
+}
+
+function Logo() {
+  return (
+    <svg className="logo" width="34" height="34" viewBox="0 0 32 32" aria-hidden="true">
+      <defs>
+        <linearGradient id="lg-gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#f6dd94" /><stop offset="100%" stopColor="#b8862b" /></linearGradient>
+      </defs>
+      <rect width="32" height="32" rx="9" fill="var(--card-solid)" stroke="var(--border)" />
+      <path d="M6 24 16 6l10 18h-5l-5-9-5 9z" fill="url(#lg-gold)" />
+    </svg>
+  );
+}
+
+/** Ctrl+K page switcher: type to filter, arrows to move, Enter to open, Escape to close. */
+function Palette({ pages, label, onGo, onClose, placeholder, empty, title }: { pages: readonly Page[]; label: (p: Page) => string; onGo: (p: Page) => void; onClose: () => void; placeholder: string; empty: string; title: string }) {
+  const [q, setQ] = useState("");
+  const [sel, setSel] = useState(0);
+  const needle = q.trim().toLowerCase();
+  const hits = pages.filter((p) => label(p).toLowerCase().includes(needle) || p.includes(needle));
+  useEffect(() => setSel(0), [q]);
+  const onKey = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Escape") onClose();
+    else if (e.key === "ArrowDown") { e.preventDefault(); setSel((x) => Math.min(hits.length - 1, x + 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setSel((x) => Math.max(0, x - 1)); }
+    else if (e.key === "Enter" && hits[sel]) onGo(hits[sel]);
+  };
+  return (
+    <div className="palette-backdrop" onClick={onClose}>
+      <div className="palette glass" role="dialog" aria-label={title} onClick={(e) => e.stopPropagation()}>
+        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} placeholder={placeholder} aria-label={placeholder} />
+        <div className="palette-list" role="listbox" aria-label={title}>
+          {hits.length === 0 && <div className="faint px-3 py-4 text-sm">{empty}</div>}
+          {hits.map((p, k) => (
+            <button key={p} role="option" aria-selected={k === sel} className={`palette-item ${k === sel ? "on" : ""}`} onMouseEnter={() => setSel(k)} onClick={() => onGo(p)}>
+              <Icon name={p} /><span>{label(p)}</span><kbd className="ml-auto">{pages.indexOf(p) + 1}</kbd>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 

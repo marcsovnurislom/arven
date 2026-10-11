@@ -41,6 +41,14 @@ class ReviewLabelIn(BaseModel):
     note: str = Field(default="", max_length=1000)
 
 
+class TradeLabelIn(BaseModel):
+    """The owner's verdict on one backtested S7 trade (page "S7 trades"): was the trade taken correctly?"""
+
+    trade_id: str = Field(min_length=3, max_length=64, pattern=r"^(15m|1h|4h)-\d+-[LS]$")
+    verdict: str = Field(pattern=r"^(ok|wrong|unsure)$")
+    note: str = Field(default="", max_length=2000)
+
+
 def r_multiple(entry: dict) -> float | None:
     """Result in units of the planned risk (needs entry, stop and exit); fees are not part of R here."""
     if entry.get("exit") is None or entry.get("stop") is None:

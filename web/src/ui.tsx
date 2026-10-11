@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ApiError } from "./api";
 import { useI18n } from "./i18n";
 
@@ -14,8 +14,8 @@ export function Card({ title, children, right, className = "" }: { title?: React
   return (
     <section className={`glass rise p-4 sm:p-5 ${className}`}>
       {(title || right) && (
-        <header className="mb-3 flex items-center justify-between gap-3">
-          <h2 className="text-sm font-medium uppercase tracking-wider muted">{title}</h2>
+        <header className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+          <h2 className="min-w-0 break-words text-sm font-medium uppercase tracking-wider muted">{title}</h2>
           {right}
         </header>
       )}
@@ -80,9 +80,35 @@ export function Sparkline({ values, up }: { values: number[]; up: boolean }) {
 
 export function PageTitle({ children, sub }: { children: ReactNode; sub?: ReactNode }) {
   return (
-    <div className="mb-4">
-      <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{children}</h1>
-      {sub && <p className="mt-1 text-sm muted">{sub}</p>}
+    <div className="page-title mb-5">
+      <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">{children}</h1>
+      {sub && <p className="mt-2 max-w-3xl text-sm leading-relaxed muted">{sub}</p>}
+    </div>
+  );
+}
+
+/** Frame around a chart: "fit" and "full screen" buttons (Escape leaves full screen). The child gets ``fill`` (always fill
+ * this frame) and ``fitKey`` (bumped by the fit button). */
+export function ChartFrame({ height, labels, children }: { height: number; labels: { fit: string; full: string; exit: string }; children: (o: { fill: true; fitKey: number }) => ReactNode }) {
+  const [full, setFull] = useState(false);
+  const [fitKey, setFitKey] = useState(0);
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setFull(false); };
+    window.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = prev; };
+  }, [full]);
+  return (
+    <div className={full ? "chart-full" : "chart-frame"} style={full ? undefined : { height }}>
+      <div className="chart-tools">
+        <button className="btn sm" onClick={() => setFitKey((k) => k + 1)} title={labels.fit} aria-label={labels.fit}>⤢ <span className="hidden sm:inline">{labels.fit}</span></button>
+        <button className="btn sm" onClick={() => setFull((f) => !f)} title={full ? labels.exit : labels.full} aria-label={full ? labels.exit : labels.full} aria-pressed={full}>
+          {full ? "✕" : "⛶"} <span className="hidden sm:inline">{full ? labels.exit : labels.full}</span>
+        </button>
+      </div>
+      {children({ fill: true, fitKey })}
     </div>
   );
 }
