@@ -1,7 +1,7 @@
 # ARVEN Phase 6 Telegram configuration (docs/ARVEN_MASTER_PROMPT.md section 5.4). The bot token and the
 # chat-id allow-list are secrets (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_IDS in .env), never here.
 
-dry_run: true          # true: outbox entries are formatted and recorded but never actually sent to Telegram -
+dry_run: false          # true: outbox entries are formatted and recorded but never actually sent to Telegram -
                         # the safe default until the owner supplies a real bot token and flips this deliberately.
 command_poll_timeout_seconds: 25   # Telegram long-poll getUpdates timeout (0-50s; Telegram's own limit)
 max_send_attempts: 5
