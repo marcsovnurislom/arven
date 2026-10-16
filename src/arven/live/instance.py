@@ -9,6 +9,15 @@ from pathlib import Path
 from typing import IO
 
 
+def open_log(path: Path, max_bytes: int = 5_000_000) -> IO[str]:
+    """Open ``path`` for appending, line-buffered. A file already over ``max_bytes`` is first moved to ``<name>.1``
+    (replacing an older one), so a long-running windowless process's log stays bounded across restarts."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and path.stat().st_size > max_bytes:
+        path.replace(path.with_name(path.name + ".1"))
+    return open(path, "a", encoding="utf-8", buffering=1)  # noqa: SIM115 - lives as long as the process
+
+
 def acquire(path: Path) -> IO[str] | None:
     """The open, locked file (keep a reference for the process's lifetime), or ``None`` if another process holds it."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -33,4 +42,4 @@ def acquire(path: Path) -> IO[str] | None:
     return fh
 
 
-__all__ = ["acquire"]
+__all__ = ["acquire", "open_log"]

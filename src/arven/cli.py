@@ -559,15 +559,28 @@ def cmd_paper_run(cfg: AppConfig, args: argparse.Namespace) -> int:
 
 def cmd_web(cfg: AppConfig, args: argparse.Namespace) -> int:
     """Phase 8: serve the read-only HTTP API (and the built web app, if present) on localhost."""
+    from pathlib import Path
+
     import uvicorn
 
+    from arven.live.instance import acquire, open_log
     from arven.web.app import create_app
 
     if args.host not in ("127.0.0.1", "localhost", "::1") and not args.allow_remote:
         print(f"refusing to bind to {args.host}: ARVEN's API is local-only by default (pass --allow-remote to override).")
         return 2
-    print(f"ARVEN web: http://{args.host}:{args.port}  (API docs at /api/docs; read-only, no order endpoints)")
-    uvicorn.run(create_app(cfg, args.config_dir), host=args.host, port=args.port, log_level="info")
+    if args.log_file:  # windowless (pythonw) run: output to a file, without the per-request access lines
+        sys.stdout = sys.stderr = open_log(Path(args.log_file))
+    # Windows lets a second socket bind the same port, so a watchdog restart is kept single by an OS lock instead.
+    lock = acquire(cfg.data.data_dir / "live" / f"web_{args.port}.lock")
+    if lock is None:
+        print(f"another `arven web` is already serving port {args.port} - exiting.", flush=True)
+        return 0
+    print(f"ARVEN web: http://{args.host}:{args.port}  (API docs at /api/docs; read-only, no order endpoints)", flush=True)
+    try:
+        uvicorn.run(create_app(cfg, args.config_dir), host=args.host, port=args.port, log_level="info", access_log=not args.log_file)
+    finally:
+        lock.close()
     return 0
 
 
@@ -577,6 +590,20 @@ def _config_dir(args: argparse.Namespace):
     from arven.core.config import DEFAULT_CONFIG_DIR
 
     return Path(args.config_dir) if args.config_dir else DEFAULT_CONFIG_DIR
+
+
+def cmd_backup(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Zip the forward signal record, runtime state and config (and, with --with-db, the DuckDB file) into data/backups."""
+    from arven.core.time import utc_now
+    from arven.live.backup import make_backup
+
+    res = make_backup(cfg.data.data_dir, _config_dir(args), utc_now(), keep=args.keep,
+                      database_path=cfg.data.database_path if args.with_db else None)
+    print(f"backup: {res.path}  ({res.files} files, {res.bytes_in / 1e6:.1f} MB before compression, "
+          f"{res.path.stat().st_size / 1e6:.1f} MB zipped, database {'included' if res.database_included else 'not included'})")
+    for old in res.removed:
+        print(f"  removed old backup {old.name}")
+    return 0
 
 
 def cmd_live_tick(cfg: AppConfig, args: argparse.Namespace) -> int:
@@ -625,13 +652,12 @@ def cmd_live_run(cfg: AppConfig, args: argparse.Namespace) -> int:
     from arven.core.live_config import load_live_config
     from arven.core.telegram_config import allowed_chat_ids, load_telegram_config
     from arven.live.app import build_deps, telegram_token_configured
-    from arven.live.instance import acquire
+    from arven.live.instance import acquire, open_log
     from arven.live.loop import live_dir, run_live_forever
     from arven.paper.runtime import run_once
 
     if args.log_file:  # e.g. under pythonw (no console): everything printed goes to this file instead
-        log = open(args.log_file, "a", encoding="utf-8", buffering=1)  # noqa: SIM115 - lives as long as the process
-        sys.stdout = sys.stderr = log
+        sys.stdout = sys.stderr = open_log(Path(args.log_file))
     lock = acquire(live_dir(cfg) / "live.lock")
     if lock is None:
         print("another `arven live run` is already running (data/live/live.lock) - exiting.", flush=True)
@@ -1059,10 +1085,16 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("run")
     q.set_defaults(func=cmd_wfo_show)
 
+    q = sub.add_parser("backup", help="zip the signal record, runtime state and config into data/backups (keeps the newest N)")
+    q.add_argument("--with-db", action="store_true", help="also copy the DuckDB database (consistent: taken under a read lock)")
+    q.add_argument("--keep", type=int, default=10, help="how many backups to keep (default 10)")
+    q.set_defaults(func=cmd_backup)
+
     q = sub.add_parser("web", help="Phase 8: local read-only HTTP API + web app")
     q.add_argument("--host", default="127.0.0.1")
     q.add_argument("--port", type=int, default=8000)
     q.add_argument("--allow-remote", action="store_true", help="allow binding to a non-local address (not recommended)")
+    q.add_argument("--log-file", help="append all output to this file, without access lines (for a windowless pythonw run)")
     q.set_defaults(func=cmd_web)
     p = sub.add_parser("paper", help="Stage 8: the paper-signal loop (forward-only, simulated fills on live data)")
     psub = p.add_subparsers(dest="paper_command", required=True)

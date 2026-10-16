@@ -134,8 +134,15 @@ not restarted, and nothing ran for two days. `scripts\run_live.bat` is still the
   Paper Run"` if you want the hourly run back.
 - **Power:** a sleeping laptop is not 24/7 (`docs/RUNTIME_OPERATIONS.md`, "Power settings"). After a sleep, the
   process catches up automatically.
-- **The web app** (`arven web`) reads the same files and the database read-only. During the few seconds a tick
-  writes, an API call may answer "database busy, retrying".
+- **The web app** (`arven web`, http://127.0.0.1:8000) reads the same files and the database read-only. During the
+  few seconds a tick writes, an API call may answer "database busy, retrying". It has its own task, **"ARVEN Web"**,
+  built the same way: windowless, output in `data\live\web_process.log` (no per-request lines), a 5-minute
+  watchdog trigger, and a lock (`data\live\web_8000.lock`) so a second copy exits at once. It was added on 2026-10-16
+  after the console window of `run_web.bat` was closed and the site went down. To register it, use the recipe above
+  with `-Argument "-m arven web --log-file data\live\web_process.log"` and `-TaskName "ARVEN Web"`. Stop it with
+  `Disable-ScheduledTask -TaskName "ARVEN Web"`, then end its `pythonw` process. `scripts\run_web.bat` is still
+  there for a manual run in a console.
+- **Log size:** `--log-file` logs over 5 MB are moved to `<name>.1` when the process starts, replacing an older `.1`.
 
 ## 5. Telegram
 

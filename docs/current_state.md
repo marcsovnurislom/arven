@@ -2089,6 +2089,32 @@ The restarted process caught up the missing two days in one tick: 6 new signals 
 `scripts/run_web.bat` (starts the web app in its own window). The laptop's sleep settings remain the owner's choice
 (`docs/RUNTIME_OPERATIONS.md`, "Power settings").
 
+Later on 2026-10-16:
+- The laptop slept from 02:21 to 08:26 UTC. On waking, the first tick was `stale` (network not up yet), and the
+  following polls caught up. This is the expected behaviour.
+- The web app was down again: the console window of `run_web.bat` had been closed. It now has its own Task Scheduler
+  task, **"ARVEN Web"**, built like "ARVEN Live":
+  - `pythonw -m arven web --log-file data\live\web_process.log`, without per-request access lines;
+  - a 5-minute watchdog trigger;
+  - an OS lock `data/live/web_<port>.lock`, because Windows lets a second socket bind the same port. A second copy
+    exits at once (checked by hand).
+- `--log-file` logs (live and web) over 5 MB are moved to `<name>.1` at process start (`open_log`, tested).
+- **Backup:** `arven backup` (`src/arven/live/backup.py`, 3 tests).
+  - It zips what cannot be downloaded again: `data/signals`, `data/live`, `data/telegram`, the top-level files of
+    `data/paper` (not the hourly run directories) and `config/*.yaml`. Lock files are left out.
+  - `--with-db` adds a consistent DuckDB copy, taken while holding a read-only connection (DuckDB then refuses a
+    writer).
+  - It keeps the newest 10 archives (`--keep`) and writes through a `.part` file.
+  - First real run: 39 files, 0.1 MB zipped. With the database: 258 MB zipped, 44 s; the live loop was unaffected.
+  - It is not scheduled. The owner runs it, or it can be added as a task later.
+- **`docs/DEFENCE_DEMO.md`** (in Russian), the master prompt's 10-minute walkthrough: data → features → regime →
+  strategies → decision → risk → signal → Telegram → web → honest results, plus likely questions. README links it
+  and gained backup and troubleshooting notes.
+- **Known growth:** every hourly legacy paper run writes a full replay of the forward period (~1.6 MB now, and it grows
+  with the period), so `data/paper` grows by about 40 MB a day and faster later (197 MB after 149 runs). There is
+  plenty of disk (79 GB free), but a retention rule (e.g. keep the newest runs plus one per day) is an open item.
+  Nothing has been deleted.
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -2798,3 +2824,5 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-11 | Stage 8 D2 changed: open interest is REST-tailed (public futures/data endpoints, verified against bulk metrics: identical OI, REST timestamp = bulk create_time + 5 min) because Crowded Shorts needs oi_z; architecture.md updated | implemented |
 | 2026-10-11 | The live process also runs the Stage 8 hourly paper run (one DuckDB writer); owner approved switching Task Scheduler: 'ARVEN Live' installed (at log-on, restart on failure), 'ARVEN Paper Run' disabled | approved, done |
 | 2026-10-16 | Live process ran in a closable console window and stopped for ~46 h after it was closed; now windowless (pythonw) with a 5-minute watchdog trigger, a single-instance lock and a stop file that keeps it stopped | implemented |
+| 2026-10-16 | Web app also closable (console window) and went down; added a windowless 'ARVEN Web' task with a 5-minute watchdog and a per-port lock; --log-file logs rotate at 5 MB on start | implemented |
+| 2026-10-16 | Added `arven backup` (signal record, runtime state, config; optional consistent DB copy; keeps 10) and docs/DEFENCE_DEMO.md; legacy paper run directories grow ~40 MB/day - retention left open, nothing deleted | implemented |
