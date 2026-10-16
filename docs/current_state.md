@@ -2110,6 +2110,13 @@ Later on 2026-10-16:
 - **`docs/DEFENCE_DEMO.md`** (in Russian), the master prompt's 10-minute walkthrough: data → features → regime →
   strategies → decision → risk → signal → Telegram → web → honest results, plus likely questions. README links it
   and gained backup and troubleshooting notes.
+- **Telegram is live (2026-10-16).** The owner created a bot and put the token and two chat ids (a private chat
+  and a group) in `.env`.
+  - `arven telegram test` delivered to both chats.
+  - `dry_run` was set to `false` and the live process was restarted through the stop file.
+  - The start line reads "Telegram: 2 chat(s), sending, token set", and the "live loop started" system alert went to
+    both chats (outbox status `sent`).
+  - Still to be observed: a real signal or update arriving, and a bot command answered.
 - **Known growth:** every hourly legacy paper run writes a full replay of the forward period (~1.6 MB now, and it grows
   with the period), so `data/paper` grows by about 40 MB a day and faster later (197 MB after 149 runs). There is
   plenty of disk (79 GB free), but a retention rule (e.g. keep the newest runs plus one per day) is an open item.
@@ -2826,3 +2833,4 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-16 | Live process ran in a closable console window and stopped for ~46 h after it was closed; now windowless (pythonw) with a 5-minute watchdog trigger, a single-instance lock and a stop file that keeps it stopped | implemented |
 | 2026-10-16 | Web app also closable (console window) and went down; added a windowless 'ARVEN Web' task with a 5-minute watchdog and a per-port lock; --log-file logs rotate at 5 MB on start | implemented |
 | 2026-10-16 | Added `arven backup` (signal record, runtime state, config; optional consistent DB copy; keeps 10) and docs/DEFENCE_DEMO.md; legacy paper run directories grow ~40 MB/day - retention left open, nothing deleted | implemented |
+| 2026-10-16 | Telegram switched on by the owner (.env token + 2 chats, dry_run false); test message and live start alert delivered | done |
