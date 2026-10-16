@@ -2071,6 +2071,24 @@ how to change/add strategies: `docs/LIVE_SIGNALS.md`. Strategy rules were not ch
     and 'ARVEN Paper Run' disabled; the scheduled process resumed from the saved state and evaluated the 14:45 close `ok`.)
   - The master prompt's 14-day continuous forward-operation gate has not been run.
 
+**Live process hardening (2026-10-16).** From 2026-10-11 to 2026-10-16 the live loop:
+- handled a network outage correctly (2026-10-13: Binance unreachable, `getaddrinfo failed`; ticks `stale`, no signals;
+  caught up after the network returned, one new S6 signal);
+- then stopped for ~46 h: the console window of `run_live.bat` was closed on 2026-10-14 (task result `0xC000013A` =
+  Ctrl+C / window closed). Windows does not treat that as a failure, so "restart on failure" never fired. The
+  laptop's Modern Standby also paused it at times.
+
+Fixes:
+- The task now runs `pythonw` without a window (`arven live run --log-file`).
+- A second trigger re-checks every 5 minutes.
+- A single-instance OS lock, `data/live/live.lock` (`src/arven/live/instance.py`, tested): a second copy exits at once
+  (checked by hand).
+- A present `live.stop` keeps the process stopped instead of being deleted at start.
+
+The restarted process caught up the missing two days in one tick: 6 new signals (S5 x3, S6 x3), 10 updates. Also added
+`scripts/run_web.bat` (starts the web app in its own window). The laptop's sleep settings remain the owner's choice
+(`docs/RUNTIME_OPERATIONS.md`, "Power settings").
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -2779,3 +2797,4 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-11 | Owner: finish the project to real-time signals, strategies unchanged, keep them changeable. Built `src/arven/live/` + `config/live.yaml` (registry of strategy kinds, per-strategy enabled/version/params), `arven live run|tick|status|heartbeat`, `scripts/run_live.bat`; live adapters reuse the research code and reproduced every forward S7 and Crowded Shorts research trade bit-identically | implemented (live signal loop) |
 | 2026-10-11 | Stage 8 D2 changed: open interest is REST-tailed (public futures/data endpoints, verified against bulk metrics: identical OI, REST timestamp = bulk create_time + 5 min) because Crowded Shorts needs oi_z; architecture.md updated | implemented |
 | 2026-10-11 | The live process also runs the Stage 8 hourly paper run (one DuckDB writer); owner approved switching Task Scheduler: 'ARVEN Live' installed (at log-on, restart on failure), 'ARVEN Paper Run' disabled | approved, done |
+| 2026-10-16 | Live process ran in a closable console window and stopped for ~46 h after it was closed; now windowless (pythonw) with a 5-minute watchdog trigger, a single-instance lock and a stop file that keeps it stopped | implemented |

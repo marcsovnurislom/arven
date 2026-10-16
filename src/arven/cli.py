@@ -625,9 +625,17 @@ def cmd_live_run(cfg: AppConfig, args: argparse.Namespace) -> int:
     from arven.core.live_config import load_live_config
     from arven.core.telegram_config import allowed_chat_ids, load_telegram_config
     from arven.live.app import build_deps, telegram_token_configured
+    from arven.live.instance import acquire
     from arven.live.loop import live_dir, run_live_forever
     from arven.paper.runtime import run_once
 
+    if args.log_file:  # e.g. under pythonw (no console): everything printed goes to this file instead
+        log = open(args.log_file, "a", encoding="utf-8", buffering=1)  # noqa: SIM115 - lives as long as the process
+        sys.stdout = sys.stderr = log
+    lock = acquire(live_dir(cfg) / "live.lock")
+    if lock is None:
+        print("another `arven live run` is already running (data/live/live.lock) - exiting.", flush=True)
+        return 0
     live = load_live_config(args.config_dir)
     if args.poll_seconds is not None:
         live = live.model_copy(update={"poll_seconds": args.poll_seconds})
@@ -637,8 +645,10 @@ def cmd_live_run(cfg: AppConfig, args: argparse.Namespace) -> int:
     legacy = (lambda now: run_once(cfg, fcfg, bt, lambda: _build_pipeline(cfg, args, bt), now=now)) if live.run_legacy_paper else None
     deps = build_deps(cfg, fcfg, live, _config_dir(args), tcfg, chat_ids, legacy_tick=legacy)
     stop_file = Path(args.stop_file) if args.stop_file else None
-    if stop_file is not None and stop_file.exists():
-        stop_file.unlink()
+    if stop_file is not None and stop_file.exists():  # a stop request stays in force (the watchdog would restart us)
+        print(f"stop file {stop_file} exists - not starting. Delete it to let the live process run.", flush=True)
+        lock.close()
+        return 0
 
     async def main() -> None:
         stop_event = asyncio.Event()
@@ -668,6 +678,8 @@ def cmd_live_run(cfg: AppConfig, args: argparse.Namespace) -> int:
         asyncio.run(main())
     except KeyboardInterrupt:
         print("stopped (Ctrl+C).")
+    finally:
+        lock.close()
     return 0
 
 
@@ -1079,6 +1091,7 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--poll-seconds", type=float, default=None, help="override poll_seconds from config/live.yaml")
     q.add_argument("--stop-file", help="create this file to stop the process gracefully (checked once a second)")
     q.add_argument("--no-telegram", action="store_true", help="do not queue Telegram alerts")
+    q.add_argument("--log-file", help="append all output to this file (for a windowless pythonw run)")
     q.set_defaults(func=cmd_live_run)
     q = lsub.add_parser("tick", help="one pass: update data, scan every enabled strategy, track stored signals, queue alerts")
     q.add_argument("--no-telegram", action="store_true", help="do not queue Telegram alerts")

@@ -103,25 +103,35 @@ Stop it with Ctrl+C. Other commands:
 - `arven live status`: enabled strategies, last summary, heartbeat.
 - `arven live heartbeat`: exits non-zero if the process is stale or in error.
 
-**Always on (Windows Task Scheduler).** `scripts\run_live.bat` is the action. It replaces the hourly "ARVEN Paper
-Run" task, because the live process does that hourly run itself and there must be only one database writer:
+**Always on (Windows Task Scheduler).** The task runs the process **without a window** (`pythonw`, output in
+`data\live\live_process.log`), so it cannot be closed by accident. A second trigger re-checks every 5 minutes and
+starts the process if it is not running. A second copy exits at once, because the first holds the lock
+`data\live\live.lock`. The task replaces the hourly "ARVEN Paper Run" task: the live process does that hourly run
+itself, and there must be only one database writer.
 
 ```powershell
 Disable-ScheduledTask -TaskName "ARVEN Paper Run"
-$action = New-ScheduledTaskAction -Execute "C:\Users\Victus\arven\scripts\run_live.bat"
-$trigger = New-ScheduledTaskTrigger -AtLogOn
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-    -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Days 3650) `
-    -MultipleInstances IgnoreNew
-Register-ScheduledTask -TaskName "ARVEN Live" -Action $action -Trigger $trigger -Settings $settings `
-    -Description "ARVEN live paper signals (arven live run). Restarts on failure; restart-safe."
+$repo = "C:\Users\Victus\arven"
+$action = New-ScheduledTaskAction -Execute "$repo\.venv\Scripts\pythonw.exe" `
+    -Argument "-m arven live run --stop-file data\live\live.stop --log-file data\live\live_process.log" -WorkingDirectory $repo
+$t1 = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$t2 = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5)
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 999 `
+    -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -StartWhenAvailable
+Register-ScheduledTask -TaskName "ARVEN Live" -Action $action -Trigger @($t1, $t2) -Settings $settings
 Start-ScheduledTask -TaskName "ARVEN Live"
 ```
 
-- **Stop gracefully:** create `data\live\live.stop`. The process exits within a second and removes the file at its
-  next start.
-- **Stop for good:** run `Unregister-ScheduledTask -TaskName "ARVEN Live"`, then `Enable-ScheduledTask -TaskName
-  "ARVEN Paper Run"` if you want the hourly run back.
+Why windowless: the first version ran `run_live.bat` in a console window. On 2026-10-14 that window was closed, and
+the task ended with `0xC000013A` (Ctrl+C / window closed). Windows does not count that as a failure, so the task was
+not restarted, and nothing ran for two days. `scripts\run_live.bat` is still there for a manual run in a console.
+
+- **Stop:** create `data\live\live.stop`. The process exits within a second. While the file exists, the watchdog's
+  restarts exit immediately.
+- **Start again:** delete `data\live\live.stop`. The watchdog starts the process within 5 minutes, or run
+  `Start-ScheduledTask -TaskName "ARVEN Live"` to start it at once.
+- **Remove for good:** `Unregister-ScheduledTask -TaskName "ARVEN Live"`, then `Enable-ScheduledTask -TaskName "ARVEN
+  Paper Run"` if you want the hourly run back.
 - **Power:** a sleeping laptop is not 24/7 (`docs/RUNTIME_OPERATIONS.md`, "Power settings"). After a sleep, the
   process catches up automatically.
 - **The web app** (`arven web`) reads the same files and the database read-only. During the few seconds a tick
