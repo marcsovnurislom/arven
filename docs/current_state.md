@@ -1,6 +1,6 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-11 (live signal loop: `arven live run` runs all five strategies in real time, configurable in config/live.yaml, open interest REST-tailed, Telegram-ready; earlier: every strategy's trades on the Strategies page; S7 trade-management study - no variant helps, S7 forward -7.3 R; earlier: Crowded Shorts sealed test run once: CONFIRMED by the pre-registered rule but weak - CFD +1.68 R / 25 trades, PF 1.27; earlier: web redesign v2: grouped sidebar/drawer/Ctrl+K, chart fit/full-screen/OHLC legend, S7 trade verdicts + SMC zones on the trades page; SMC-zone breakdown of S7 trades; earlier: S7 trades page + $1000 account replay + cost check; owner: no more new strategies; earlier: S7 validation run once: CFD -3.05 R / 102 trades, inside the random-entry control - the development result did not replicate, S7 EXPERIMENTAL; earlier: S7 evaluation stage, development selection CFD +47.6 R / 167 trades in-sample; earlier: S7 owner check round 2 done, variants 12/13 added, labelling stopped; earlier: S7 detector v2 from the owner's round-1 check of 100 setups; earlier: Signal-product build-out Phase 8 complete (8a API, 8b React app, 8c browser tests/Lighthouse); earlier: Strategies S5 and S6 and an ML signal filter (no value) added and evaluated; forward evaluation of S4/S5/S6 wired (first 14 weeks negative); Phase 7b, part 2c: exit-variant study + CFD cost profile; part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
+_Last updated: 2026-10-16 (improvement pass: S7 detector ~5x faster with identical results, forward review rule, weekly report, daily backup and retention, server deployment files, Telegram live; earlier: live signal loop: `arven live run` runs all five strategies in real time, configurable in config/live.yaml, open interest REST-tailed, Telegram-ready; earlier: every strategy's trades on the Strategies page; S7 trade-management study - no variant helps, S7 forward -7.3 R; earlier: Crowded Shorts sealed test run once: CONFIRMED by the pre-registered rule but weak - CFD +1.68 R / 25 trades, PF 1.27; earlier: web redesign v2: grouped sidebar/drawer/Ctrl+K, chart fit/full-screen/OHLC legend, S7 trade verdicts + SMC zones on the trades page; SMC-zone breakdown of S7 trades; earlier: S7 trades page + $1000 account replay + cost check; owner: no more new strategies; earlier: S7 validation run once: CFD -3.05 R / 102 trades, inside the random-entry control - the development result did not replicate, S7 EXPERIMENTAL; earlier: S7 evaluation stage, development selection CFD +47.6 R / 167 trades in-sample; earlier: S7 owner check round 2 done, variants 12/13 added, labelling stopped; earlier: S7 detector v2 from the owner's round-1 check of 100 setups; earlier: Signal-product build-out Phase 8 complete (8a API, 8b React app, 8c browser tests/Lighthouse); earlier: Strategies S5 and S6 and an ML signal filter (no value) added and evaluated; forward evaluation of S4/S5/S6 wired (first 14 weeks negative); Phase 7b, part 2c: exit-variant study + CFD cost profile; part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
 
 ## Phase
 
@@ -2122,6 +2122,46 @@ Later on 2026-10-16:
   plenty of disk (79 GB free), but a retention rule (e.g. keep the newest runs plus one per day) is an open item.
   Nothing has been deleted.
 
+**Improvement pass (2026-10-16, owner: "do all the improvement steps you listed"; no server yet).**
+- **S7 detector about 5 times faster, identical results.** `src/arven/engine/strategy_s7.py`:
+  - `nan_to_num(ATR)` and the swing lows are computed once instead of per candidate line or setup;
+  - the confluence swing levels are filtered with vector comparisons;
+  - the line search takes its swings by bisection (`_known_swings`).
+
+  On the real 15m history it fell from 80 s to 14 s, and all 590 (live configuration) + 1567 (defaults) setups are
+  field-for-field identical to the previous code. `tests/engine/test_strategy_s7_speed.py` pins each equivalence and
+  causality. The first live tick on the new code finished 49 s after its close (it used to take 1.5-2.5 min).
+- **Forward review rule** (`src/arven/live/review.py`, `config/live.yaml` `forward_review`, tests hand-computed).
+  - Rule: at least 30 closed signals, then a 95 % normal-approximation interval of mean net R: `losing`, `positive`,
+    `inconclusive` or `too_few`.
+  - It only flags. The verdict is in `strategies_summary.json` (`review`), on the web Strategies page (EN/RU) and in
+    the weekly report.
+  - The thresholds are textbook values, set when S6's numbers were already visible, so this is a monitoring rule.
+  - First verdicts: S5 inconclusive [-0.65, +0.11]; S6 inconclusive [-0.33, +0.04] (167 closed, -24.5 R);
+    Crowded Shorts, S4 and S7 too few.
+- **Weekly forward report** to Telegram on Mondays with the daily summary (`weekly_report_weekday`,
+  `format_weekly_report`, tested).
+- **Daily housekeeping in the live process** at 01 UTC (`config/live.yaml` `maintenance`, `src/arven/live/maintenance.py`,
+  tested):
+  - a backup with the database, keeping 7;
+  - retention of hourly paper-run directories: the newest 48 plus the last of each day. `runs.jsonl` keeps every entry.
+    The Streamlit dashboard lists only runs whose directory exists.
+  - A failure is alerted once, not retried every poll.
+  - First run, 2026-10-16 10:41 UTC: backup 260 MB; 87 old run directories removed (120 MB freed), 58 kept.
+- **Tests no longer see the real `.env`** (`tests/conftest.py` autouse fixture). After the owner created `.env`, a
+  Telegram test had started reading the real token. Tests can now never reach a real chat.
+- **Server deployment prepared** (no server yet): `deploy/linux/arven-live.service`, `deploy/linux/arven-web.service`
+  (systemd, restart always), and `docs/DEPLOY_SERVER.md` (in Russian: VPS choice, Python 3.13, moving code and
+  data, `.env`, switching the laptop off first, SSH tunnel to the site, updates).
+- **Web:**
+  - The Strategies page shows the verdict, the 95 % interval and the max drawdown.
+  - The trade viewer moved below the strategy cards: mobile Lighthouse performance on that page had fallen to 89
+    since the viewer was added on 10-11; it is now 90-91.
+  - Lighthouse re-run: performance min 90, accessibility min 95, best-practices 100, SEO 100.
+  - Playwright: 72 passed (2 new tests).
+- **`docs/RESULTS_FOR_THESIS.md`** (in Russian): every evaluation in one place, with sources, for the thesis.
+- **Tests:** full suite 2340 passed, 13 skipped (real-data checks, off by default).
+
 ## Full backfill results (per yearly chunk)
 
 Procedure per chunk:
@@ -2834,3 +2874,4 @@ sequentially, based on this run's rate of roughly 2.3 s per file.
 | 2026-10-16 | Web app also closable (console window) and went down; added a windowless 'ARVEN Web' task with a 5-minute watchdog and a per-port lock; --log-file logs rotate at 5 MB on start | implemented |
 | 2026-10-16 | Added `arven backup` (signal record, runtime state, config; optional consistent DB copy; keeps 10) and docs/DEFENCE_DEMO.md; legacy paper run directories grow ~40 MB/day - retention left open, nothing deleted | implemented |
 | 2026-10-16 | Telegram switched on by the owner (.env token + 2 chats, dry_run false); test message and live start alert delivered | done |
+| 2026-10-16 | Improvement pass: S7 detector ~5x faster with identical setups; forward review rule (95 % CI, flags only); weekly report; daily backup + paper-run retention in the live process; deployment files for a Linux server; results summary for the thesis | implemented |

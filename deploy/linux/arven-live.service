@@ -1,0 +1,23 @@
+# ARVEN live signal process on a Linux server (docs/DEPLOY_SERVER.md). Decision support only - it never places an order.
+# Install: sudo cp deploy/linux/arven-live.service /etc/systemd/system/ && sudo systemctl daemon-reload
+#          sudo systemctl enable --now arven-live
+[Unit]
+Description=ARVEN live signals (paper signals, Telegram alerts)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=arven
+WorkingDirectory=/opt/arven
+ExecStart=/opt/arven/.venv/bin/python -m arven live run --stop-file data/live/live.stop --log-file data/live/live_process.log
+# restart on any exit (crash, kill, network trouble at start); a present stop file makes it exit at once instead
+Restart=always
+RestartSec=30
+# a tick may be mid-write: give it time to finish after SIGTERM before it is killed
+TimeoutStopSec=180
+KillSignal=SIGINT
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

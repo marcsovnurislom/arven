@@ -77,7 +77,12 @@ def seed(data_dir: Path):
     stat = {"signals": 12, "closed": 11, "open": 1, "signals_per_week": 1.5, "total_r": -1.2, "mean_r": -0.11, "win_rate": 0.36}
     (paper / "strategies_summary.json").write_text(json.dumps({
         "generated_at": "2026-10-01T00:00:00+00:00", "forward_start_ms": now - 30 * 86_400_000, "data_through_ms": now, "cost_profile": "fixture",
-        "strategies": {"s4_impulse_retest": stat, "s5_squeeze_breakout": stat, "s6_trend_pullback": stat},
+        # s4 without a "review" (a summary written before 2026-10-16), s5 too few, s6 losing (arven.live.review)
+        "strategies": {"s4_impulse_retest": stat,
+                       "s5_squeeze_breakout": stat | {"review": {"n": 11, "min_closed": 30, "mean_r": -0.11, "ci_low": -0.6, "ci_high": 0.38,
+                                                                 "profit_factor": 0.8, "max_dd_r": 3.1, "verdict": "too_few"}},
+                       "s6_trend_pullback": stat | {"review": {"n": 40, "min_closed": 30, "mean_r": -0.3, "ci_low": -0.52, "ci_high": -0.08,
+                                                               "profit_factor": 0.6, "max_dd_r": 14.0, "verdict": "losing"}}},
         "agreement_hypothesis": {"alone": {"n": 20, "mean_r": -0.1, "win_rate": 0.35}, "agreed_by_another_strategy": {"n": 6, "mean_r": -0.3, "win_rate": 0.33}},
         "trades": [
             {"t": now - (60 - i) * 12 * HOUR, "strategy": ("s4_impulse_retest", "s5_squeeze_breakout", "s6_trend_pullback")[i % 3], "side": 1 if i % 2 else -1,

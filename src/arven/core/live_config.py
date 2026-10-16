@@ -33,6 +33,23 @@ class LiveTelegramConfig(_StrictModel):
     send_updates: bool = True  # also TP hit / stop moved / filled / cancelled / closed
     commands: bool = True  # answer bot commands from the allow-listed chats
     daily_summary_hour_utc: int | None = Field(default=0, ge=0, le=23)
+    weekly_report_weekday: int | None = Field(default=0, ge=0, le=6)  # 0 = Monday, sent with the daily summary; None = off
+
+
+class ForwardReviewConfig(_StrictModel):
+    """The forward review rule (arven.live.review): fixed 2026-10-16, flags only, never switches a strategy off."""
+
+    min_closed: int = Field(default=30, ge=2)
+
+
+class MaintenanceConfig(_StrictModel):
+    """Daily housekeeping in the live process (arven.live.maintenance, arven.live.backup)."""
+
+    hour_utc: int | None = Field(default=1, ge=0, le=23)  # None = no daily housekeeping
+    backup: bool = True
+    backup_with_db: bool = True  # also a consistent copy of the DuckDB file (~260 MB zipped)
+    backup_keep: int = Field(default=7, ge=1)
+    paper_keep_recent: int | None = Field(default=48, ge=1)  # hourly paper-run dirs kept (plus the last of each day); None = keep all
 
 
 class LiveConfig(_StrictModel):
@@ -44,6 +61,8 @@ class LiveConfig(_StrictModel):
     include_open_interest: bool = True  # REST-tail open interest (needed by Crowded Shorts' oi_z)
     run_legacy_paper: bool = True  # also run the Stage 8 hourly `paper run` in this process (one DuckDB writer)
     telegram: LiveTelegramConfig = Field(default_factory=LiveTelegramConfig)
+    forward_review: ForwardReviewConfig = Field(default_factory=ForwardReviewConfig)
+    maintenance: MaintenanceConfig = Field(default_factory=MaintenanceConfig)
     strategies: tuple[LiveStrategyConfig, ...] = ()
 
     @model_validator(mode="after")
@@ -62,4 +81,4 @@ def load_live_config(config_dir: Path | str | None = None) -> LiveConfig:
     return LiveConfig.model_validate(_read_yaml(config_dir / LIVE_FILE))
 
 
-__all__ = ["LiveConfig", "LiveStrategyConfig", "LiveTelegramConfig", "load_live_config"]
+__all__ = ["ForwardReviewConfig", "LiveConfig", "MaintenanceConfig", "LiveStrategyConfig", "LiveTelegramConfig", "load_live_config"]

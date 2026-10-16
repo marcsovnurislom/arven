@@ -30,8 +30,31 @@ One process, `arven live run` (`src/arven/live/loop.py`), wakes every 20 s (`pol
 4. Write the heartbeat `data/live/heartbeat.json`, the state `data/live/state.json` and the log
    `data/live/live.jsonl`.
 
-A tick takes about 1.5 minutes on this laptop. Most of that is the S7 detector, which runs over all 15m bars since
-2020 so that it sees exactly what the research saw. A signal therefore arrives a minute or two after its bar closes.
+5. **Once a week** (Monday, with the daily summary, `weekly_report_weekday`): a weekly forward report for every
+   strategy. It shows this week's closed signals and the whole forward record: net R, win rate, mean R with its
+   95 % interval, max drawdown in R, and the forward review verdict (below).
+6. **Once a day at 01 UTC** (`maintenance`):
+   - `arven backup` with the database into `data/backups`, keeping the newest 7;
+   - the retention rule for the hourly paper-run directories: the newest 48 plus the last run of every day are kept,
+     and `data/paper/runs.jsonl` keeps every run's id and `result_hash`.
+
+   A failure is logged, alerted once, and retried the next day, not on every poll.
+
+The S7 detector runs over all 15m bars since 2020, so that it sees exactly what the research saw. On 2026-10-16 it was
+made about 5 times faster: 80 s → 14 s on the full history, with every one of 2157 setups field-for-field identical
+(`tests/engine/test_strategy_s7_speed.py`). The whole tick now takes well under a minute. A signal arrives soon after
+its bar closes.
+
+**Forward review rule** (`src/arven/live/review.py`, `config/live.yaml` `forward_review`, fixed 2026-10-16):
+- Fewer than 30 closed signals → `too_few`.
+- Otherwise a 95 % normal-approximation interval of the mean net R per signal is computed:
+  - wholly below 0 → `losing`;
+  - wholly above 0 → `positive` (still not `VALIDATED`);
+  - otherwise → `inconclusive`.
+
+The thresholds are textbook values, chosen when S6's −23.5 R was already visible, so it is a monitoring rule and not
+a hypothesis test. It only **flags**: the verdict appears in `strategies_summary.json`, on the Strategies page and in
+the weekly report. Switching a strategy off stays the owner's decision (`enabled: false`).
 
 **Restart-safe.** Cursors (`data/paper/strategies_cursor.json`) and loop state are persisted. After a restart or a
 sleep, the next tick catches up on every missed close in order, and nothing is duplicated. A failing strategy keeps

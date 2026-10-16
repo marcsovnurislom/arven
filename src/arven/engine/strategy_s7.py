@@ -160,7 +160,8 @@ def _count_touches(line: Line, swings: np.ndarray, high: np.ndarray, low: np.nda
         s = int(s)
         if s < line.a_index or not math.isfinite(a_tr[s]):
             continue
-        if abs(high[s] - float(line.at(s))) > p.touch_tol_atr * a_tr[s]:
+        # line.at(s) as plain float arithmetic: the same IEEE operations as the numpy form, without its per-call overhead
+        if abs(high[s] - (line.a_price + line.slope * (s - line.a_index))) > p.touch_tol_atr * a_tr[s]:
             continue
         if not counted or p.count_every_touch:
             counted.append(s)
@@ -175,10 +176,22 @@ def _count_touches(line: Line, swings: np.ndarray, high: np.ndarray, low: np.nda
     return counted
 
 
-def _best_line(t: int, from_index: int, swing_highs: np.ndarray, high: np.ndarray, low: np.ndarray, close: np.ndarray, a_tr: np.ndarray, p: S7Params) -> tuple[Line, list[int]] | None:
+def _known_swings(swings: np.ndarray, t: int, first: int) -> np.ndarray:
+    """``swings[(swings + SWING_K <= t) & (swings >= first)]`` for an ascending ``swings``, by bisection (no full scan)."""
+    lo_i = int(np.searchsorted(swings, first, side="left"))
+    hi_i = int(np.searchsorted(swings, t - SWING_K, side="right"))
+    return swings[lo_i : max(lo_i, hi_i)]
+
+
+def _best_line(t: int, from_index: int, swing_highs: np.ndarray, high: np.ndarray, low: np.ndarray, close: np.ndarray, a_tr: np.ndarray, p: S7Params,
+               atr_inf: np.ndarray | None = None) -> tuple[Line, list[int]] | None:
     """The descending line with the most counted touches among the recent confirmed swing highs, respected by every
-    close since its first anchor (a close above the line by more than the tolerance disqualifies it)."""
-    known = swing_highs[(swing_highs + SWING_K <= t) & (swing_highs >= max(from_index, t - p.lookback_bars))]
+    close since its first anchor (a close above the line by more than the tolerance disqualifies it).
+    ``atr_inf``: ``np.nan_to_num(a_tr, nan=np.inf)`` precomputed once by the caller (elementwise, so its slices equal the
+    per-call conversion exactly)."""
+    if atr_inf is None:
+        atr_inf = np.nan_to_num(a_tr, nan=np.inf)
+    known = _known_swings(swing_highs, t, max(from_index, t - p.lookback_bars))
     if len(known) < 2:
         return None
     recent = known[-p.max_swings :]
@@ -195,10 +208,10 @@ def _best_line(t: int, from_index: int, swing_highs: np.ndarray, high: np.ndarra
                 continue
             line = Line(a, float(high[a]), float((high[b] - high[a]) / (b - a)))
             seg = np.arange(a, t)  # bars before t: bar t itself may be the one that crosses the line
-            tol = p.touch_tol_atr * np.nan_to_num(a_tr[a:t], nan=np.inf)
-            if np.any(close[a:t] > line.at(seg) + tol):
+            at_seg = line.at(seg)
+            if np.any(close[a:t] > at_seg + p.touch_tol_atr * atr_inf[a:t]):
                 continue
-            if p.max_wick_pierce_atr is not None and np.any(high[a:t] > line.at(seg) + p.max_wick_pierce_atr * np.nan_to_num(a_tr[a:t], nan=np.inf)):
+            if p.max_wick_pierce_atr is not None and np.any(high[a:t] > at_seg + p.max_wick_pierce_atr * atr_inf[a:t]):
                 continue
             touches = _count_touches(line, known[known >= a], high, low, a_tr, p)
             if len(touches) < p.min_touches:
@@ -228,8 +241,16 @@ def _range_before(t: int, high: np.ndarray, low: np.ndarray, a_tr: np.ndarray, p
     return RangeBox(j + 1, t - 1, float(hi), float(lo)) if length >= p.range_min_bars else None
 
 
-def _confluence(s: S7Setup, t: int, o: np.ndarray, h: np.ndarray, lo: np.ndarray, c: np.ndarray, a_tr: np.ndarray, p: S7Params) -> tuple[ConfluenceZone, ...]:
-    """Zones known at bar ``t`` that overlap the entry zone widened by the touch tolerance (long orientation)."""
+def _confluence(s: S7Setup, t: int, o: np.ndarray, h: np.ndarray, lo: np.ndarray, c: np.ndarray, a_tr: np.ndarray, p: S7Params,
+                sh: np.ndarray | None = None, sl: np.ndarray | None = None) -> tuple[ConfluenceZone, ...]:
+    """Zones known at bar ``t`` that overlap the entry zone widened by the touch tolerance (long orientation).
+    ``sh`` / ``sl``: ``swing_highs(h)`` / ``swing_lows(lo)`` of the whole series, precomputed once by the caller. A swing
+    at ``i`` with ``i + SWING_K <= t`` depends only on bars up to ``t``, so restricted that way they equal the swings of
+    the prefix ``[: t + 1]`` exactly (no look-ahead either way)."""
+    if sh is None:
+        sh = swing_highs(h[: t + 1])
+    if sl is None:
+        sl = swing_lows(lo[: t + 1])
     pad = p.touch_tol_atr * a_tr[t]
     zl, zh = s.zone_low - pad, s.zone_high + pad
     out: list[ConfluenceZone] = []
@@ -251,12 +272,13 @@ def _confluence(s: S7Setup, t: int, o: np.ndarray, h: np.ndarray, lo: np.ndarray
             if i < t and np.any(c[i + 1 : t + 1] > top) and overlaps(bottom, top):
                 out.append(ConfluenceZone("ifvg", bottom, top, i))
     levels: list[ConfluenceZone] = []
-    for sw in swing_highs(h[: t + 1]):
-        if sw + SWING_K <= t and sw < s.level0_index and overlaps(h[sw], h[sw]):
-            levels.append(ConfluenceZone("level", float(h[sw]), float(h[sw]), int(sw)))
-    for sw in swing_lows(lo[: t + 1]):
-        if sw + SWING_K <= t and sw < s.level0_index and overlaps(lo[sw], lo[sw]):
-            levels.append(ConfluenceZone("level", float(lo[sw]), float(lo[sw]), int(sw)))
+    # a level is a point: overlaps(x, x) == (x <= zh and x >= zl), evaluated for all candidates at once (same comparisons)
+    known_h = sh[(sh + SWING_K <= t) & (sh < s.level0_index)]
+    for sw in known_h[(h[known_h] <= zh) & (h[known_h] >= zl)]:
+        levels.append(ConfluenceZone("level", float(h[sw]), float(h[sw]), int(sw)))
+    known_l = sl[(sl + SWING_K <= t) & (sl < s.level0_index)]
+    for sw in known_l[(lo[known_l] <= zh) & (lo[known_l] >= zl)]:
+        levels.append(ConfluenceZone("level", float(lo[sw]), float(lo[sw]), int(sw)))
     # keep the most recent few prior swing levels only (older chop would otherwise flood the list)
     out.extend(sorted(levels, key=lambda z: -z.index)[: p.max_level_zones])
     return tuple(out)
@@ -282,6 +304,8 @@ def _detect_long(o: np.ndarray, h: np.ndarray, lo: np.ndarray, c: np.ndarray, p:
     a_tr = atr(h, lo, c)
     swings = swing_highs(h)
     swing_conf = set(int(s) + SWING_K for s in swings)
+    atr_inf = np.nan_to_num(a_tr, nan=np.inf)  # once, not per candidate line (identical values)
+    lows = swing_lows(lo)  # once, not per setup (identical once restricted to swings confirmed by t)
     out: list[S7Setup] = []
     phase = "seek"
     line: Line | None = None
@@ -294,7 +318,7 @@ def _detect_long(o: np.ndarray, h: np.ndarray, lo: np.ndarray, c: np.ndarray, p:
             continue
         if phase == "seek":
             if t in swing_conf:  # candidate lines only change when a new swing high is confirmed
-                found = _best_line(t, search_from, swings, h, lo, c, a_tr, p)
+                found = _best_line(t, search_from, swings, h, lo, c, a_tr, p, atr_inf)
                 if found is not None:
                     line, touches = found
             if line is None:
@@ -367,7 +391,7 @@ def _detect_long(o: np.ndarray, h: np.ndarray, lo: np.ndarray, c: np.ndarray, p:
                     limit_618=zone_high if p.shallow_zone else zone_low,
                     level1_moves=leg["moves"],
                 )
-                out.append(replace(setup, confluence=_confluence(setup, t, o, h, lo, c, a_tr, p)))
+                out.append(replace(setup, confluence=_confluence(setup, t, o, h, lo, c, a_tr, p, swings, lows)))
                 leg["armed_l1"], leg["armed_until"] = leg["l1_idx"], t + p.cancel_after_mult * (t - leg["break"])
     return out
 

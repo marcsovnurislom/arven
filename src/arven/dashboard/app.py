@@ -46,7 +46,8 @@ def _fmt_num(x: object, spec: str = "{:.2f}") -> str:
 
 
 def _run_picker(label: str, root: Path) -> tuple[dict, Path] | None:
-    entries = list_runs(root / "runs.jsonl")
+    # old hourly paper-run directories are pruned by the live process's retention rule; their index lines stay
+    entries = [e for e in list_runs(root / "runs.jsonl") if run_dir_for(root, e).exists()]
     if not entries:
         st.info(f"No {label.lower()} runs recorded yet.")
         return None

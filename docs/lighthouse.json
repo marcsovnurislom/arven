@@ -1,11 +1,11 @@
 {
-  "generated": "2026-10-09T22:26:42.299Z",
+  "generated": "2026-10-16T10:38:51.967Z",
   "base": "http://127.0.0.1:8124",
   "rows": [
     {
       "preset": "mobile",
       "page": "home",
-      "performance": 93,
+      "performance": 92,
       "accessibility": 100,
       "bestPractices": 100,
       "seo": 100
@@ -21,7 +21,7 @@
     {
       "preset": "mobile",
       "page": "signals",
-      "performance": 92,
+      "performance": 91,
       "accessibility": 97,
       "bestPractices": 100,
       "seo": 100
@@ -29,7 +29,7 @@
     {
       "preset": "mobile",
       "page": "screener",
-      "performance": 94,
+      "performance": 93,
       "accessibility": 100,
       "bestPractices": 100,
       "seo": 100
@@ -37,7 +37,7 @@
     {
       "preset": "mobile",
       "page": "charts",
-      "performance": 95,
+      "performance": 93,
       "accessibility": 100,
       "bestPractices": 100,
       "seo": 100
@@ -45,7 +45,7 @@
     {
       "preset": "mobile",
       "page": "strategies",
-      "performance": 94,
+      "performance": 90,
       "accessibility": 96,
       "bestPractices": 100,
       "seo": 100
@@ -53,7 +53,7 @@
     {
       "preset": "mobile",
       "page": "journal",
-      "performance": 95,
+      "performance": 93,
       "accessibility": 95,
       "bestPractices": 100,
       "seo": 100
@@ -61,7 +61,7 @@
     {
       "preset": "mobile",
       "page": "lab",
-      "performance": 95,
+      "performance": 93,
       "accessibility": 100,
       "bestPractices": 100,
       "seo": 100
@@ -69,7 +69,7 @@
     {
       "preset": "mobile",
       "page": "settings",
-      "performance": 95,
+      "performance": 93,
       "accessibility": 100,
       "bestPractices": 100,
       "seo": 100
@@ -86,14 +86,14 @@
       "preset": "desktop",
       "page": "overview",
       "performance": 100,
-      "accessibility": 100,
+      "accessibility": 95,
       "bestPractices": 100,
       "seo": 100
     },
     {
       "preset": "desktop",
       "page": "signals",
-      "performance": 99,
+      "performance": 100,
       "accessibility": 97,
       "bestPractices": 100,
       "seo": 100

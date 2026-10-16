@@ -37,6 +37,18 @@ export type StrategyStats = {
   total_r: number;
   mean_r: number | null;
   win_rate: number | null;
+  review?: ForwardReview;
+};
+
+export type ForwardReview = {
+  n: number;
+  min_closed: number;
+  mean_r: number | null;
+  ci_low: number | null;
+  ci_high: number | null;
+  profit_factor: number | null;
+  max_dd_r: number | null;
+  verdict: "too_few" | "losing" | "inconclusive" | "positive";
 };
 
 export type Group = { n: number; mean_r: number | null; win_rate: number | null };

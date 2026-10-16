@@ -1,7 +1,7 @@
 import { api } from "../api";
 import { Reveal, Tilt } from "../fx";
 import { LegacyPipelineCard } from "../Legacy";
-import { useI18n } from "../i18n";
+import { useI18n, type Key } from "../i18n";
 import { useLoad } from "../hooks";
 import { Card, Chip, Empty, ErrorBox, PageTitle, Skeleton, fmt, fmtPct, fmtR, signClass } from "../ui";
 import { StrategyTrades } from "../TradesViewer";
@@ -47,7 +47,6 @@ export function Strategies() {
   return (
     <>
       <PageTitle sub={t("honesty")}>{t("nav_strategies")}</PageTitle>
-      <StrategyTrades />
       {error && !data && <ErrorBox error={error} onRetry={reload} />}
       {loading && !data && <Skeleton h={160} />}
       {data && (
@@ -67,13 +66,26 @@ export function Strategies() {
                       <dt className="muted">{t("meanR")}</dt><dd className={`num text-right ${signClass(s.mean_r)}`}>{fmtR(s.mean_r)}</dd>
                       <dt className="muted">{t("totalR")}</dt><dd className={`num text-right ${signClass(s.total_r)}`}>{fmtR(s.total_r)}</dd>
                       <dt className="muted">{t("perWeek")}</dt><dd className="num text-right">{fmt(s.signals_per_week, 1)}</dd>
+                      {s.review && s.review.ci_low !== null && s.review.ci_high !== null && (
+                        <><dt className="muted">{t("ci95")}</dt><dd className="num text-right">[{fmtR(s.review.ci_low)}, {fmtR(s.review.ci_high)}]</dd></>
+                      )}
+                      {s.review && s.review.max_dd_r !== null && (
+                        <><dt className="muted">{t("maxDdR")}</dt><dd className="num text-right">{fmt(s.review.max_dd_r, 1)}R</dd></>
+                      )}
                     </dl>
+                  )}
+                  {s?.review && (
+                    <p className="mt-3 text-xs" data-verdict={s.review.verdict}
+                       style={{ color: s.review.verdict === "losing" ? "var(--down)" : s.review.verdict === "positive" ? "var(--up)" : undefined }}>
+                      {t(`review_${s.review.verdict}` as Key).replace("{n}", String(s.review.min_closed))}
+                    </p>
                   )}
                   {s && s.closed < 100 && <p className="mt-3 text-xs" style={{ color: "var(--warn)" }}>{t("sampleWarn")}</p>}
                 </Card></Tilt>
               );
             })}
           </div>
+          <StrategyTrades />
           <Reveal>
             <Card title={t("compareTitle")}>
               <CompareChart />

@@ -91,3 +91,51 @@ def format_daily_summary(date_label: str, sections: tuple[DailySummarySection, .
             for s in sections
         )
     return f"Daily summary - {date_label}\n{body}\n\n{DISCLAIMER}"
+
+
+@dataclass(frozen=True, slots=True)
+class WeeklyReportRow:
+    """One strategy's whole forward record (closed signals, net R) and the forward review verdict."""
+
+    strategy_id: str
+    grade: str
+    n_closed: int
+    n_open: int
+    total_r: float
+    win_rate: float | None
+    mean_r: float | None
+    ci_low: float | None
+    ci_high: float | None
+    max_dd_r: float | None
+    verdict: str  # too_few | losing | inconclusive | positive (arven.live.review)
+    week_closed: int
+    week_r: float
+
+
+VERDICT_TEXT = {
+    "too_few": "too few closed signals to judge",
+    "losing": "LOSING: the 95% interval of mean R is below 0",
+    "inconclusive": "inconclusive: the 95% interval contains 0",
+    "positive": "positive so far (95% interval above 0) - still not validated",
+}
+
+
+def _num(x: float | None, spec: str) -> str:
+    return "n/a" if x is None else format(x, spec)
+
+
+def format_weekly_report(week_label: str, since_label: str, rows: tuple[WeeklyReportRow, ...]) -> str:
+    blocks = []
+    for r in rows:
+        ci = f"[{_num(r.ci_low, '+.2f')}, {_num(r.ci_high, '+.2f')}]" if r.ci_low is not None else "n/a"
+        win = _num(None if r.win_rate is None else r.win_rate * 100, ".0f")
+        blocks.append(
+            f"{r.strategy_id} [{r.grade}]\n"
+            f"  this week: {r.week_closed} closed, {r.week_r:+.2f}R\n"
+            f"  since {since_label}: {r.n_closed} closed ({r.n_open} open), {r.total_r:+.2f}R, win {win}%, "
+            f"mean {_num(r.mean_r, '+.3f')}R, 95% CI {ci}, max DD {_num(r.max_dd_r, '.1f')}R\n"
+            f"  review: {VERDICT_TEXT.get(r.verdict, r.verdict)}"
+        )
+    body = "\n".join(blocks) if blocks else "No strategies."
+    return (f"Weekly forward report - {week_label}\n{body}\n\n"
+            f"Net of costs, each signal tracked on its own. No strategy has a proven edge.\n{DISCLAIMER}")

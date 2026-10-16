@@ -7,8 +7,9 @@ Every ``poll_seconds``:
 - once per new hour, optionally the Stage 8 hourly ``paper run`` (``run_legacy_paper``), so no second process (the
   old scheduled task) competes for the database;
 - drain the Telegram outbox and answer bot commands (both never raise);
-- once a day at ``daily_summary_hour_utc``, queue a daily summary; system alerts on start, on stale data and after
-  repeated errors;
+- once a day at ``daily_summary_hour_utc``, queue a daily summary (and on ``weekly_report_weekday`` a weekly forward
+  report); system alerts on start, on stale data and after repeated errors;
+- once a day at ``maintenance.hour_utc``, the housekeeping: a backup and the paper-run retention rule;
 - write the heartbeat (``<data_dir>/live/heartbeat.json``, the same format as the Phase 5 runtime's, so
   ``arven live heartbeat``, ``/status`` and the web app read it) and a JSONL log.
 
@@ -55,6 +56,8 @@ class LoopState:
     legacy_hour_ms: int | None = None  # the last hour the Stage 8 paper run was done for
     last_tick_ms: int | None = None
     summary_date: str | None = None  # the last UTC date a daily summary was queued for
+    weekly_date: str | None = None  # the last UTC date a weekly report was queued for
+    maintenance_date: str | None = None  # the last UTC date the daily housekeeping ran (or was attempted)
     consecutive_errors: int = 0
     stale_alerted: bool = False
     telegram_update_id: int = 0
@@ -84,6 +87,8 @@ class LoopDeps:
     poll_commands: Callable[[int], int] | None  # (last_update_id) -> new last_update_id
     queue_system: Callable[[str, str, str], None] | None  # (event_key, title, detail)
     queue_daily_summary: Callable[[str], None] | None  # (date label)
+    queue_weekly_report: Callable[[str], None] | None = None  # (today's UTC date) - the 7 days before it
+    maintenance: Callable[[datetime], Any] | None = None  # daily backup + paper-run retention -> dict for the log
 
 
 async def _run(fn: Callable[..., Any], *args: Any) -> tuple[Any, str | None]:
@@ -138,6 +143,26 @@ async def poll_once(live: LiveConfig, deps: LoopDeps, state: LoopState, now: dat
             _, err = await _run(deps.queue_daily_summary, today)
             if err is None:
                 state.summary_date = today
+
+    weekday = live.telegram.weekly_report_weekday
+    if deps.queue_weekly_report is not None and weekday is not None and live.telegram.daily_summary_hour_utc is not None:
+        utc = now.astimezone(UTC)
+        today = utc.date().isoformat()
+        if utc.weekday() == weekday and utc.hour >= live.telegram.daily_summary_hour_utc and state.weekly_date != today:
+            _, err = await _run(deps.queue_weekly_report, today)
+            log_event(log_path, event="weekly_report", status="error" if err else "queued", detail=err or "")
+            if err is None:
+                state.weekly_date = today
+
+    if deps.maintenance is not None and live.maintenance.hour_utc is not None:
+        utc = now.astimezone(UTC)
+        today = utc.date().isoformat()
+        if utc.hour >= live.maintenance.hour_utc and state.maintenance_date != today:
+            state.maintenance_date = today  # once a day even if it fails: a broken backup must not repeat every poll
+            res, err = await _run(deps.maintenance, now)
+            log_event(log_path, event="maintenance", status="error" if err else "ok", detail=err or json.dumps(res, sort_keys=True))
+            if err and deps.queue_system is not None:
+                await _run(deps.queue_system, f"maintenance:{today}", "daily backup failed", err)
 
     if deps.send_telegram is not None:
         res, err = await _run(deps.send_telegram)

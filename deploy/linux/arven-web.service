@@ -1,0 +1,18 @@
+# ARVEN web app on a Linux server (docs/DEPLOY_SERVER.md). Read-only, bound to 127.0.0.1: reach it through an SSH
+# tunnel (ssh -L 8000:127.0.0.1:8000 arven@SERVER), never expose it to the internet without a password and HTTPS.
+# Install: sudo cp deploy/linux/arven-web.service /etc/systemd/system/ && sudo systemctl daemon-reload
+#          sudo systemctl enable --now arven-web
+[Unit]
+Description=ARVEN web app (read-only)
+After=network-online.target arven-live.service
+
+[Service]
+Type=simple
+User=arven
+WorkingDirectory=/opt/arven
+ExecStart=/opt/arven/.venv/bin/python -m arven web --log-file data/live/web_process.log
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

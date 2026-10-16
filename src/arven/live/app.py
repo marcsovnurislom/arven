@@ -54,6 +54,53 @@ def daily_summary_sections(app: AppConfig, day: str) -> tuple[Any, ...]:
     return tuple(out)
 
 
+def weekly_report_rows(app: AppConfig, today: str) -> tuple[Any, ...]:
+    """Per strategy: the whole forward record and its review (from ``strategies_summary.json``) plus the signals that
+    closed in the 7 UTC days before ``today``."""
+    from arven.telegram.messages import WeeklyReportRow
+
+    summary_path = paper_dir(app) / "strategies_summary.json"
+    if not summary_path.exists():
+        return ()
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    end = to_ms(datetime.fromisoformat(today).replace(tzinfo=UTC))
+    start = end - 7 * DAY_MS
+    week: dict[str, list[float]] = {}
+    for d in summary.get("closed_signals", []):
+        if start <= d["closed_ms"] < end and d.get("r") is not None:
+            week.setdefault(d["strategy"], []).append(float(d["r"]))
+    root = app.data.data_dir / "signals"
+    rows = []
+    for sid, st in sorted(summary.get("strategies", {}).items()):
+        rv = st.get("review") or {}
+        sigs = read_signals(root, sid) if (root / sid).exists() else []
+        rows.append(WeeklyReportRow(
+            sid, sigs[-1].grade.value if sigs else "EXPERIMENTAL", st.get("closed", 0), st.get("open", 0) + st.get("pending", 0),
+            float(st.get("total_r") or 0.0), st.get("win_rate"), st.get("mean_r"), rv.get("ci_low"), rv.get("ci_high"),
+            rv.get("max_dd_r"), rv.get("verdict", "too_few"), len(week.get(sid, [])), float(sum(week.get(sid, []))),
+        ))
+    return tuple(rows)
+
+
+def run_maintenance(app: AppConfig, live: LiveConfig, config_dir: Path, now: datetime) -> dict[str, Any]:
+    """The daily housekeeping (``config/live.yaml`` ``maintenance``): backup, then the paper-run retention rule."""
+    from arven.live.backup import make_backup
+    from arven.live.maintenance import prune_paper_runs
+
+    m = live.maintenance
+    out: dict[str, Any] = {}
+    if m.backup:
+        res = make_backup(app.data.data_dir, config_dir, now, keep=m.backup_keep,
+                          database_path=app.data.database_path if m.backup_with_db else None)
+        out["backup"] = res.path.name
+        out["backup_mb"] = round(res.path.stat().st_size / 1e6, 1)
+    if m.paper_keep_recent is not None:
+        pr = prune_paper_runs(paper_dir(app), m.paper_keep_recent)
+        out["paper_runs_kept"], out["paper_runs_removed"] = len(pr.kept), len(pr.removed)
+        out["paper_mb_freed"] = round(pr.bytes_freed / 1e6, 1)
+    return out
+
+
 def build_deps(
     app: AppConfig, fcfg: FeaturesConfig, live: LiveConfig, config_dir: Path, tcfg: TelegramConfig, chat_ids: frozenset[str],
     *, legacy_tick: Callable[[datetime], Any] | None = None,
@@ -94,6 +141,21 @@ def build_deps(
             for chat in sorted(chat_ids):
                 enqueue(con, signal_id="daily_summary", event_type=day, chat_id=chat, text=text, now_ms=now_ms)
 
+    def queue_weekly(today: str) -> None:
+        from arven.telegram.messages import format_weekly_report
+
+        end = datetime.fromisoformat(today).date()
+        label = f"{(end - timedelta(days=7)).isoformat()} - {(end - timedelta(days=1)).isoformat()}"
+        since = app.splits.forward_start.date().isoformat()
+        text = format_weekly_report(label, since, weekly_report_rows(app, today))
+        now_ms = to_ms(utc_now())
+        with connect(db) as con:
+            for chat in sorted(chat_ids):
+                enqueue(con, signal_id="weekly_report", event_type=today, chat_id=chat, text=text, now_ms=now_ms)
+
+    def maintenance(now: datetime) -> dict[str, Any]:
+        return run_maintenance(app, live, config_dir, now)
+
     return LoopDeps(
         live_tick=live_tick,
         legacy_tick=legacy_tick if live.run_legacy_paper else None,
@@ -101,7 +163,9 @@ def build_deps(
         poll_commands=commands if live.telegram.commands and chat_ids and telegram_token_configured() else None,
         queue_system=queue_system if alerts_on else None,
         queue_daily_summary=queue_daily if alerts_on else None,
+        queue_weekly_report=queue_weekly if alerts_on else None,
+        maintenance=maintenance if live.maintenance.hour_utc is not None else None,
     )
 
 
-__all__ = ["build_deps", "daily_summary_sections", "telegram_token_configured"]
+__all__ = ["build_deps", "daily_summary_sections", "run_maintenance", "telegram_token_configured", "weekly_report_rows"]

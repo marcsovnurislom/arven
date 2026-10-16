@@ -7,6 +7,17 @@ import yaml
 from arven.core.config import CONFIG_FILES, DEFAULT_CONFIG_DIR, AppConfig, load_config
 
 
+@pytest.fixture(autouse=True)
+def _no_real_secrets(monkeypatch):
+    """Tests never see the owner's real ``.env`` (bot token, chat ids, API key): a test must not depend on it, and
+    must never be able to reach a real chat. A test that needs a value sets it with ``monkeypatch.setenv``."""
+    import dotenv
+
+    monkeypatch.setattr(dotenv, "load_dotenv", lambda *a, **k: False)
+    for name in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_IDS", "ANTHROPIC_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+
+
 def repo_config_docs() -> dict[str, dict]:
     return {
         name: yaml.safe_load((DEFAULT_CONFIG_DIR / name).read_text(encoding="utf-8")) for name in CONFIG_FILES

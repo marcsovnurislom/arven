@@ -43,6 +43,7 @@ from arven.engine.signal import EngineSignal
 from arven.engine.signal_store import append_signal, append_update, read_signals, read_updates
 from arven.live.base import LiveContext, LiveOutcome, LiveStrategy
 from arven.live.registry import build_strategies, needs_features
+from arven.live.review import forward_review
 from arven.live.strategies import natural_key
 from arven.paper.runs import latest_forward_window_end_ms, load_paper_inputs, paper_dir, update_market_data
 from arven.paper.strategies_forward import SignalOutcome, agreement_summary, trade_log
@@ -102,14 +103,17 @@ def _update_event_type(u: Any) -> str:
     return f"update:{u.kind.value}:{digest}"
 
 
-def summarize(outcomes: Sequence[LiveOutcome], weeks: float) -> dict[str, Any]:
-    closed = [o.net_r for o in outcomes if o.state == "closed" and o.net_r is not None]
+def summarize(outcomes: Sequence[LiveOutcome], weeks: float, min_closed: int = 30) -> dict[str, Any]:
+    done = sorted((o for o in outcomes if o.state == "closed" and o.net_r is not None),
+                  key=lambda o: max((u.time_ms for u in o.updates), default=0))  # closing-time order for the drawdown
+    closed = [float(o.net_r) for o in done]  # type: ignore[arg-type]
     states = [o.state for o in outcomes]
     return {
         "signals": len(outcomes), "closed": len(closed), "open": states.count("open"), "pending": states.count("pending"),
         "cancelled": states.count("cancelled"), "signals_per_week": len(outcomes) / weeks if weeks > 0 else None,
         "total_r": float(np.sum(closed)) if closed else 0.0, "mean_r": float(np.mean(closed)) if closed else None,
         "win_rate": float(np.mean(np.array(closed) > 0)) if closed else None,
+        "review": forward_review(closed, min_closed),
     }
 
 
@@ -215,7 +219,7 @@ def run_live_tick(
     outcome.summary = {
         "generated_at": now.isoformat(), "forward_start_ms": window.start_ms, "data_through_ms": through, "last_1m_ms": last_1m,
         "status": outcome.status, "cost_profile": f"config/{live.cost_profile}", "git_commit": ctx.git_commit,
-        "strategies": {sid: summarize(st.outcomes, weeks) | {"title": next((s.title for s in strategies if s.strategy_id == sid), sid), "error": st.error}
+        "strategies": {sid: summarize(st.outcomes, weeks, live.forward_review.min_closed) | {"title": next((s.title for s in strategies if s.strategy_id == sid), sid), "error": st.error}
                        for sid, st in outcome.strategies.items()},
         "agreement_hypothesis": agreement_summary([o for v in as_forward.values() for o in v]),
         "trades": trade_log(as_forward),

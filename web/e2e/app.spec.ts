@@ -166,6 +166,20 @@ test("offline: when the API is unreachable the page says so instead of inventing
   await expect(page.getByRole("alert")).toContainText("not reachable");
 });
 
+test("strategies: the forward review verdict and its interval", async ({ page }) => {
+  await open(page, "strategies");
+  const s6 = page.locator("[data-verdict=losing]");
+  await expect(s6).toContainText("LOSING");
+  await expect(page.locator("[data-verdict=too_few]")).toContainText("needs 30");
+  await expect(page.getByText("[-0.52R, -0.08R]")).toBeVisible();
+  await expect(page.locator("[data-verdict]")).toHaveCount(2); // a summary without a review shows none, not a made-up one
+});
+
+test("strategies in Russian: the verdict is translated", async ({ page }) => {
+  await open(page, "strategies", "ru");
+  await expect(page.locator("[data-verdict=losing]")).toContainText("УБЫТОЧНА");
+});
+
 test("lab lists the stored run with its sealed-test flag", async ({ page }) => {
   await open(page, "lab");
   await expect(page.getByRole("cell", { name: "run-fixture" })).toBeVisible();

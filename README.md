@@ -54,6 +54,8 @@ reasons. It sends them in real time to Telegram and shows them in a local web ap
 | [`docs/current_state.md`](docs/current_state.md) | Where the project stands, every result, the decisions log |
 | [`docs/LIVE_SIGNALS.md`](docs/LIVE_SIGNALS.md) | The live signal loop: running it, Telegram, changing / adding strategies |
 | [`docs/DEFENCE_DEMO.md`](docs/DEFENCE_DEMO.md) | 10-minute defence walkthrough (in Russian) |
+| [`docs/RESULTS_FOR_THESIS.md`](docs/RESULTS_FOR_THESIS.md) | Every evaluation in one place, with sources (in Russian) |
+| [`docs/DEPLOY_SERVER.md`](docs/DEPLOY_SERVER.md) | Running ARVEN 24/7 on a Linux VPS with systemd (in Russian) |
 | [`docs/architecture.md`](docs/architecture.md) | System architecture, data model, backtesting, ML, risk, LLM usage |
 | [`docs/roadmap.md`](docs/roadmap.md) | Staged development plan |
 | [`docs/ARVEN_MASTER_PROMPT.md`](docs/ARVEN_MASTER_PROMPT.md) | The signal-product build-out plan |
