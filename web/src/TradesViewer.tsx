@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
-import { api, type TradeRec } from "./api";
+import { api, tradeSize, type TradeRec } from "./api";
 import type { ChartLine, ChartMarker, ChartOverlay } from "./CandleChart";
 import { useI18n, type Key } from "./i18n";
 import { useLoad } from "./hooks";
@@ -177,7 +177,7 @@ export function StrategyTrades() {
               <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
                 <dt className="muted">{t("s7tEntry")}</dt><dd className="num">{fmt(tr.entry, 1)}</dd>
                 <dt className="muted">{t("s7tStop")}</dt><dd className="num">{fmt(tr.stop, 1)}</dd>
-                <dt className="muted">{t("s7tSize")}</dt><dd className="num">{tr.size_btc.toFixed(2)} BTC</dd>
+                <dt className="muted">{t("s7tSize")}</dt><dd className="num">{tradeSize(tr)}</dd>
                 <dt className="muted">{t("s7tExit")}</dt><dd className="num">{fmtTime(tr.exit_time_ms)} · {tr.exit_reasons.join(", ")}</dd>
               </dl>
               <div className="mt-3 flex justify-between">

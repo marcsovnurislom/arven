@@ -22,6 +22,8 @@ export function Overview() {
   return (
     <>
       <PageTitle sub={t("appTagline")}>{t("nav_overview")}</PageTitle>
+      {o?.market === "gold" && <p className="mb-3 text-sm muted">{t("goldFeed")}</p>}
+      {o && o.market_open === false && <div className="mb-4"><Chip tone="gold">{t("marketClosed")}</Chip></div>}
       {error && !o && <ErrorBox error={error} onRetry={reload} />}
       {loading && !o && <div className="grid gap-4 sm:grid-cols-3"><Skeleton h={150} /><Skeleton h={150} /><Skeleton h={150} /></div>}
       {o && (

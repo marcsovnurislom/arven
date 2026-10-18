@@ -112,6 +112,13 @@ body::before {
   transition: background 0.15s, border-color 0.15s, transform 0.1s;
 }
 .btn:hover { border-color: var(--gold); }
+/* BTC / Gold market switch (segmented control in the top bar) */
+.market-switch { display: inline-flex; border: 1px solid var(--border); background: var(--card); border-radius: 10px; padding: 2px; gap: 2px; }
+.market-opt { border: 0; background: transparent; color: var(--muted); border-radius: 8px; padding: 6px 12px; font-size: 14px; cursor: pointer;
+  transition: background 0.15s, color 0.15s; min-height: 32px; }
+.market-opt:hover { color: var(--text); }
+.market-opt.on { background: var(--gold); color: #17130a; font-weight: 600; }
+.market-opt:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .btn:active { transform: translateY(1px); }
 .btn.primary { background: var(--gold); color: #17130a; border-color: var(--gold); font-weight: 600; }
 .btn:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {

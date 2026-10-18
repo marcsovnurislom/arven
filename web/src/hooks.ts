@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, api, type Candle } from "./api";
+import { ApiError, api, withMarket, type Candle } from "./api";
 
 export type Loadable<T> = { data: T | null; error: ApiError | null; loading: boolean; reload: () => void };
 
@@ -41,7 +41,7 @@ export function useOverviewStream<T>(onEvent: (payload: T) => void): boolean {
   cb.current = onEvent;
   useEffect(() => {
     if (typeof EventSource === "undefined" || window.location.search.includes("nosse")) return; // ?nosse: polling only (used by automated screenshots)
-    const es = new EventSource("/api/stream?interval=10");
+    const es = new EventSource(withMarket("/api/stream?interval=10"));
     es.onopen = () => setConnected(true);
     es.onerror = () => setConnected(false);
     es.addEventListener("overview", (ev) => cb.current(JSON.parse((ev as MessageEvent).data) as T));

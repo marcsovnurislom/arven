@@ -59,6 +59,9 @@ class LiveMarketConfig(_StrictModel):
 
     instrument: str = Field(pattern=r"^[A-Z0-9]+$")
     title: str = ""
+    # the research history of this market (e.g. XAUUSD from Dukascopy): the web app's charts continue into it before
+    # the live feed starts, and its research exports live in data/markets/<history_instrument>/
+    history_instrument: str | None = Field(default=None, pattern=r"^[A-Z0-9]+$")
     enabled: bool = True
     cost_profile: str  # file in config/ used to resolve this market's signals in R
     include_open_interest: bool = False

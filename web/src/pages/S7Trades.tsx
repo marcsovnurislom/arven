@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, type S7Trade, type S7TradeLabel } from "../api";
+import { api, tradeSize, type S7Trade, type S7TradeLabel } from "../api";
 import { useI18n } from "../i18n";
 import { useLoad } from "../hooks";
 import { EquityCurve, TradeChart, ZONE_STYLE, usd } from "../TradesViewer";
@@ -134,7 +134,7 @@ export function S7Trades() {
                 <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
                   <dt className="muted">{t("s7tEntry")}</dt><dd className="num">{fmt(tr.entry, 1)}</dd>
                   <dt className="muted">{t("s7tStop")}</dt><dd className="num">{fmt(tr.stop, 1)}</dd>
-                  <dt className="muted">{t("s7tSize")}</dt><dd className="num">{tr.size_btc.toFixed(2)} BTC</dd>
+                  <dt className="muted">{t("s7tSize")}</dt><dd className="num">{tradeSize(tr)}</dd>
                   <dt className="muted">{t("s7tExit")}</dt><dd className="num">{fmtTime(tr.exit_time_ms)} · {tr.exit_reasons.join(", ")}</dd>
                 </dl>
               </Card>

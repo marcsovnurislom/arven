@@ -1,5 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { api, getMarket, setMarketId, type Market } from "./api";
 import { Aurora } from "./fx";
+import { useLoad } from "./hooks";
 import { I18nProvider, useI18n, type Key } from "./i18n";
 
 const Home = lazy(() => import("./pages/Home").then((m) => ({ default: m.Home })));
@@ -40,6 +42,17 @@ function Shell() {
   const [tour, setTour] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [palette, setPalette] = useState(false);
+  const [market, setMarketState] = useState(getMarket);
+  const marketsLoad = useLoad(api.markets, []);
+  const markets: Market[] = marketsLoad.data?.markets ?? [];
+  const setMarket = useCallback((id: string) => {
+    setMarketId(id);
+    setMarketState(id);
+  }, []);
+  useEffect(() => {
+    // a remembered market that no longer exists falls back to the default
+    if (marketsLoad.data && !marketsLoad.data.markets.some((m) => m.id === market)) setMarket(marketsLoad.data.default);
+  }, [marketsLoad.data, market, setMarket]);
 
   const setTheme = (v: "dark" | "light") => {
     setThemeState(v);
@@ -80,6 +93,10 @@ function Shell() {
       const n = Number(e.key);
       if (n >= 1 && n <= PAGES.length) go(PAGES[n - 1]);
       else if (e.key.toLowerCase() === "t") setTheme(theme === "dark" ? "light" : "dark");
+      else if (e.key.toLowerCase() === "m" && markets.length > 1) {
+        const i = markets.findIndex((m) => m.id === market);
+        setMarket(markets[(i + 1) % markets.length].id);
+      }
       else if (e.key.toLowerCase() === "l") setLang(lang === "en" ? "ru" : "en");
     };
     window.addEventListener("keydown", onKey);
@@ -117,7 +134,7 @@ function Shell() {
           <Logo />
           <span>
             <span className="brand-name shine">ARVEN</span>
-            <span className="brand-sub">BTC · decision support</span>
+            <span className="brand-sub">{markets.length > 1 ? "BTC · Gold" : "BTC"} · decision support</span>
           </span>
         </a>
         <nav className="side-nav" aria-label="Pages">{groups()}</nav>
@@ -131,6 +148,7 @@ function Shell() {
               <span className="truncate">{label(page)}</span>
             </div>
             <div className="ml-auto flex items-center gap-2">
+              {markets.length > 1 && <MarketSwitch markets={markets} value={market} onChange={setMarket} label={t("market")} />}
               <button className="btn search-btn" onClick={() => setPalette(true)} aria-label={t("search")}>
                 <span aria-hidden="true">⌕</span><span className="hidden md:inline">{t("search")}</span><kbd className="hidden md:inline">Ctrl K</kbd>
               </button>
@@ -142,7 +160,7 @@ function Shell() {
           <div className="honesty">{t("honesty")}</div>
         </header>
         <main id="main" className="mx-auto max-w-7xl px-4 pb-28 pt-6 lg:pb-12">
-          <div key={page} className="page-in">
+          <div key={`${page}:${market}`} className="page-in">
             <Suspense fallback={<div className="skeleton" style={{ height: 160 }} aria-hidden="true" />}>{view}</Suspense>
           </div>
         </main>
@@ -212,6 +230,20 @@ function Logo() {
       <rect width="32" height="32" rx="9" fill="var(--card-solid)" stroke="var(--border)" />
       <path d="M6 24 16 6l10 18h-5l-5-9-5 9z" fill="url(#lg-gold)" />
     </svg>
+  );
+}
+
+/** BTC / Gold: every market-aware page re-loads for the chosen market (the page is re-mounted by its key). */
+function MarketSwitch({ markets, value, onChange, label }: { markets: Market[]; value: string; onChange: (id: string) => void; label: string }) {
+  return (
+    <div className="market-switch" role="radiogroup" aria-label={label}>
+      {markets.map((m) => (
+        <button key={m.id} role="radio" aria-checked={m.id === value} className={`market-opt ${m.id === value ? "on" : ""}`}
+          onClick={() => onChange(m.id)} title={m.label}>
+          {m.id === "btc" ? "BTC" : m.id === "gold" ? "Gold" : m.label}
+        </button>
+      ))}
+    </div>
   );
 }
 

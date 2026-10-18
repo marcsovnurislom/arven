@@ -114,11 +114,11 @@ def test_strategies_and_research_read_artifacts(env):
     assert runs[0]["run_id"] == "r1" and runs[0]["touched_test_set"] is False and runs[0]["total_return"] == -0.1
 
 
-def test_screener_is_single_symbol_and_honest(env):
+def test_screener_lists_every_followed_market_and_only_real_rows(env):
     _, client, _ = env
     s = client.get("/api/screener").json()
-    assert s["supported_symbols"] == ["BTCUSDT"] and len(s["rows"]) == 1 and s["rows"][0]["price"] == 129.0
-    assert "not faked" in s["note"]
+    assert s["supported_symbols"] == ["BTCUSDT", "XAUUSDT"]
+    assert len(s["rows"]) == 1 and s["rows"][0]["price"] == 129.0 and s["rows"][0]["market"] == "btc"  # no gold bars stored here
 
 
 def test_journal_add_stats_delete_and_validation(env):
@@ -218,3 +218,47 @@ def test_strategy_trades_index_and_files_read_only(env):
     assert client.get("/api/strategy_trades", params={"strategy": "s6_trend_pullback", "period": "forward"}).json()["trades"] == [{"n": 1}]
     assert client.get("/api/strategy_trades", params={"strategy": "../etc", "period": "forward"}).status_code == 422
     assert client.get("/api/strategy_trades", params={"strategy": "s6_trend_pullback", "period": "x"}).status_code == 422
+
+
+def test_markets_btc_and_gold_are_listed_and_unknown_is_404(env):
+    _, client, _ = env
+    m = client.get("/api/markets").json()
+    ids = [x["id"] for x in m["markets"]]
+    assert ids[0] == "btc" and "gold" in ids and m["default"] == "btc"
+    gold = next(x for x in m["markets"] if x["id"] == "gold")
+    assert gold["symbol"] == "XAUUSDT" and gold["history_symbol"] == "XAUUSD" and gold["session"] == "cme_metals"
+    assert client.get("/api/overview", params={"market": "nope"}).status_code == 404
+    assert client.get("/api/overview", params={"market": "BAD!"}).status_code == 422
+
+
+def test_gold_reads_its_own_record_and_charts_continue_into_the_history(env):
+    cfg, client, now = env
+    gold_signals = cfg.data.data_dir / "markets" / "XAUUSDT" / "signals"
+    s = _signal("s4_impulse_retest", now - HOUR)
+    append_signal(gold_signals, s)
+    got = client.get("/api/signals", params={"market": "gold"}).json()["signals"]
+    assert len(got) == 1 and got[0]["strategy_id"] == "s4_impulse_retest"
+    assert client.get("/api/signals").json()["signals"] == []  # the BTC record is separate
+    assert client.get("/api/strategies", params={"market": "gold"}).json()["strategies"] == ["s4_impulse_retest"]
+    with connect(cfg.data.database_path) as con:
+        for i in range(5):
+            t = now - (1000 - i) * 60_000
+            con.execute(
+                "INSERT INTO ohlcv_1m (symbol, open_time_ms, close_time_ms, open, high, low, close, volume, quote_volume, trade_count, taker_buy_volume, "
+                "taker_buy_quote_volume, source_key, ingested_at_ms) VALUES ('XAUUSD', ?, ?, 2000, 2001, 1999, 2000.5, 1, 2000, 0, 0, 0, 'duka', 0)", [t, t + 59_999],
+            )
+    c = client.get("/api/candles", params={"tf": "1m", "limit": 3, "market": "gold"}).json()
+    assert c["source"] == "XAUUSD" and len(c["candles"]) == 3 and c["candles"][-1]["c"] == 2000.5  # no XAUUSDT bars yet
+    o = client.get("/api/overview", params={"market": "gold"}).json()
+    assert o["market"] == "gold" and o["symbol"] == "XAUUSDT" and o["last_1m_bar_open_ms"] is None and o["data_stale"] is True
+    with connect(cfg.data.database_path) as con:
+        for i in range(3):
+            t = now // HOUR * HOUR - (3 - i) * HOUR
+            con.execute(
+                "INSERT INTO ohlcv (symbol, timeframe, open_time_ms, close_time_ms, open, high, low, close, volume, quote_volume, trade_count, "
+                "taker_buy_volume, taker_buy_quote_volume, bar_count, is_complete, built_at_ms) VALUES ('XAUUSD', '1h', ?, ?, 2000, 2001, 1999, ?, 1, 2000, 0, 0, 0, 60, TRUE, 0)",
+                [t, t + HOUR - 1, 2000.0 + i],
+            )
+    s2 = client.get("/api/screener").json()
+    assert [r["market"] for r in s2["rows"]] == ["btc", "gold"]
+    assert s2["rows"][1]["symbol"] == "XAUUSD" and s2["rows"][1]["price"] == 2002.0  # history until the live feed has bars

@@ -66,6 +66,8 @@ export type ForwardSummary = {
 
 export type Overview = {
   now_ms: number;
+  market?: string;
+  market_open?: boolean;
   symbol: string;
   last_1m_bar_open_ms: number | null;
   data_age_seconds: number | null;
@@ -79,7 +81,10 @@ export type Overview = {
   note: string;
 };
 
-export type ScreenerRow = { symbol: string; price: number; change_24h_pct: number | null; quote_volume_24h: number; as_of_ms: number; sparkline: number[] };
+export type ScreenerRow = {
+  symbol: string; price: number; change_24h_pct: number | null; quote_volume_24h: number; as_of_ms: number; sparkline: number[];
+  market?: string; label?: string;
+};
 
 export type ResearchRun = {
   kind: string;
@@ -154,7 +159,9 @@ export type S7Trade = {
   targets: number[];
   exit_reasons: string[];
   net_r: number;
-  size_btc: number;
+  size_btc?: number;
+  size?: number;
+  size_unit?: string;
   risk_usd: number;
   pnl_usd: number;
   equity_after: number;
@@ -170,7 +177,8 @@ export type S7Trade = {
 /** One backtested/forward trade of any strategy (scripts/strategy_trades_export.py); the S7 drawing fields are optional. */
 export type TradeRec = {
   n: number; id: string; side: 1 | -1; entry_time_ms: number; exit_time_ms: number; entry: number; stop: number; targets: number[];
-  exit_reasons: string[]; net_r: number; size_btc: number; risk_usd: number; pnl_usd: number; equity_after: number; skipped: string | null;
+  exit_reasons: string[]; net_r: number; size_btc?: number; size?: number; size_unit?: string; risk_usd: number; pnl_usd: number;
+  equity_after: number; skipped: string | null;
   candles: Candle[];
   line?: { points: S7Point[] }; level0?: S7Point; level1?: S7Point; zone?: { low: number; high: number };
   smc_zones?: { kind: string; low: number; high: number; timeMs: number }[];
@@ -190,6 +198,36 @@ export type S7Trades = {
   summary: { trades: number; win_rate: number; total_r: number; account: S7AccountSummary } | null;
   trades: S7Trade[];
 };
+
+export type Market = { id: string; label: string; symbol: string; history_symbol: string | null; session: string; enabled: boolean };
+
+/** The market every market-aware request is about ("btc" or e.g. "gold"); remembered per browser. */
+let currentMarket = (() => {
+  try {
+    return localStorage.getItem("arven.market") || "btc";
+  } catch {
+    return "btc";
+  }
+})();
+
+export function getMarket(): string {
+  return currentMarket;
+}
+
+export function setMarketId(id: string): void {
+  currentMarket = id;
+  try {
+    localStorage.setItem("arven.market", id);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Adds `market=` for a non-default market (BTC requests stay exactly as before). */
+export function withMarket(path: string): string {
+  if (currentMarket === "btc") return path;
+  return `${path}${path.includes("?") ? "&" : "?"}market=${encodeURIComponent(currentMarket)}`;
+}
 
 export class ApiError extends Error {
   status: number;
@@ -219,23 +257,24 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  overview: () => request<Overview>("/api/overview"),
+  markets: () => request<{ markets: Market[]; default: string }>("/api/markets"),
+  overview: () => request<Overview>(withMarket("/api/overview")),
   candles: (tf: string, limit = 400, before?: number) =>
-    request<{ candles: Candle[] }>(`/api/candles?tf=${tf}&limit=${limit}${before ? `&before=${before}` : ""}`),
+    request<{ candles: Candle[]; source?: string }>(withMarket(`/api/candles?tf=${tf}&limit=${limit}${before ? `&before=${before}` : ""}`)),
   signals: (strategy?: string, limit = 200) =>
-    request<{ signals: Signal[] }>(`/api/signals?limit=${limit}${strategy ? `&strategy=${strategy}` : ""}`),
-  strategies: () => request<{ forward_summary: ForwardSummary | null; strategies: string[] }>("/api/strategies"),
+    request<{ signals: Signal[] }>(withMarket(`/api/signals?limit=${limit}${strategy ? `&strategy=${strategy}` : ""}`)),
+  strategies: () => request<{ forward_summary: ForwardSummary | null; strategies: string[] }>(withMarket("/api/strategies")),
   screener: () => request<{ supported_symbols: string[]; rows: ScreenerRow[]; note: string }>("/api/screener"),
-  research: () => request<{ runs: ResearchRun[] }>("/api/research"),
+  research: () => request<{ runs: ResearchRun[] }>(withMarket("/api/research")),
   journal: () => request<{ entries: JournalEntry[]; stats: JournalStats }>("/api/journal"),
   addJournal: (body: Record<string, unknown>) =>
     request<JournalEntry>("/api/journal", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
   deleteJournal: (id: string) => request<{ deleted: string }>(`/api/journal/${id}`, { method: "DELETE" }),
   telegram: () => request<TelegramStatus>("/api/telegram"),
   s7Review: (tf: string) => request<S7Review>(`/api/s7/review?tf=${tf}`),
-  s7Trades: (period: string) => request<S7Trades>(`/api/s7/trades?period=${period}`),
-  strategyTradesIndex: () => request<{ entries: StrategyTradesEntry[] }>("/api/strategy_trades/index"),
-  strategyTrades: (strategy: string, period: string) => request<StrategyTradesFile>(`/api/strategy_trades?strategy=${strategy}&period=${period}`),
+  s7Trades: (period: string) => request<S7Trades>(withMarket(`/api/s7/trades?period=${period}`)),
+  strategyTradesIndex: () => request<{ entries: StrategyTradesEntry[] }>(withMarket("/api/strategy_trades/index")),
+  strategyTrades: (strategy: string, period: string) => request<StrategyTradesFile>(withMarket(`/api/strategy_trades?strategy=${strategy}&period=${period}`)),
   s7TradeLabels: () => request<{ labels: Record<string, S7TradeLabel> }>("/api/s7/trade_labels"),
   s7TradeLabel: (trade_id: string, verdict: string, note: string) =>
     request<{ saved: string; count: number }>("/api/s7/trade_labels", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ trade_id, verdict, note }) }),
@@ -243,3 +282,14 @@ export const api = {
   s7Label: (setup_id: string, verdict: string, note: string) =>
     request<{ saved: string; count: number }>("/api/s7/labels", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ setup_id, verdict, note }) }),
 };
+
+/** "0.05 BTC" / "3 oz": a trade's position size in its market's unit (BTC exports carry size_btc only). */
+export function tradeSize(tr: { size_btc?: number; size?: number; size_unit?: string }): string {
+  if (tr.size !== undefined) return `${tr.size.toFixed(2)} ${tr.size_unit ?? ""}`.trim();
+  return `${(tr.size_btc ?? 0).toFixed(2)} BTC`;
+}
+
+/** Subtitle naming the current market and where its prices come from. */
+export function marketSubtitle(): string {
+  return currentMarket === "gold" ? "Gold · XAUUSD (live: Binance XAUUSDT, history: Dukascopy)" : currentMarket === "btc" ? "BTC/USDT" : currentMarket;
+}

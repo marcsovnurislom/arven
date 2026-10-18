@@ -1,7 +1,10 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
 
 const en = {
-  appTagline: "Decision support for BTC/USDT. Signals only - never orders.",
+  appTagline: "Decision support for BTC/USDT and gold (XAUUSD). Signals only - never orders.",
+  market: "Market",
+  marketClosed: "Market closed (weekend, daily halt or holiday) - no signals until it reopens",
+  goldFeed: "Gold signals use Binance XAUUSDT prices; your broker's XAUUSD quote can differ slightly.",
   honesty: "Paper simulation on real market data. Not an exchange account, not advice, not evidence of profitability.",
   nav_overview: "Overview",
   nav_signals: "Signals",
@@ -58,7 +61,7 @@ const en = {
   long: "LONG",
   short: "SHORT",
   tpLadder: "Take-profit ladder",
-  screenerNote: "Single-symbol MVP. Multi-symbol screening is a later phase and is not faked.",
+  screenerNote: "The markets ARVEN follows. Prices from stored 1h bars, last 24 hours.",
   verified: "Verified history (offline studies, unchanged v1 strategies)",
   verifiedSrc: "Source: docs/strategy_*.md and docs/current_state.md. Development 2020-2023, validation 2023-2025; CFD cost profile.",
   addTrade: "Add a trade",
@@ -235,7 +238,10 @@ const en = {
 };
 
 const ru: typeof en = {
-  appTagline: "Поддержка решений по BTC/USDT. Только сигналы, никаких ордеров.",
+  appTagline: "Поддержка решений по BTC/USDT и золоту (XAUUSD). Только сигналы, никаких ордеров.",
+  market: "Рынок",
+  marketClosed: "Рынок закрыт (выходные, ежедневная пауза или праздник): сигналов нет до открытия",
+  goldFeed: "Сигналы по золоту считаются по ценам Binance XAUUSDT; котировка XAUUSD у брокера может немного отличаться.",
   honesty: "Бумажная симуляция на реальных данных. Это не биржевой счёт, не совет и не доказательство прибыльности.",
   nav_overview: "Обзор",
   nav_signals: "Сигналы",
@@ -292,7 +298,7 @@ const ru: typeof en = {
   long: "ЛОНГ",
   short: "ШОРТ",
   tpLadder: "Лестница тейк-профитов",
-  screenerNote: "MVP на одном инструменте. Мультисимвольный скринер — следующая фаза, подделывать его я не буду.",
+  screenerNote: "Рынки, за которыми следит ARVEN. Цены по сохранённым часовым свечам, последние 24 часа.",
   verified: "Проверенная история (офлайн-исследования, стратегии v1 без изменений)",
   verifiedSrc: "Источник: docs/strategy_*.md и docs/current_state.md. Development 2020–2023, validation 2023–2025; издержки CFD.",
   addTrade: "Добавить сделку",

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { api } from "../api";
+import { api, marketSubtitle } from "../api";
 import { Suspense, lazy } from "react";
 import type { ChartMarker } from "../CandleChart";
 import { useI18n } from "../i18n";
@@ -20,7 +20,7 @@ export function Charts() {
   );
   return (
     <>
-      <PageTitle sub="BTC/USDT">{t("nav_charts")}</PageTitle>
+      <PageTitle sub={marketSubtitle()}>{t("nav_charts")}</PageTitle>
       <Card
         title={t("chartTf")}
         right={
