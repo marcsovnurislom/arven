@@ -19,7 +19,8 @@ from arven.core.signal import Signal
 
 @dataclass(frozen=True, eq=False)
 class FeatureData:
-    """Feature rows of one window: a contiguous hourly grid of decision times and a (rows x columns) matrix."""
+    """Feature rows of one window: the hourly grid of decision times (contiguous around the clock; a session market's
+    tradable hours only) and a (rows x columns) matrix."""
 
     t_ms: np.ndarray
     names: tuple[str, ...]
@@ -34,8 +35,11 @@ class FeatureView:
         t = np.ascontiguousarray(t_ms, dtype=np.int64)
         if values.shape != (len(t), len(names)):
             raise ValueError("feature values must have shape (rows, columns)")
-        if len(t) and (np.any(np.diff(t) != HOUR_MS)):
-            raise ValueError("feature rows must be a contiguous hourly grid")
+        if len(t) and (np.any(np.diff(t) <= 0) or np.any(t % HOUR_MS)):
+            raise ValueError("feature rows must be strictly increasing whole hours")
+        # around the clock the grid is contiguous and a row is found by arithmetic; a session market's grid skips the
+        # closed hours, so a row is found by search (history(n) then means n *trading* hours)
+        self._contiguous = bool(len(t) == 0 or np.all(np.diff(t) == HOUR_MS))
         self._t = t
         self._names = names
         self._col = {n: i for i, n in enumerate(names)}
@@ -59,7 +63,12 @@ class FeatureView:
             raise LookAheadError(f"feature row {t} requested at decision time {now}")
         if not len(self._t) or t < self._t[0] or (t - int(self._t[0])) % HOUR_MS:
             raise KeyError(f"no feature row at {t}")
-        i = (t - int(self._t[0])) // HOUR_MS
+        if self._contiguous:
+            i = (t - int(self._t[0])) // HOUR_MS
+        else:
+            i = int(np.searchsorted(self._t, t))
+            if i < len(self._t) and int(self._t[i]) != t:
+                raise KeyError(f"no feature row at {t}")
         if i >= len(self._t):
             raise KeyError(f"no feature row at {t}")
         return int(i)

@@ -84,11 +84,15 @@ def key(cfg: dict[str, Any]) -> str:
 
 
 class Study:
-    def __init__(self, period: BacktestPeriod = BacktestPeriod.DEVELOPMENT) -> None:
+    """``instrument``: a config/instruments overlay (gold: XAUUSD) - its data, its CFD cost profile and its session
+    calendar; ``None`` is the BTC study exactly as before."""
+
+    def __init__(self, period: BacktestPeriod = BacktestPeriod.DEVELOPMENT, instrument: str | None = None, config_dir: str | None = None) -> None:
         if period not in (BacktestPeriod.DEVELOPMENT, BacktestPeriod.VALIDATION, BacktestPeriod.FORWARD):
             raise SystemExit("only development, validation or forward (the sealed test is not available here)")
         self.period = period
-        self.app, fcfg = load_config(), load_features_config()
+        self.app, fcfg = load_config(config_dir, instrument=instrument), load_features_config(config_dir)
+        self.calendar = self.app.session_calendar()
         t0 = time.time()
         if period == BacktestPeriod.FORWARD:
             # forward: the paper loader (features built in memory); the detector's bars below start at history_start, so
@@ -105,10 +109,16 @@ class Study:
         finally:
             con.close()
         print(f"data loaded in {time.time() - t0:.0f}s: {len(self.market)} 1m bars, window {from_ms(self.window.start_ms)} -> {from_ms(self.window.end_ms)}")
-        self.costs = {
-            "cfd": CostsConfig.model_validate(yaml.safe_load(Path("config/costs_cfd_justmarkets.yaml").read_text(encoding="utf-8"))),
-            "perp": self.app.costs,
-        }
+        if instrument is None:
+            self.costs = {
+                "cfd": CostsConfig.model_validate(yaml.safe_load(Path("config/costs_cfd_justmarkets.yaml").read_text(encoding="utf-8"))),
+                "perp": self.app.costs,
+            }
+        else:  # the instrument's own CFD profile; "perp" = Binance USD-M taker costs (a trader of the XAUUSDT perpetual)
+            self.costs = {
+                "cfd": self.app.costs,
+                "perp": CostsConfig.model_validate(yaml.safe_load(Path("config/costs.yaml").read_text(encoding="utf-8"))),
+            }
         self._setups: dict[str, list[S7Setup]] = {}
         self._results: dict[tuple[str, str, bool], dict[str, Any]] = {}
         self._outcomes: dict[tuple[str, str, bool], list[S7Outcome]] = {}
@@ -130,12 +140,15 @@ class Study:
         if rk not in self._results:
             tf, p, tp = split(cfg)
             setups = self.setups(tf, p)
-            ctx = make_context(self.s7bars(TFS[tf]), self.s7bars(LOWER[tf]), self.market, self.costs[costs], p, tp,
-                               higher=self.s7bars(HIGHER[tf]), stress=stress)
-            outs = run_setups(ctx, setups)
+            outs = run_setups(self.context(tf, p, tp, costs, stress), setups)
             self._outcomes[rk] = outs
             self._results[rk] = metrics(outs, len(setups))
         return self._results[rk]
+
+    def context(self, tf: str, p: S7Params, tp: S7TradeParams, costs: str = "cfd", stress: bool = False):
+        """The simulator context of this study (bars, 1m market, costs, and the session calendar)."""
+        return make_context(self.s7bars(TFS[tf]), self.s7bars(LOWER[tf]), self.market, self.costs[costs], p, tp,
+                            higher=self.s7bars(HIGHER[tf]), stress=stress, calendar=self.calendar)
 
     def outcomes(self, cfg: dict[str, Any], costs: str = "cfd", stress: bool = False) -> list[S7Outcome]:
         self.evaluate(cfg, costs, stress)
@@ -205,7 +218,7 @@ def random_control(study: Study, outs: list[S7Outcome], costs: CostsConfig, draw
             stop = fill * (1.0 - side * dist)
             ladder = tuple(TPLevel.from_r_multiple(r, f, entry=fill, stop=stop, side=side) for r, f in zip(leg.ladder_r, (0.5, 0.3, 0.2), strict=True))
             sig = EngineSignal(
-                symbol="BTCUSDT", side=side, strategy_id="random_control", strategy_version="v1", grade=Grade.EXPERIMENTAL,
+                symbol=study.app.market.symbol, side=side, strategy_id="random_control", strategy_version="v1", grade=Grade.EXPERIMENTAL,
                 event_time_ms=int(m.time_ms[i]), entry_reference=fill, stop=stop, tp_ladder=ladder, risk_fraction=0.01,
                 confidence=0.5, regime="control", reasons=("control",), risk_checks=(), versions=SignalVersions("v1", "control", None),
             )
@@ -262,7 +275,7 @@ def run_meta(study: Study, t_start: float) -> dict[str, Any]:
 
 
 def finish(study: Study, out: dict[str, Any], name: str) -> None:
-    path = study.app.data.data_dir / "s7_study" / f"{name}.json"
+    path = study.app.market_root / "s7_study" / f"{name}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(out, indent=1, default=str), encoding="utf-8")
     sel = out["report"]["selected"]["cfd"]

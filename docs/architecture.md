@@ -1,6 +1,8 @@
 # ARVEN — Architecture
 
 Status: **approved as target architecture** (2026-09-28). Not every module is built in the MVP; see `roadmap.md`.
+**2026-10-18 (owner request): a second market, gold (XAUUSD), added** - section 18 describes how; BTC behaviour and
+results are unchanged by it.
 Constraint: DuckDB + Parquet only — no PostgreSQL unless a concrete requirement appears.
 
 ---
@@ -709,3 +711,48 @@ Tests run offline on fixtures; no network in unit tests.
 | News ingestion + LLM structuring | Medium–Hard | Source licensing, timestamp reliability, contamination, cost |
 | Liquidation data | Hard (availability) | Deferred |
 | Dashboard | Easy–Medium | Streamlit |
+
+---
+
+## 18. A second market: gold (XAUUSD) and trading sessions (added 2026-10-18)
+
+The owner asked for gold next to BTC with every strategy and the same evaluation. Gold differs from BTC in one way
+that touches the whole system: **it does not trade around the clock** (CME metals hours: Friday 17:00 to Sunday 18:00
+and a daily 17:00-18:00 halt, New York time, plus holidays). The design keeps BTC byte-identical and makes the
+session an explicit property of a market.
+
+**Instruments.** `config/instruments/<NAME>.yaml` overlays `default.yaml` (`load_config(instrument=...)`, CLI
+`--instrument`): `XAUUSD` = gold history from Dukascopy (BID/ASK 1m candles -> mid), `XAUUSDT` = Binance's gold
+perpetual, the free real-time feed for live signals (listed 2025-12-11). Market data shares the one database (rows
+keyed by symbol); every other artifact of a non-default instrument lives under `data/markets/<instrument>/`
+(`AppConfig.market_root`): signals, paper summaries, backtests with their own sealed-test log, feature caches,
+research exports. The default (BTC) configuration hash is unchanged and pinned by a test.
+
+**Sessions** (`arven.core.sessions.SessionCalendar`): `24x7` (BTC; every function reduces to the plain UTC grid) or
+`cme_metals` (New York local time, so DST is exact) plus holiday / early-close windows in
+`config/sessions/cme_metals_closures.csv`, derived from the Dukascopy feed and projected for coming holidays
+(`scripts/research/gold_closures.py`). Rules that follow from it, all no-ops for BTC:
+- only tradable minutes are stored (Dukascopy and Binance ingestion, REST tail); quality checks count open minutes;
+  a derived bar is complete when it has all of its *open* minutes;
+- the bar grid of a session market is its trading bars (`BarSeries.calendar`, `regularized()`): a weekend is not a
+  row of NaN, so indicators continue across it, as on a broker chart; `shift(k)` = k trading bars;
+- staleness follows the grid (a bar is superseded when its successor *on the trading grid* could have closed), so the
+  last bar before a weekend is current, not stale, while the market is shut; live data age is trading time;
+- decisions only where an order could be filled at once: the market is open at `t` and the bar ending at `t` was a
+  trading bar (`session_decision_mask`) - never inside a closure and not at the close that starts one;
+- the 1m simulator's "data gap" exit fires only for missing *open* minutes; a position carries over a weekend and a
+  stop gapped through at the reopen fills at the reopen price;
+- time-based rules that are meant in bars use bars or *trading time* (`SessionCalendar.trading_ms`): S4's trend line,
+  S6's cooldown, S7's resistance window and expiry. Wall-clock holding limits (S1-S3) stay wall-clock.
+
+**Data that gold lacks.** Funding (a CFD; Binance's XAUUSDT rate is always 0) and, for Dukascopy, trade counts and
+taker volume: `market.has_funding: false` / `has_trade_flow: false` make those Stage 3 columns non-required, so they
+cannot block `feat_ready`. Crowded Shorts (funding + OI) cannot run on gold and is not configured for it.
+
+**Costs.** `config/costs_cfd_justmarkets_xauusd.yaml`: spread only (set from the Dukascopy spread, unverified on the
+owner's terminal), `funding.source: none`; overnight swap is reported as a separate sensitivity, not in the profile.
+
+**Live.** `config/live.yaml` `markets` lists further markets with their own strategies (gold: S4-S7 with exactly BTC's
+parameters, S1-S3 paper run); one process runs every market with its own cursor, stale flag and alerts; Telegram
+labels gold signals with both the broker symbol and the feed. The web app has a BTC / Gold switch (`market=` on the
+API). Gold's live prices come from XAUUSDT, whose small basis to the broker's XAUUSD is measured in the gold report.

@@ -251,3 +251,23 @@ def test_s7_resistance_window_in_bars_equals_the_millisecond_rule_on_a_gap_free_
     arm = int(np.searchsorted(g, ms(2024, 7, 14, 22, 15)))
     k, lb = resistance_window(sess, arm)
     assert k - lb == int(g[arm - 3]) and int(g[arm - 3]) == ms(2024, 7, 12, 20, 30)
+
+
+def test_feature_view_reads_a_session_hourly_grid_and_counts_trading_hours():
+    from arven.backtest.errors import LookAheadError
+    from arven.backtest.provider import FeatureView
+
+    grid = decision_grid(ms(2024, 7, 12, 18), ms(2024, 7, 15, 3), CME)  # Friday afternoon -> Monday night, over the weekend
+    vals = np.arange(len(grid), dtype=float).reshape(-1, 1)
+    clock = type("C", (), {"now_ms": int(grid[-1])})()
+    view = FeatureView(grid, ("x",), vals, clock, None)  # type: ignore[arg-type]
+    assert view.value("x", ms(2024, 7, 14, 23)) == float(np.searchsorted(grid, ms(2024, 7, 14, 23)))
+    # the last 3 values at Sunday 23:00 are Friday 19:00, Friday 20:00 and Sunday 23:00: trading hours, not wall hours
+    i = int(np.searchsorted(grid, ms(2024, 7, 14, 23)))
+    assert view.history("x", 3, ms(2024, 7, 14, 23)).tolist() == [i - 2, i - 1, i]
+    with pytest.raises(KeyError):
+        view.value("x", ms(2024, 7, 13, 12))  # Saturday: no decision row
+    with pytest.raises(LookAheadError):
+        view.value("x", int(grid[-1]) + H)
+    with pytest.raises(ValueError, match="whole hours"):
+        FeatureView(grid + 1, ("x",), vals, clock, None)  # type: ignore[arg-type]
