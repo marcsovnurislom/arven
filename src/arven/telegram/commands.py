@@ -15,6 +15,7 @@ import duckdb
 from arven.core.time import from_ms
 from arven.engine.signal_store import read_signals
 from arven.paper.runtime import read_heartbeat
+from arven.telegram.messages import symbol_label
 from arven.telegram.outbox import is_paused, set_paused
 
 HELP_TEXT = (
@@ -37,6 +38,10 @@ class CommandContext:
     signals_root: Path
     heartbeat_path: Path
     now_ms: int
+    extra_roots: tuple[tuple[str, Path], ...] = ()  # (label, signal store) of further markets, e.g. ("Gold", ...)
+
+    def roots(self) -> tuple[tuple[str, Path], ...]:
+        return (("", self.signals_root), *self.extra_roots)
 
 
 def _strategy_ids(root: Path) -> list[str]:
@@ -66,26 +71,25 @@ def _cmd_status(ctx: CommandContext) -> str:
 
 
 def _cmd_signals(ctx: CommandContext, n: int = 5) -> str:
-    signals = _recent_signals_across_strategies(ctx.signals_root, n)
+    signals = sorted((s for _, root in ctx.roots() for s in _recent_signals_across_strategies(root, n)),
+                     key=lambda s: s.event_time_ms)[-n:]
     if not signals:
         return "No signals recorded yet."
     return "\n".join(
-        f"{from_ms(s.event_time_ms).isoformat()}  {s.symbol} {'LONG' if s.side == 1 else 'SHORT'} "
+        f"{from_ms(s.event_time_ms).isoformat()}  {symbol_label(s.symbol)} {'LONG' if s.side == 1 else 'SHORT'} "
         f"({s.strategy_id}) [{s.grade.value}]"
         for s in signals
     )
 
 
 def _cmd_strategies(ctx: CommandContext) -> str:
-    ids = _strategy_ids(ctx.signals_root)
-    if not ids:
-        return "No strategies with recorded signals yet."
     lines = []
-    for sid in ids:
-        sigs = read_signals(ctx.signals_root, sid)
-        grade = sigs[-1].grade.value if sigs else "EXPERIMENTAL"
-        lines.append(f"{sid}: {len(sigs)} signals, current grade {grade}")
-    return "\n".join(lines)
+    for label, root in ctx.roots():
+        for sid in _strategy_ids(root):
+            sigs = read_signals(root, sid)
+            grade = sigs[-1].grade.value if sigs else "EXPERIMENTAL"
+            lines.append(f"{label + ': ' if label else ''}{sid}: {len(sigs)} signals, current grade {grade}")
+    return "\n".join(lines) if lines else "No strategies with recorded signals yet."
 
 
 def handle_command(text: str, chat_id: str, ctx: CommandContext) -> str | None:

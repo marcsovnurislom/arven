@@ -102,7 +102,9 @@ def test_cli_refuses_instrument_for_commands_not_yet_instrument_aware():
     from arven.cli import main
 
     with pytest.raises(SystemExit, match="does not support --instrument"):
-        main(["--instrument", "XAUUSD", "features", "status"])
+        main(["--instrument", "XAUUSD", "wfo", "show", "x"])
+    with pytest.raises(SystemExit, match="only `live tick` takes --instrument"):
+        main(["--instrument", "XAUUSDT", "live", "run"])
     with pytest.raises(SystemExit, match="Binance bulk files"):
         main(["--instrument", "XAUUSD", "ingest", "--start", "2024-01-01", "--end", "2024-01-02"])
     with pytest.raises(SystemExit, match="Dukascopy instrument"):

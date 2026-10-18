@@ -43,7 +43,7 @@ RESAMPLE_BOUNDARY_BUFFER_MS = 2 * DAY_MS  # comfortably more than the largest de
 
 
 def paper_dir(app: AppConfig) -> Path:
-    return app.data.data_dir / "paper"
+    return app.market_root / "paper"
 
 
 def latest_forward_window_end_ms(app: AppConfig, now=None) -> int:
@@ -80,7 +80,7 @@ def update_market_data(
     if summary.klines_written:
         anchor = last_before_tail if last_before_tail is not None else m1_end_ms
         lo = max(to_ms(app.data.history_start), anchor - RESAMPLE_BOUNDARY_BUFFER_MS)
-        resample(con, app.market.symbol, from_ms(lo), from_ms(m1_end_ms), DERIVED_TIMEFRAMES)
+        resample(con, app.market.symbol, from_ms(lo), from_ms(m1_end_ms), DERIVED_TIMEFRAMES, calendar=app.session_calendar())
     return summary
 
 
@@ -110,8 +110,8 @@ def load_paper_inputs(
     market = MarketData(bars["time_ms"], bars["open"], bars["high"], bars["low"], bars["close"], window.start_ms, window.end_ms, ft, fr, interval_ms,
                         calendar=app.session_calendar())
 
-    full_grid = decision_grid(to_ms(app.data.history_start), window.end_ms)
-    full_table = build_features(inputs, full_grid, fcfg)
+    full_grid = decision_grid(to_ms(app.data.history_start), window.end_ms, app.session_calendar())
+    full_table = build_features(inputs, full_grid, fcfg, **app.feature_flags())
     mask = (full_table.t_ms >= window.start_ms) & (full_table.t_ms < window.end_ms)
     table = full_table.select_rows(mask)
     ranges.append({"dataset": "features", "start_ms": window.start_ms, "end_ms": window.end_ms})
@@ -119,7 +119,7 @@ def load_paper_inputs(
     ready = full_table.columns["feat_ready"] == 1.0
     feature_manifest = {
         "feature_version": fcfg.version,
-        "definition_hash": definition_hash(fcfg),
+        "definition_hash": definition_hash(fcfg, **app.feature_flags()),
         "features_config_hash": fcfg.config_hash(),
         "data_sha256": full_table.content_sha256(),
         "source_fingerprint": inputs.fingerprint(),

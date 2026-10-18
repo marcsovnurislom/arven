@@ -42,7 +42,9 @@ FILE_NAMES = {"meta": "meta.json", "orders": "orders.csv", "fills": "fills.csv",
 
 
 def backtests_dir(app: AppConfig) -> Path:
-    return app.data.data_dir / "backtests"
+    """``data/backtests`` (BTC, unchanged) or ``data/markets/<instrument>/backtests``: each market keeps its own run
+    index and its own sealed-test access log (a sealed period is sealed per market)."""
+    return app.market_root / "backtests"
 
 
 def sealed_log_path(app: AppConfig) -> Path:
@@ -90,11 +92,11 @@ def load_inputs(
     market = MarketData(bars["time_ms"], bars["open"], bars["high"], bars["low"], bars["close"], window.start_ms, window.end_ms, ft, fr, interval_ms,
                         calendar=app.session_calendar())
 
-    directory = feature_store.cache_dir(app.data.data_dir, fcfg.version)
+    directory = feature_store.cache_dir(app.data.data_dir, fcfg.version, app.instrument)
     manifest = feature_store.read_manifest(directory)
-    if manifest["definition_hash"] != definition_hash(fcfg):
+    if manifest["definition_hash"] != definition_hash(fcfg, **app.feature_flags()):
         raise ConfigurationError("feature cache is stale: definition hash differs from config/features.yaml (run `arven features build`)")
-    specs = build_registry(fcfg)
+    specs = build_registry(fcfg, **app.feature_flags())
     table = feature_store.read_window_parquet(directory / feature_store.PARQUET_NAME, manifest["feature_version"], specs, window.start_ms, window.end_ms)
     ranges.append({"dataset": "features", "start_ms": window.start_ms, "end_ms": window.end_ms})
     if list(table.columns) != [c["name"] for c in manifest["columns"]]:

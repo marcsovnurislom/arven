@@ -22,6 +22,9 @@ from pathlib import Path
 STATE_DIRS = ("signals", "live", "telegram")
 TOP_LEVEL_ONLY_DIRS = ("paper",)
 SKIP_SUFFIXES = (".lock",)
+MARKETS_DIR = "markets"  # further markets (gold): data/markets/<instrument>/ with its own signals/ and paper/
+MARKET_STATE_DIRS = ("signals",)
+CONFIG_PATTERNS = ("*.yaml", "*.csv")  # the settings and the session / macro calendars
 
 
 @dataclass(frozen=True)
@@ -40,6 +43,20 @@ def _state_files(data_dir: Path) -> Iterable[Path]:
             yield from (p for p in sorted(root.rglob("*")) if p.is_file() and p.suffix not in SKIP_SUFFIXES)
     for name in TOP_LEVEL_ONLY_DIRS:
         root = data_dir / name
+        if root.is_dir():
+            yield from (p for p in sorted(root.iterdir()) if p.is_file() and p.suffix not in SKIP_SUFFIXES)
+    markets = data_dir / MARKETS_DIR
+    for market in sorted(m for m in markets.iterdir() if m.is_dir()) if markets.is_dir() else []:
+        yield from _state_files_of(market, MARKET_STATE_DIRS, TOP_LEVEL_ONLY_DIRS)
+
+
+def _state_files_of(root_dir: Path, whole: Iterable[str], top_level: Iterable[str]) -> Iterable[Path]:
+    for name in whole:
+        root = root_dir / name
+        if root.is_dir():
+            yield from (p for p in sorted(root.rglob("*")) if p.is_file() and p.suffix not in SKIP_SUFFIXES)
+    for name in top_level:
+        root = root_dir / name
         if root.is_dir():
             yield from (p for p in sorted(root.iterdir()) if p.is_file() and p.suffix not in SKIP_SUFFIXES)
 
@@ -61,7 +78,7 @@ def make_backup(
             files += 1
             bytes_in += p.stat().st_size
         if config_dir.is_dir():
-            for p in sorted(config_dir.rglob("*.yaml")):
+            for p in sorted({q for pattern in CONFIG_PATTERNS for q in config_dir.rglob(pattern)}):
                 zf.write(p, Path("config") / p.relative_to(config_dir))
                 files += 1
                 bytes_in += p.stat().st_size

@@ -11,6 +11,8 @@ market:
   has_funding: false            # spot CFD: no funding (overnight swap is a cost, config/costs_*)
   has_trade_flow: false         # an OTC quote feed: no trade counts or taker-buy volume (stored as 0)
 
+costs_file: costs_cfd_justmarkets_xauusd.yaml  # spread-only CFD costs (the owner trades XAUUSD as a CFD)
+
 dukascopy:
   base_url: https://datafeed.dukascopy.com/datafeed
   instrument: XAUUSD

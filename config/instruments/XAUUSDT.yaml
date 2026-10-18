@@ -9,3 +9,5 @@ market:
   symbol: XAUUSDT
   session: cme_metals
   has_funding: false            # published but always 0 for gold: not a usable feature
+
+costs_file: costs_cfd_justmarkets_xauusd.yaml  # gold signals are tracked with the broker CFD costs, as BTC's are

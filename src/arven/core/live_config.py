@@ -52,6 +52,27 @@ class MaintenanceConfig(_StrictModel):
     paper_keep_recent: int | None = Field(default=48, ge=1)  # hourly paper-run dirs kept (plus the last of each day); None = keep all
 
 
+class LiveMarketConfig(_StrictModel):
+    """A market beside the default BTCUSDT one (whose strategies are the top-level ``strategies``): its live feed
+    (``config/instruments/<instrument>.yaml``), its own strategies and costs. Its signals, cursors and summary live in
+    ``<data_dir>/markets/<instrument>/`` (``AppConfig.market_root``), so the BTC record is untouched."""
+
+    instrument: str = Field(pattern=r"^[A-Z0-9]+$")
+    title: str = ""
+    enabled: bool = True
+    cost_profile: str  # file in config/ used to resolve this market's signals in R
+    include_open_interest: bool = False
+    run_legacy_paper: bool = False  # also the hourly Stage 8 S1-S3 paper run for this market
+    strategies: tuple[LiveStrategyConfig, ...] = ()
+
+    @model_validator(mode="after")
+    def _unique_ids(self) -> LiveMarketConfig:
+        ids = [s.id for s in self.strategies]
+        if len(ids) != len(set(ids)):
+            raise ValueError(f"{self.instrument}: strategy ids must be unique, got {ids}")
+        return self
+
+
 class LiveConfig(_StrictModel):
     poll_seconds: float = Field(default=20.0, ge=1.0, le=600.0)
     event_delay_seconds: int = Field(default=5, ge=0, le=600)  # wait this long after a 15m close before evaluating it
@@ -64,16 +85,32 @@ class LiveConfig(_StrictModel):
     forward_review: ForwardReviewConfig = Field(default_factory=ForwardReviewConfig)
     maintenance: MaintenanceConfig = Field(default_factory=MaintenanceConfig)
     strategies: tuple[LiveStrategyConfig, ...] = ()
+    markets: tuple[LiveMarketConfig, ...] = ()  # further markets (gold), each with its own strategies
 
     @model_validator(mode="after")
     def _unique_ids(self) -> LiveConfig:
         ids = [s.id for s in self.strategies]
         if len(ids) != len(set(ids)):
             raise ValueError(f"strategy ids must be unique, got {ids}")
+        instruments = [m.instrument for m in self.markets]
+        if len(instruments) != len(set(instruments)):
+            raise ValueError(f"market instruments must be unique, got {instruments}")
         return self
 
     def enabled(self) -> tuple[LiveStrategyConfig, ...]:
         return tuple(s for s in self.strategies if s.enabled)
+
+    def enabled_markets(self) -> tuple[LiveMarketConfig, ...]:
+        return tuple(m for m in self.markets if m.enabled)
+
+    def for_market(self, market: LiveMarketConfig) -> LiveConfig:
+        """This loop configuration as seen by one extra market's tick: its strategies, costs and switches; every
+        timing / Telegram / review setting shared."""
+        return self.model_copy(update={
+            "strategies": market.strategies, "cost_profile": market.cost_profile,
+            "include_open_interest": market.include_open_interest, "run_legacy_paper": market.run_legacy_paper,
+            "markets": (),
+        })
 
 
 def load_live_config(config_dir: Path | str | None = None) -> LiveConfig:
@@ -81,4 +118,5 @@ def load_live_config(config_dir: Path | str | None = None) -> LiveConfig:
     return LiveConfig.model_validate(_read_yaml(config_dir / LIVE_FILE))
 
 
-__all__ = ["ForwardReviewConfig", "LiveConfig", "MaintenanceConfig", "LiveStrategyConfig", "LiveTelegramConfig", "load_live_config"]
+__all__ = ["ForwardReviewConfig", "LiveConfig", "LiveMarketConfig", "MaintenanceConfig", "LiveStrategyConfig", "LiveTelegramConfig",
+           "load_live_config"]

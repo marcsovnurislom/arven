@@ -236,8 +236,8 @@ def cmd_features_build(cfg: AppConfig, args: argparse.Namespace) -> int:
     fcfg = load_features_config(args.config_dir)
     with open_readonly(cfg.data.database_path) as con:
         inputs = load_feature_inputs(con, cfg)
-    t_ms = decision_grid(to_ms(cfg.data.history_start), to_ms(cfg.data.history_end))
-    table = build_features(inputs, t_ms, fcfg)
+    t_ms = decision_grid(to_ms(cfg.data.history_start), to_ms(cfg.data.history_end), cfg.session_calendar())
+    table = build_features(inputs, t_ms, fcfg, **cfg.feature_flags())
     problems = invariant_violations(table)
     if problems:
         for p in problems:
@@ -247,7 +247,7 @@ def cmd_features_build(cfg: AppConfig, args: argparse.Namespace) -> int:
     peak = _peak_working_set_mb()
     manifest = feature_store.build_manifest(
         table,
-        definition_hash=definition_hash(fcfg),
+        definition_hash=definition_hash(fcfg, **cfg.feature_flags()),
         features_config_hash=fcfg.config_hash(),
         app_config_hash=cfg.config_hash(),
         source_fingerprint=inputs.fingerprint(),
@@ -261,7 +261,7 @@ def cmd_features_build(cfg: AppConfig, args: argparse.Namespace) -> int:
         history_end=cfg.data.history_end,
         peak_working_set_mb=peak,
     )
-    directory = feature_store.cache_dir(cfg.data.data_dir, fcfg.version)
+    directory = feature_store.cache_dir(cfg.data.data_dir, fcfg.version, cfg.instrument)
     feature_store.write_cache(directory, table, manifest)
     print(f"feature version {fcfg.version}: {len(table)} rows x {len(table.columns)} columns -> {directory}")
     first_ready = from_ms(manifest["first_ready_ms"]).isoformat() if manifest["first_ready_ms"] else None
@@ -274,8 +274,8 @@ def cmd_features_build(cfg: AppConfig, args: argparse.Namespace) -> int:
 
 def cmd_features_check(cfg: AppConfig, args: argparse.Namespace) -> int:
     fcfg = load_features_config(args.config_dir)
-    specs = build_registry(fcfg)
-    directory = feature_store.cache_dir(cfg.data.data_dir, fcfg.version)
+    specs = build_registry(fcfg, **cfg.feature_flags())
+    directory = feature_store.cache_dir(cfg.data.data_dir, fcfg.version, cfg.instrument)
     table, manifest = feature_store.read_cache(directory, specs)
     ok = True
 
@@ -285,7 +285,7 @@ def cmd_features_check(cfg: AppConfig, args: argparse.Namespace) -> int:
         print(f"  {'PASS' if passed else 'FAIL'}  {text}")
 
     print(f"feature cache {directory}")
-    report(manifest["definition_hash"] == definition_hash(fcfg), "definition hash matches the current features.yaml and registry")
+    report(manifest["definition_hash"] == definition_hash(fcfg, **cfg.feature_flags()), "definition hash matches the current features.yaml and registry")
     report(list(table.columns) == [s.name for s in specs], "columns match the registry")
     report(table.content_sha256() == manifest["data_sha256"], "content hash matches the manifest")
     violations = invariant_violations(table)
@@ -310,7 +310,7 @@ def cmd_features_check(cfg: AppConfig, args: argparse.Namespace) -> int:
 
 def cmd_features_status(cfg: AppConfig, args: argparse.Namespace) -> int:
     fcfg = load_features_config(args.config_dir)
-    directory = feature_store.cache_dir(cfg.data.data_dir, fcfg.version)
+    directory = feature_store.cache_dir(cfg.data.data_dir, fcfg.version, cfg.instrument)
     if not (directory / feature_store.MANIFEST_NAME).exists():
         print(f"no feature cache at {directory}; run `arven features build`")
         return 1
@@ -321,7 +321,7 @@ def cmd_features_status(cfg: AppConfig, args: argparse.Namespace) -> int:
     print(f"  decision times {from_ms(m['decision_time_first_ms']).isoformat()} .. {from_ms(m['decision_time_last_ms']).isoformat()}")
     print(f"  first feat_ready {first_ready}  ready rows {m['ready_rows']}")
     print(f"  built from git {m['git_commit']}, created {from_ms(m['created_at_ms']).isoformat()}")
-    print(f"  up to date with features.yaml: {m['definition_hash'] == definition_hash(fcfg)}")
+    print(f"  up to date with features.yaml: {m['definition_hash'] == definition_hash(fcfg, **cfg.feature_flags())}")
     print(f"  inputs {m['inputs']}")
     return 0
 
@@ -663,6 +663,11 @@ def cmd_live_tick(cfg: AppConfig, args: argparse.Namespace) -> int:
     from arven.live.service import run_live_tick
 
     live = load_live_config(args.config_dir)
+    if cfg.instrument is not None:  # `arven --instrument XAUUSDT live tick`: that market's entry in config/live.yaml
+        market = next((m for m in live.markets if m.instrument == cfg.instrument), None)
+        if market is None:
+            raise SystemExit(f"config/live.yaml has no market {cfg.instrument}")
+        live = live.for_market(market)
     chat_ids = frozenset() if args.no_telegram or not live.telegram.enabled else allowed_chat_ids()
     out = run_live_tick(cfg, load_features_config(args.config_dir), live, _config_dir(args), chat_ids=chat_ids)
     rs = out.rest
@@ -718,7 +723,14 @@ def cmd_live_run(cfg: AppConfig, args: argparse.Namespace) -> int:
     chat_ids = frozenset() if args.no_telegram else allowed_chat_ids()
     bt = load_backtest_config(args.config_dir)
     legacy = (lambda now: run_once(cfg, fcfg, bt, lambda: _build_pipeline(cfg, args, bt), now=now)) if live.run_legacy_paper else None
-    deps = build_deps(cfg, fcfg, live, _config_dir(args), tcfg, chat_ids, legacy_tick=legacy)
+    markets = {m.instrument: (m, load_config(args.config_dir, instrument=m.instrument)) for m in live.enabled_markets()}
+
+    def market_legacy(m_app: AppConfig):
+        return lambda now: run_once(m_app, fcfg, bt, lambda: _build_pipeline(m_app, args, bt), now=now)
+
+    market_legacy_ticks = {name: market_legacy(a) for name, (m, a) in markets.items() if m.run_legacy_paper}
+    deps = build_deps(cfg, fcfg, live, _config_dir(args), tcfg, chat_ids, legacy_tick=legacy, markets=markets,
+                      market_legacy_ticks=market_legacy_ticks)
     stop_file = Path(args.stop_file) if args.stop_file else None
     if stop_file is not None and stop_file.exists():  # a stop request stays in force (the watchdog would restart us)
         print(f"stop file {stop_file} exists - not starting. Delete it to let the live process run.", flush=True)
@@ -742,7 +754,8 @@ def cmd_live_run(cfg: AppConfig, args: argparse.Namespace) -> int:
         finally:
             watcher.cancel()
 
-    enabled = ", ".join(s.id for s in live.enabled())
+    enabled = ", ".join(s.id for s in live.enabled()) + "".join(
+        f"; {m.title or m.instrument}: " + ", ".join(s.id for s in m.strategies if s.enabled) for m, _ in markets.values())
     tg = ("off" if not live.telegram.enabled else "no chats configured (TELEGRAM_CHAT_IDS)" if not chat_ids else
           f"{len(chat_ids)} chat(s), {'DRY RUN (config/telegram.yaml)' if tcfg.dry_run else 'sending'}, "
           f"token {'set' if telegram_token_configured() else 'MISSING'}")
@@ -788,16 +801,21 @@ def cmd_live_status(cfg: AppConfig, args: argparse.Namespace) -> int:
     from arven.web.service import read_json
 
     live = load_live_config(args.config_dir)
-    for s in live.strategies:
-        print(f"  {'ON ' if s.enabled else 'off'} {s.id:22s} kind={s.kind:20s} version={s.version}")
-    summary = read_json(paper_dir(cfg) / "strategies_summary.json")
-    if not summary:
-        print("no live summary yet; run `arven live tick`")
-        return 0
-    print(f"last tick {summary['generated_at']}  data through {from_ms(summary['data_through_ms']).isoformat()}  status {summary.get('status', 'ok')}")
-    for sid, st in summary["strategies"].items():
-        print(f"  {sid}: signals {st['signals']}, closed {st['closed']}, open {st['open']}, pending {st.get('pending', 0)}, "
-              f"cancelled {st.get('cancelled', 0)}, net {st['total_r']:+.2f} R")
+    sections = [(cfg.market.symbol, cfg, live.strategies)] + [
+        (m.title or m.instrument, load_config(args.config_dir, instrument=m.instrument), m.strategies) for m in live.markets if m.enabled]
+    for title, app_cfg, strategies in sections:
+        print(f"{title}:")
+        for s in strategies:
+            print(f"  {'ON ' if s.enabled else 'off'} {s.id:22s} kind={s.kind:20s} version={s.version}")
+        summary = read_json(paper_dir(app_cfg) / "strategies_summary.json")
+        if not summary:
+            print("  no live summary yet; run `arven live tick`")
+            continue
+        print(f"  last tick {summary['generated_at']}  data through {from_ms(summary['data_through_ms']).isoformat()}  "
+              f"status {summary.get('status', 'ok')}")
+        for sid, st in summary["strategies"].items():
+            print(f"    {sid}: signals {st['signals']}, closed {st['closed']}, open {st['open']}, pending {st.get('pending', 0)}, "
+                  f"cancelled {st.get('cancelled', 0)}, net {st['total_r']:+.2f} R")
     return cmd_live_heartbeat(cfg, args) if (cfg.data.data_dir / "live" / "heartbeat.json").exists() else 0
 
 
@@ -1223,7 +1241,7 @@ def build_parser() -> argparse.ArgumentParser:
 # Commands that already work per instrument (`--instrument`). Every other command still assumes the default
 # BTCUSDT configuration (shared output directories such as the feature cache), so it refuses an overlay instead of
 # silently mixing markets.
-_INSTRUMENT_COMMANDS = frozenset({"ingest", "resample", "crosscheck", "quality", "status", "duka"})
+_INSTRUMENT_COMMANDS = frozenset({"ingest", "resample", "crosscheck", "quality", "status", "duka", "features", "backtest", "live"})
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1233,6 +1251,8 @@ def main(argv: list[str] | None = None) -> int:
     cfg = load_config(args.config_dir, instrument=args.instrument)
     if args.command == "duka" and cfg.market.exchange != "dukascopy":
         raise SystemExit("`duka` needs a Dukascopy instrument, e.g. --instrument XAUUSD")
+    if args.command == "live" and args.instrument is not None and args.live_command != "tick":
+        raise SystemExit("`live run/status/heartbeat` cover every market of config/live.yaml; only `live tick` takes --instrument")
     if args.command in ("ingest", "crosscheck") and cfg.market.exchange != "binance":
         raise SystemExit(f"`{args.command}` reads Binance bulk files; use `duka download/ingest` for {cfg.market.symbol}")
     return args.func(cfg, args)

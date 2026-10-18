@@ -27,8 +27,10 @@ PARQUET_NAME = "features_1h.parquet"
 MANIFEST_NAME = "manifest.json"
 
 
-def cache_dir(data_dir: Path, version: str) -> Path:
-    return data_dir / "features" / version
+def cache_dir(data_dir: Path, version: str, instrument: str | None = None) -> Path:
+    """``data/features/<version>`` for the default market (unchanged); ``data/features/<version>-<instrument>`` for an
+    instrument overlay (its own decision grid and registry flags)."""
+    return data_dir / "features" / (version if instrument is None else f"{version}-{instrument}")
 
 
 def _sql_path(p: Path) -> str:

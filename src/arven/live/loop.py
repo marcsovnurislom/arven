@@ -89,6 +89,10 @@ class LoopDeps:
     queue_daily_summary: Callable[[str], None] | None  # (date label)
     queue_weekly_report: Callable[[str], None] | None = None  # (today's UTC date) - the 7 days before it
     maintenance: Callable[[datetime], Any] | None = None  # daily backup + paper-run retention -> dict for the log
+    # further markets (config/live.yaml ``markets``), by instrument: their own tick and optional hourly S1-S3 paper run.
+    # Each keeps its own progress in ``state.extra["markets"][instrument]``, so one market never holds another back.
+    market_ticks: dict[str, Callable[[datetime], Any]] = field(default_factory=dict)
+    market_legacy_ticks: dict[str, Callable[[datetime], Any]] = field(default_factory=dict)
 
 
 async def _run(fn: Callable[..., Any], *args: Any) -> tuple[Any, str | None]:
@@ -127,6 +131,9 @@ async def poll_once(live: LiveConfig, deps: LoopDeps, state: LoopState, now: dat
         if status == "error":
             log_event(log_path, event="live_tick", status="error", detail=detail)
 
+    for name, tick in deps.market_ticks.items():
+        await _market_tick(name, tick, deps, state, now, due, log_path)
+
     if deps.legacy_tick is not None and live.run_legacy_paper:
         hour = now_ms // HOUR_MS * HOUR_MS
         if state.legacy_hour_ms is None or state.legacy_hour_ms < hour:
@@ -134,6 +141,15 @@ async def poll_once(live: LiveConfig, deps: LoopDeps, state: LoopState, now: dat
             if err is None and getattr(res, "status", None) in ("ticked", "idle"):
                 state.legacy_hour_ms = hour
             log_event(log_path, event="legacy_paper", status=getattr(res, "status", "error"), detail=err or getattr(res, "detail", ""))
+
+    for name, tick in deps.market_legacy_ticks.items():
+        ms = _market_state(state, name)
+        hour = now_ms // HOUR_MS * HOUR_MS
+        if ms["legacy_hour_ms"] is None or ms["legacy_hour_ms"] < hour:
+            res, err = await _run(tick, now)
+            if err is None and getattr(res, "status", None) in ("ticked", "idle"):
+                ms["legacy_hour_ms"] = hour
+            log_event(log_path, event="legacy_paper", market=name, status=getattr(res, "status", "error"), detail=err or getattr(res, "detail", ""))
 
     if deps.queue_daily_summary is not None and live.telegram.daily_summary_hour_utc is not None:
         today = now.astimezone(UTC).date().isoformat()
@@ -175,6 +191,48 @@ async def poll_once(live: LiveConfig, deps: LoopDeps, state: LoopState, now: dat
         if err is None and new_id is not None:
             state.telegram_update_id = new_id
     return status, detail
+
+
+def _market_state(state: LoopState, name: str) -> dict[str, Any]:
+    markets = state.extra.setdefault("markets", {})
+    ms = markets.setdefault(name, {})
+    for key, default in (("done_through_ms", None), ("stale_alerted", False), ("consecutive_errors", 0), ("legacy_hour_ms", None),
+                         ("last_tick_ms", None)):
+        ms.setdefault(key, default)
+    return ms
+
+
+async def _market_tick(
+    name: str, tick: Callable[[datetime], Any], deps: LoopDeps, state: LoopState, now: datetime, due: int, log_path: Path,
+) -> None:
+    """One extra market's tick: the same rules as the default market's above, with its own state and labelled alerts."""
+    ms = _market_state(state, name)
+    now_ms = to_ms(now)
+    if ms["done_through_ms"] is not None and ms["done_through_ms"] >= due:
+        return
+    out, err = await _run(tick, now)
+    if err is not None:
+        status, detail = "error", err
+        log_event(log_path, event="live_tick", market=name, status="error", detail=detail)
+    else:
+        status, detail = out.status, out.detail
+        if out.through_ms is not None and out.status in ("ok", "error"):
+            ms["done_through_ms"] = out.through_ms if ms["done_through_ms"] is None else max(ms["done_through_ms"], out.through_ms)
+        if out.status in ("ok", "error", "stale"):
+            ms["last_tick_ms"] = now_ms
+        new = {sid: len(st.new_signals) for sid, st in out.strategies.items() if st.new_signals}
+        log_event(log_path, event="live_tick", market=name, status=out.status, detail=out.detail, through_ms=out.through_ms,
+                  new_signals=new, new_updates=sum(st.new_updates for st in out.strategies.values()), alerts=out.queued_alerts)
+    ms["consecutive_errors"] = ms["consecutive_errors"] + 1 if status == "error" else 0
+    if ms["consecutive_errors"] == ERROR_ALERT_AFTER and deps.queue_system:
+        await _run(deps.queue_system, f"errors:{name}:{now_ms // HOUR_MS}", f"{name}: repeated errors",
+                   f"{ERROR_ALERT_AFTER} ticks in a row failed: {detail}")
+    if status == "stale" and not ms["stale_alerted"] and deps.queue_system:
+        await _run(deps.queue_system, f"stale:{name}:{now_ms // HOUR_MS}", f"{name}: market data stale",
+                   f"{detail} - no new {name} signals until it is fresh again (NO_TRADE)")
+        ms["stale_alerted"] = True
+    elif status == "ok":
+        ms["stale_alerted"] = False
 
 
 async def run_live_forever(

@@ -23,6 +23,15 @@ _UPDATE_VERB = {
 }
 
 
+# How a feed symbol is shown to the owner: gold signals are computed on Binance's XAUUSDT perpetual, but the owner
+# trades the XAUUSD CFD - say both, so a price is never mistaken for the broker's quote.
+SYMBOL_LABELS = {"XAUUSDT": "GOLD XAUUSD (prices: Binance XAUUSDT)"}
+
+
+def symbol_label(symbol: str) -> str:
+    return SYMBOL_LABELS.get(symbol, symbol)
+
+
 def _side_word(side: int) -> str:
     return "LONG" if side == 1 else "SHORT"
 
@@ -50,7 +59,7 @@ def format_new_signal(signal: EngineSignal) -> str:
     reasons = "; ".join(signal.reasons[:3]) if signal.reasons else "(none recorded)"
     return (
         f"NEW SIGNAL [{signal.grade.value}]\n"
-        f"{signal.symbol} {_side_word(signal.side)}  ({signal.strategy_id} {_version(signal.strategy_version)})  {_utc(signal.event_time_ms)}\n"
+        f"{symbol_label(signal.symbol)} {_side_word(signal.side)}  ({signal.strategy_id} {_version(signal.strategy_version)})  {_utc(signal.event_time_ms)}\n"
         f"{entry}\n"
         f"Stop: {signal.stop:.2f}\n"
         f"{tp_lines}\n"
@@ -63,7 +72,7 @@ def format_new_signal(signal: EngineSignal) -> str:
 def format_signal_update(signal: EngineSignal, update: SignalUpdate) -> str:
     verb = _UPDATE_VERB[update.kind]
     return (
-        f"{verb}: {signal.symbol} {_side_word(signal.side)} ({signal.strategy_id})  {_utc(update.time_ms)}\n"
+        f"{verb}: {symbol_label(signal.symbol)} {_side_word(signal.side)} ({signal.strategy_id})  {_utc(update.time_ms)}\n"
         f"Signal of {_utc(signal.event_time_ms)}, entry {signal.entry_reference:.2f}, stop {signal.stop:.2f}\n"
         f"{update.detail}\n\n{DISCLAIMER}"
     )

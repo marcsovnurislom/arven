@@ -176,7 +176,8 @@ class RestIngestor:
         5-minute open-interest statistics)."""
         summary = RestTailSummary()
         self._tail_klines(end_ms, summary)
-        self._tail_funding(end_ms, summary)
+        if self.cfg.market.has_funding:  # gold: the published rate is always 0 and not used (market.has_funding)
+            self._tail_funding(end_ms, summary)
         if include_open_interest:
             self._tail_open_interest(end_ms, summary)
         return summary

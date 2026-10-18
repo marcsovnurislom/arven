@@ -91,7 +91,7 @@ def write_update_cursor(path: Path, last_update_id: int) -> None:
 def run_telegram_commands_tick(
     con: duckdb.DuckDBPyConnection, cfg: TelegramConfig, signals_root: Path, heartbeat_path: Path, *,
     last_update_id: int, allowed_chats: frozenset[str], token: str | None = None,
-    opener=urllib.request.urlopen, sleep=time.sleep, now=None,
+    opener=urllib.request.urlopen, sleep=time.sleep, now=None, extra_signal_roots: tuple[tuple[str, Path], ...] = (),
 ) -> tuple[CommandsTickSummary, int]:
     """One ``getUpdates`` poll + reply cycle. Returns the summary and the new ``last_update_id`` the
     caller should persist (`write_update_cursor`) so no update is processed twice next time. Never raises:
@@ -106,7 +106,7 @@ def run_telegram_commands_tick(
     except Exception as exc:  # noqa: BLE001 - e.g. TELEGRAM_BOT_TOKEN not configured, or a network failure
         summary.errors.append(f"getUpdates failed: {exc}")
         return summary, last_update_id
-    ctx = CommandContext(con, signals_root, heartbeat_path, now_ts)
+    ctx = CommandContext(con, signals_root, heartbeat_path, now_ts, extra_signal_roots)
     new_last_id = last_update_id
     for update in updates:
         summary.updates_seen += 1

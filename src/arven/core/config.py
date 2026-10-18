@@ -305,6 +305,18 @@ class AppConfig(_StrictModel):
     def session_calendar(self) -> SessionCalendar:
         return self.market.session_calendar()
 
+    @property
+    def market_root(self) -> Path:
+        """Where this market's own artifacts live (signals, paper summaries, backtests, research exports): the data
+        directory itself for the default (BTCUSDT) configuration - every existing path unchanged - and
+        ``<data_dir>/markets/<instrument>`` for an instrument overlay. Market data shares one database."""
+        return self.data.data_dir if self.instrument is None else self.data.data_dir / "markets" / self.instrument
+
+    def feature_flags(self) -> dict[str, bool]:
+        """Keyword arguments for ``build_features`` / ``build_registry`` / ``definition_hash``: which feature groups
+        this market's data can support (all of them for BTC)."""
+        return {"funding_required": self.market.has_funding, "trade_flow_required": self.market.has_trade_flow}
+
 
 def _read_yaml(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as fh:

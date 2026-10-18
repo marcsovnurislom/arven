@@ -130,7 +130,7 @@ def run_live_tick(
     now_ms = to_ms(now)
     strategies = strategies if strategies is not None else build_strategies(live)
     costs = load_costs(config_dir, live.cost_profile)
-    signals_root = app.data.data_dir / "signals"
+    signals_root = app.market_root / "signals"
     root = paper_dir(app)
     root.mkdir(parents=True, exist_ok=True)
     cursor_path, summary_path = root / "strategies_cursor.json", root / "strategies_summary.json"
@@ -158,14 +158,22 @@ def run_live_tick(
                         calendar=app.session_calendar())
 
     last_1m = int(m1["time_ms"][-1])
+    calendar = app.session_calendar()
     through = complete_through_ms(last_1m, now_ms, live.event_delay_seconds * 1000)
     m15 = bars[Timeframe.M15]
     through = min(through, int(m15.open_time_ms[-1]) + MIN15) if len(m15) else through
-    stale = now_ms - (last_1m + MIN1) > live.max_data_age_seconds * 1000
+    if not calendar.always_open and not len(calendar.open_minutes(last_1m + MIN1, now_ms - live.event_delay_seconds * 1000)):
+        # a session market whose every open minute up to now is stored (it is closed): complete through the clock, so
+        # the loop does not re-run the tick every poll of a weekend (nothing actionable can happen while closed)
+        through = max(through, complete_through_ms(now_ms, now_ms, live.event_delay_seconds * 1000) or through)
+    # data age in *trading* time (= wall time around the clock): a session market's data is not stale while it is closed
+    lag_ms = int(calendar.trading_ms(now_ms)) - int(calendar.trading_ms(last_1m + MIN1))
+    stale = lag_ms > live.max_data_age_seconds * 1000
     features_loader = (lambda: load_paper_inputs(app, fcfg, window).features) if needs_features(live) else None
     ctx = LiveContext(app, fcfg, costs, window, bars, market, through, fcfg.version, fcfg.config_hash(), git_commit(), features_loader)
+    closed = not calendar.always_open and not calendar.is_open(now_ms // MIN1 * MIN1)
     outcome = LiveTickOutcome("stale" if stale else "ok", rest, through, last_1m,
-                              detail=f"newest 1m bar is {(now_ms - last_1m - MIN1) / 1000:.0f}s old" if stale else "")
+                              detail=f"newest 1m bar is {lag_ms / 1000:.0f}s old" if stale else ("market closed" if closed else ""))
     if stale:
         return outcome
 

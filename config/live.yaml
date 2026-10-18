@@ -79,3 +79,50 @@ strategies:
       oi_z_min: 1.0
       hold_hours: 24
       stop_fraction: 0.03
+
+# Further markets, each with its own strategies, costs and signal record in data/markets/<instrument>/ (the BTC record
+# above stays where it is). Gold: signals computed on Binance's XAUUSDT perpetual (the only free real-time gold feed),
+# only while CME metals trade (the owner's XAUUSD CFD hours; arven.core.sessions), tracked with the gold CFD costs.
+# The strategies and their parameters are exactly BTC's - nothing re-tuned for gold (docs/RESULTS_GOLD.md).
+# Crowded Shorts is not here: XAUUSDT's funding rate is always 0, so its rule cannot fire.
+markets:
+  - instrument: XAUUSDT
+    title: Gold
+    enabled: false              # switched on once the gold history is ingested and verified
+    cost_profile: costs_cfd_justmarkets_xauusd.yaml
+    include_open_interest: false
+    run_legacy_paper: true      # the hourly S1-S3 paper run for gold as well
+    strategies:
+      - id: s4_impulse_retest
+        kind: s4_impulse_retest
+        title: S4 Impulse-Retest
+        enabled: true
+      - id: s5_squeeze_breakout
+        kind: s5_squeeze_breakout
+        title: S5 Squeeze-Breakout
+        enabled: true
+      - id: s6_trend_pullback
+        kind: s6_trend_pullback
+        title: S6 Trend-Pullback
+        enabled: true
+      - id: s7_trend_break_fib
+        kind: s7
+        title: S7 Trend-Break Fib (owner's method)
+        enabled: true
+        version: v1
+        params:                 # identical to the BTC entry above
+          tf: 15m
+          min_touches: 3
+          impulse: fvg
+          freeze_pullback: 0.382
+          entry: E3
+          stop: S1
+          breakeven_after_tp1: false
+          min_tp1_r: null
+          count_every_touch: false
+          level0_range_bottom: false
+          skip_beyond_line_start: true
+          break_on_cross: false
+          line_from_major_high: false
+          shallow_zone: true
+          management: V0
