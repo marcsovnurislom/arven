@@ -117,3 +117,13 @@ def test_24x7_cannot_have_closures_and_unknown_kind_rejected():
         SessionCalendar("24x7", ((0, MIN),))
     with pytest.raises(ValueError):
         SessionCalendar("nyse")  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("tf", [Timeframe.M5, Timeframe.M15, Timeframe.H1, Timeframe.H4])
+def test_expected_minutes_equals_a_minute_by_minute_count(tf):
+    cal = SessionCalendar("cme_metals", ((ms(2024, 3, 28, 21), ms(2024, 3, 31, 22)), (ms(2024, 7, 4, 18, 30), ms(2024, 7, 4, 21))))
+    opens = np.arange(ms(2023, 12, 20), ms(2024, 8, 1), tf.ms, dtype=np.int64)
+    per = tf.ms // MIN
+    minutes = opens[:, None] + np.arange(per, dtype=np.int64)[None, :] * MIN
+    brute = cal.is_open(minutes.ravel()).reshape(len(opens), per).sum(axis=1)
+    assert np.array_equal(cal.expected_minutes(tf, opens), brute)

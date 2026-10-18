@@ -165,8 +165,9 @@ class SessionCalendar:
         per = tf.ms // MINUTE_MS
         if self.always_open or len(b) == 0:
             return np.full(len(b), per, dtype=np.int64)
-        minutes = b[:, None] + np.arange(per, dtype=np.int64)[None, :] * MINUTE_MS
-        return self.is_open(minutes.ravel()).reshape(len(b), per).sum(axis=1).astype(np.int64)
+        # open time inside [open, open + tf) is the trading-time difference of its ends (closures are on whole minutes)
+        span = np.asarray(self.trading_ms(b + tf.ms), dtype=np.int64) - np.asarray(self.trading_ms(b), dtype=np.int64)
+        return span // MINUTE_MS
 
     def bar_opens(self, tf: Timeframe, lo_ms: int, hi_ms: int) -> np.ndarray:
         """Opens of the ``tf`` buckets in ``[lo_ms, hi_ms)`` (``lo_ms`` aligned up) with at least one open minute."""
