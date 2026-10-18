@@ -66,10 +66,11 @@ class ImpulseRetestProvider:
 
     def __init__(
         self, setup_bars: BarSeries, trigger_bars: BarSeries, context_bars: BarSeries,
-        *, tf_params: TFFeatureParams | None = None,
+        *, tf_params: TFFeatureParams | None = None, symbol: str = "BTCUSDT",
     ) -> None:
         if setup_bars.timeframe != Timeframe.H1 or trigger_bars.timeframe != Timeframe.M15 or context_bars.timeframe != Timeframe.H4:
             raise ValueError("setup_bars must be 1h, trigger_bars 15m, context_bars 4h")
+        self.symbol = symbol  # stamped on the EngineSignal; the decision never depends on it
         self._setup_bars = setup_bars
         self._trigger_bars = trigger_bars
         self._multitf = MultiTFView.from_bars({Timeframe.H4: context_bars}, (Timeframe.H4,), tf_params or TFFeatureParams())
@@ -84,6 +85,12 @@ class ImpulseRetestProvider:
         # development-period run completed - see `docs/current_state.md`'s "Phase 7b" section.
         self._setup_cache_len: int | None = None
         self._setup_cache: tuple[BarSeries, float, object | None, object | None] | None = None
+
+    def _line_time(self, open_ms: np.ndarray) -> np.ndarray:
+        """The time axis the trend line is drawn on: real epoch ms around the clock; *trading time* for a session
+        market (gold), so a line continues across a weekend as it does on a chart without weekend bars."""
+        cal = self._setup_bars.calendar
+        return open_ms if cal is None or cal.always_open else np.asarray(cal.trading_ms(open_ms), dtype=np.int64)
 
     def describe(self) -> dict[str, Any]:
         return {"name": STRATEGY_ID, "version": STRATEGY_VERSION, "risk_fraction": RISK_FRACTION}
@@ -110,7 +117,7 @@ class ImpulseRetestProvider:
             if impulse is not None:
                 zone = confluence_zone(impulse, setup.high, setup.low, atr_setup)
                 if zone is not None:
-                    trendline = counter_trend_trendline(swings, impulse, as_of, setup.open_time_ms)
+                    trendline = counter_trend_trendline(swings, impulse, as_of, self._line_time(setup.open_time_ms))
                     if trendline is not None:
                         zone_and_line = (zone, trendline)
             atr_at_as_of = float(atr_setup[as_of])
@@ -145,7 +152,7 @@ class ImpulseRetestProvider:
 
         search_from = int(np.searchsorted(trigger.open_time_ms, setup.open_time_ms[impulse.end.index]))
         trigger_idx = find_trigger(
-            trigger.close, trigger.high, trigger.low, trigger.open_time_ms, trendline, zone, impulse.side, search_from,
+            trigger.close, trigger.high, trigger.low, self._line_time(trigger.open_time_ms), trendline, zone, impulse.side, search_from,
         )
         if trigger_idx is None or trigger_idx != len(trigger) - 1:
             return None  # only a *fresh* trigger on the current decision bar fires - never a stale one
@@ -191,7 +198,7 @@ class ImpulseRetestProvider:
             "4h ema_slope_50 agrees with impulse direction",
         )
         return EngineSignal(
-            symbol="BTCUSDT", side=decision.side, strategy_id=STRATEGY_ID, strategy_version=STRATEGY_VERSION,
+            symbol=self.symbol, side=decision.side, strategy_id=STRATEGY_ID, strategy_version=STRATEGY_VERSION,
             grade=Grade.EXPERIMENTAL, event_time_ms=event_time_ms, entry_reference=decision.entry,
             stop=decision.stop, tp_ladder=ladder, risk_fraction=RISK_FRACTION, confidence=decision.confidence,
             regime=f"S4_IMPULSE_{'UP' if decision.side == 1 else 'DOWN'}", reasons=reasons, risk_checks=(),

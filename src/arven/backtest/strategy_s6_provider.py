@@ -47,10 +47,11 @@ def make_spec() -> StrategySpec:
 class TrendPullbackProvider:
     def __init__(
         self, setup_bars: BarSeries, trigger_bars: BarSeries, context_bars: BarSeries,
-        *, tf_params: TFFeatureParams | None = None,
+        *, tf_params: TFFeatureParams | None = None, symbol: str = "BTCUSDT",
     ) -> None:
         if setup_bars.timeframe != Timeframe.H1 or trigger_bars.timeframe != Timeframe.M15 or context_bars.timeframe != Timeframe.H4:
             raise ValueError("setup_bars must be 1h, trigger_bars 15m, context_bars 4h")
+        self.symbol = symbol  # stamped on the EngineSignal; the decision never depends on it
         self._setup_bars = setup_bars
         self._trigger_bars = trigger_bars
         self._multitf = MultiTFView.from_bars({Timeframe.H4: context_bars}, (Timeframe.H4,), tf_params or TFFeatureParams())
@@ -59,6 +60,13 @@ class TrendPullbackProvider:
         self.placed = 0
         self._cache_len: int | None = None
         self._cache_state: PullbackState | None = None
+
+    def _elapsed_ms(self, since_ms: int, now_ms: int) -> int:
+        """Cooldown clock: wall time around the clock; trading time on a session market (a weekend does not use it up)."""
+        cal = self._setup_bars.calendar
+        if cal is None or cal.always_open:
+            return now_ms - since_ms
+        return int(cal.trading_ms(now_ms)) - int(cal.trading_ms(since_ms))
 
     def describe(self) -> dict[str, Any]:
         return {"name": STRATEGY_ID, "version": STRATEGY_VERSION, "risk_fraction": RISK_FRACTION}
@@ -76,7 +84,7 @@ class TrendPullbackProvider:
         return self._cache_state
 
     def _compute_decision(self, now_ms: int) -> TrendPullbackDecision | None:
-        if self._last_signal_ms is not None and now_ms - self._last_signal_ms < COOLDOWN_HOURS * HOUR_MS:
+        if self._last_signal_ms is not None and self._elapsed_ms(self._last_signal_ms, now_ms) < COOLDOWN_HOURS * HOUR_MS:
             return None
         trigger = self._trigger_bars.available_until(now_ms).regularized()
         try:
@@ -122,7 +130,7 @@ class TrendPullbackProvider:
             "4h ema_slope_50 agrees with the trade direction",
         )
         return EngineSignal(
-            symbol="BTCUSDT", side=d.side, strategy_id=STRATEGY_ID, strategy_version=STRATEGY_VERSION,
+            symbol=self.symbol, side=d.side, strategy_id=STRATEGY_ID, strategy_version=STRATEGY_VERSION,
             grade=Grade.EXPERIMENTAL, event_time_ms=event_time_ms, entry_reference=d.entry, stop=d.stop,
             tp_ladder=ladder, risk_fraction=RISK_FRACTION, confidence=d.confidence,
             regime=f"S6_PULLBACK_{'UP' if d.side == 1 else 'DOWN'}", reasons=reasons, risk_checks=(),

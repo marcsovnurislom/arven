@@ -44,10 +44,11 @@ def make_spec() -> StrategySpec:
 class SqueezeBreakoutProvider:
     def __init__(
         self, setup_bars: BarSeries, trigger_bars: BarSeries, context_bars: BarSeries,
-        *, tf_params: TFFeatureParams | None = None,
+        *, tf_params: TFFeatureParams | None = None, symbol: str = "BTCUSDT",
     ) -> None:
         if setup_bars.timeframe != Timeframe.H1 or trigger_bars.timeframe != Timeframe.M15 or context_bars.timeframe != Timeframe.H4:
             raise ValueError("setup_bars must be 1h, trigger_bars 15m, context_bars 4h")
+        self.symbol = symbol  # stamped on the EngineSignal; the decision never depends on it
         self._setup_bars = setup_bars
         self._trigger_bars = trigger_bars
         self._multitf = MultiTFView.from_bars({Timeframe.H4: context_bars}, (Timeframe.H4,), tf_params or TFFeatureParams())
@@ -118,7 +119,7 @@ class SqueezeBreakoutProvider:
             "4h ema_slope_50 agrees with breakout direction",
         )
         return EngineSignal(
-            symbol="BTCUSDT", side=d.side, strategy_id=STRATEGY_ID, strategy_version=STRATEGY_VERSION,
+            symbol=self.symbol, side=d.side, strategy_id=STRATEGY_ID, strategy_version=STRATEGY_VERSION,
             grade=Grade.EXPERIMENTAL, event_time_ms=event_time_ms, entry_reference=d.entry, stop=d.stop,
             tp_ladder=ladder, risk_fraction=RISK_FRACTION, confidence=d.confidence,
             regime=f"S5_BREAKOUT_{'UP' if d.side == 1 else 'DOWN'}", reasons=reasons, risk_checks=(),

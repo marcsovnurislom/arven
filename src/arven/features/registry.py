@@ -18,12 +18,22 @@ BAR_TIMEFRAMES: tuple[Timeframe, ...] = (Timeframe.H1, Timeframe.H4, Timeframe.M
 READY_COLUMN = "feat_ready"
 
 
-def build_registry(cfg: FeaturesConfig, funding_required: bool = True) -> tuple[FeatureSpec, ...]:
+# Bar features that need exchange trade flow (trade counts, taker-buy volume); an OTC feed such as Dukascopy has none.
+TRADE_FLOW_SUFFIXES: tuple[str, ...] = ("_taker_buy_ratio", "_rel_trades")
+
+
+def build_registry(
+    cfg: FeaturesConfig, funding_required: bool = True, trade_flow_required: bool = True
+) -> tuple[FeatureSpec, ...]:
     """``funding_required=False`` for a market without meaningful funding (gold: a spot CFD, or a perpetual whose
-    rate is always 0): its funding columns are still computed but no longer gate ``feat_ready``."""
+    rate is always 0); ``trade_flow_required=False`` for a feed without trade counts / taker volume (Dukascopy). Those
+    columns are still computed but no longer gate ``feat_ready``. The defaults are the BTC registry, unchanged."""
     specs: list[FeatureSpec] = []
     for tf in BAR_TIMEFRAMES:
-        specs += [f.spec for f in bar_features(tf, cfg)]
+        bar = [f.spec for f in bar_features(tf, cfg)]
+        if not trade_flow_required:
+            bar = [replace(s, required=False) if s.name.endswith(TRADE_FLOW_SUFFIXES) else s for s in bar]
+        specs += bar
     specs += funding_specs(cfg) if funding_required else [replace(s, required=False) for s in funding_specs(cfg)]
     specs += oi_specs(cfg)
     specs += time_specs()
@@ -35,7 +45,8 @@ def build_registry(cfg: FeaturesConfig, funding_required: bool = True) -> tuple[
     return tuple(specs)
 
 
-def definition_hash(cfg: FeaturesConfig, funding_required: bool = True) -> str:
+def definition_hash(cfg: FeaturesConfig, funding_required: bool = True, trade_flow_required: bool = True) -> str:
     """Fingerprint of the feature definitions: every spec plus the feature configuration."""
-    payload = {"config": cfg.config_hash(), "specs": [asdict(s) for s in build_registry(cfg, funding_required)]}
+    specs = build_registry(cfg, funding_required, trade_flow_required)
+    payload = {"config": cfg.config_hash(), "specs": [asdict(s) for s in specs]}
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()

@@ -149,6 +149,10 @@ class DukascopyIngestor:
         def fetch(f: DukaDayFile) -> None:
             path = self.raw_dir / f.key
             self.sleep(self.duka.request_interval_seconds)
+            if self._valid_on_disk(f):  # fetched meanwhile (e.g. by a second download of an overlapping range)
+                with lock:
+                    summary.present += 1
+                return
             try:
                 self.downloader.download_file(f.url(self.duka.base_url), path, None)
                 decode_m1(path.read_bytes(), f.day, self.duka.point)

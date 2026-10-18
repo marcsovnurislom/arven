@@ -40,6 +40,7 @@ from arven.backtest.marketdata import MarketData
 from arven.backtest.paper_tracker import TrackedUpdate, track_signal
 from arven.core.config import CostsConfig
 from arven.core.series import BarSeries
+from arven.core.sessions import SessionCalendar
 from arven.engine.grading import Grade
 from arven.engine.ladder import ClosedLeg, resolve_legs
 from arven.engine.signal import EngineSignal, SignalVersions, TPLevel
@@ -145,6 +146,9 @@ class _Context:
     oriented_lower: dict[int, tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]
     resist_tf: dict[int, tuple[np.ndarray, np.ndarray]]  # side -> (confirmation time ms, raw price) of prior swings
     resist_higher: dict[int, tuple[np.ndarray, np.ndarray]]
+    # Session market (gold): the resistance lookback counts TF *bars* (a weekend is not part of it). Around the clock
+    # it stays the original ``lookback_bars * tf`` milliseconds, so BTC results are unchanged.
+    lookback_in_bars: bool = False
 
 
 def _swing_table(b: S7Bars, side: int, k: int = 2) -> tuple[np.ndarray, np.ndarray]:
@@ -158,7 +162,7 @@ def _swing_table(b: S7Bars, side: int, k: int = 2) -> tuple[np.ndarray, np.ndarr
 
 def make_context(
     tf: S7Bars, lower: S7Bars, market: MarketData, costs: CostsConfig, p: S7Params, tp: S7TradeParams,
-    *, higher: S7Bars | None = None, stress: bool = False,
+    *, higher: S7Bars | None = None, stress: bool = False, calendar: SessionCalendar | None = None,
 ) -> _Context:
     empty = (np.zeros(0, dtype=np.int64), np.zeros(0))
     return _Context(
@@ -168,6 +172,7 @@ def make_context(
         oriented_lower={s: oriented_bars(s, lower.open, lower.high, lower.low, lower.close) for s in (1, -1)},
         resist_tf={s: _swing_table(tf, s) for s in (1, -1)},
         resist_higher={s: (_swing_table(higher, s) if higher is not None else empty) for s in (1, -1)},
+        lookback_in_bars=calendar is not None and not calendar.always_open,
     )
 
 
@@ -179,10 +184,22 @@ def _resistances(ctx: _Context, s: S7Setup, known_at_ms: int, lookback_ms: int) 
     return np.concatenate(out)
 
 
+def resistance_window(ctx: _Context, arm_index: int) -> tuple[int, int]:
+    """``(known_at_ms, lookback_ms)`` of the swings S7 may use as resistances for a setup armed at ``arm_index``: those
+    confirmed in ``(known_at - lookback, known_at]``. Around the clock the lookback is ``lookback_bars * tf`` ms; on a
+    session market it is the same number of *bars* (swings known after the open of the bar ``lookback_bars - 1``
+    bars before the arming bar), which is the identical window on a gap-free grid."""
+    known_ms = int(ctx.tf.time_ms[arm_index]) + ctx.tf.tf_ms
+    lookback_ms = ctx.p.lookback_bars * ctx.tf.tf_ms
+    if ctx.lookback_in_bars:
+        j0 = arm_index + 1 - ctx.p.lookback_bars
+        lookback_ms = known_ms - int(ctx.tf.time_ms[j0]) if j0 >= 0 else known_ms - int(ctx.tf.time_ms[0]) + 1
+    return known_ms, lookback_ms
+
+
 def planned_targets(ctx: _Context, s: S7Setup) -> tuple[tuple[float, float], ...]:
     """TP1-TP3 ``(raw price, close fraction)`` as planned at the close of the arming bar (resistances known by then)."""
-    known_ms = int(ctx.tf.time_ms[s.arm_index]) + ctx.tf.tf_ms
-    return targets(s, ctx.tp, _resistances(ctx, s, known_ms, ctx.p.lookback_bars * ctx.tf.tf_ms))
+    return targets(s, ctx.tp, _resistances(ctx, s, *resistance_window(ctx, s.arm_index)))
 
 
 def _bar_at(market: MarketData, t_ms: int) -> int | None:

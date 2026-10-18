@@ -26,6 +26,7 @@ from arven.backtest.crowded_shorts_sim import resolve_block
 from arven.backtest.provider import SignalProvider
 from arven.backtest.strategy_s7_sim import S7Bars, S7Outcome, make_context, planned_targets, simulate_setup
 from arven.core.live_config import LiveStrategyConfig
+from arven.core.sessions import SessionCalendar
 from arven.core.timeframes import Timeframe
 from arven.engine.grading import Grade
 from arven.engine.signal import EngineSignal, SignalVersions, TPLevel
@@ -59,10 +60,10 @@ class ProviderStrategy:
         self._factory = factory
 
     def scan(self, ctx: LiveContext, after_ms: int, through_ms: int, stored: list[EngineSignal]) -> list[EngineSignal]:
-        provider = self._factory(ctx.bars[Timeframe.H1], ctx.bars[Timeframe.M15], ctx.bars[Timeframe.H4])
+        provider = self._factory(ctx.bars[Timeframe.H1], ctx.bars[Timeframe.M15], ctx.bars[Timeframe.H4], symbol=ctx.app.market.symbol)
         if stored and hasattr(provider, "_last_signal_ms"):
             provider._last_signal_ms = max(s.event_time_ms for s in stored)  # type: ignore[attr-defined]  # restores the cooldown
-        return process_events(provider, event_times(after_ms, through_ms), feature_version=ctx.feature_version,
+        return process_events(provider, event_times(after_ms, through_ms, ctx.app.session_calendar()), feature_version=ctx.feature_version,
                               config_hash=ctx.config_hash, commit=ctx.git_commit)
 
     def resolve(self, ctx: LiveContext, signal: EngineSignal) -> LiveOutcome | None:
@@ -119,7 +120,7 @@ class S7Strategy:
             setups = [s for s in found if ctx.window.start_ms <= int(close_ms[s.arm_index]) <= ctx.through_ms]
             higher = S7_HIGHER[self.tf]
             sim = make_context(S7Bars.from_series(b), S7Bars.from_series(ctx.bars[S7_LOWER[self.tf]]), ctx.market, ctx.costs, self.p, self.tp,
-                               higher=None if higher is None else S7Bars.from_series(ctx.bars[higher]))
+                               higher=None if higher is None else S7Bars.from_series(ctx.bars[higher]), calendar=ctx.app.session_calendar())
             planned: list[tuple[S7Setup, EngineSignal]] = []
             for s in setups:
                 sig = self._signal(ctx, sim, s)
@@ -139,7 +140,8 @@ class S7Strategy:
         rs = ladder_r(entry, stop, s.side, prices)
         if rs is None:
             return None
-        expiry_close = int(sim.tf.time_ms[s.arm_index]) + tf_ms * (1 + self.p.cancel_after_mult * (s.arm_index - s.break_index))
+        expiry_close = bar_close_after(ctx.app.session_calendar(), S7_TFS[self.tf], int(sim.tf.time_ms[s.arm_index]),
+                                       self.p.cancel_after_mult * (s.arm_index - s.break_index))
         order_text = (f"limit {entry:.2f} (fib 0.5)" if self.tp.entry == "E3" else
                       f"limits {', '.join(f'{px:.2f} x{f:g}' for px, f in orders)}" if orders else
                       f"market once a {S7_LOWER[self.tf].value} bar closes back above fib 0.5 ({entry:.2f})")
@@ -168,6 +170,16 @@ class S7Strategy:
         if s is None:
             return None  # the setup is not in this tick's data (e.g. armed before the forward window)
         return s7_outcome(signal, simulate_setup(st["sim"], s, st["setups"].index(s)))
+
+
+def bar_close_after(calendar: SessionCalendar, tf: Timeframe, open_ms: int, n: int) -> int:
+    """Close of the ``tf`` bar ``n`` bars after the one opening at ``open_ms`` on the market's grid (S7's expiry is
+    counted in bars: around the clock ``open + (n + 1) * tf``; across closures for a session market)."""
+    if calendar.always_open:
+        return open_ms + tf.ms * (1 + n)
+    span = (n + 1) * tf.ms * 3 + 16 * 86_400_000  # far more than n trading bars plus any closure
+    opens = calendar.bar_opens(tf, open_ms, open_ms + span)
+    return int(opens[n]) + tf.ms
 
 
 def s7_outcome(signal: EngineSignal, out: S7Outcome) -> LiveOutcome:

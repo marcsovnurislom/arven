@@ -77,6 +77,8 @@ class MarketConfig(_StrictModel):
     # False for a market whose funding is absent or meaningless (gold): funding features then do not gate
     # feat_ready (arven.features.registry.build_registry). Left out of config_hash while True.
     has_funding: bool = True
+    # False for a feed without trade counts / taker-buy volume (Dukascopy): those features then do not gate feat_ready.
+    has_trade_flow: bool = True
 
     @model_validator(mode="after")
     def _check_timeframes(self) -> MarketConfig:
@@ -289,8 +291,9 @@ class AppConfig(_StrictModel):
             del payload["market"]["session"]
         if not payload["market"]["session_closures"]:
             del payload["market"]["session_closures"]
-        if payload["market"]["has_funding"]:
-            del payload["market"]["has_funding"]
+        for flag in ("has_funding", "has_trade_flow"):
+            if payload["market"][flag]:
+                del payload["market"][flag]
         for name in ("instrument", "dukascopy"):
             if payload[name] is None:
                 del payload[name]

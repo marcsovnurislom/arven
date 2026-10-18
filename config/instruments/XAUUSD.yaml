@@ -9,6 +9,7 @@ market:
   symbol: XAUUSD
   session: cme_metals           # Fri 17:00 -> Sun 18:00 and Mon-Thu 17:00-18:00 New York time + config/sessions CSV
   has_funding: false            # spot CFD: no funding (overnight swap is a cost, config/costs_*)
+  has_trade_flow: false         # an OTC quote feed: no trade counts or taker-buy volume (stored as 0)
 
 dukascopy:
   base_url: https://datafeed.dukascopy.com/datafeed

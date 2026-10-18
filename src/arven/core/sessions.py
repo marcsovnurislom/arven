@@ -118,6 +118,24 @@ class SessionCalendar:
         w = self.closed_windows(lo_ms - WEEK_MS, hi_ms + WEEK_MS)
         return np.array([s for s, _ in w], dtype=np.int64), np.array([e for _, e in w], dtype=np.int64)
 
+    def trading_ms(self, t_ms: np.ndarray | int) -> np.ndarray | int:
+        """*Trading time*: epoch ms with every closed stretch before ``t`` cut out (constant while closed). Around the
+        clock it is ``t`` itself. Only differences are meaningful - it is what a time-based line or cooldown should be
+        measured in on a session market, where a chart has no weekend (a trend line drawn on Friday continues straight
+        into Monday)."""
+        scalar = np.ndim(t_ms) == 0
+        t = np.atleast_1d(np.asarray(t_ms, dtype=np.int64))
+        if self.always_open or len(t) == 0:
+            out = t.copy()
+        else:
+            starts, ends = self._tables(int(t.min()), int(t.max()) + 1)
+            closed_before = np.concatenate(([0], np.cumsum(ends - starts)))  # total closed time before window k
+            k = np.searchsorted(starts, t, side="right")  # windows starting before or at t
+            last = np.maximum(k - 1, 0)
+            partial = np.where(k > 0, np.minimum(t, ends[last]) - starts[last], 0)
+            out = t - (closed_before[np.maximum(k - 1, 0)] * (k > 0) + partial)
+        return int(out[0]) if scalar else out
+
     # -- minutes -------------------------------------------------------------------------------------
 
     def is_open(self, t_ms: np.ndarray | int) -> np.ndarray | bool:

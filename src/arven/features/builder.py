@@ -73,13 +73,15 @@ def market_open_at_decision(inputs: MarketInputs, t: np.ndarray) -> np.ndarray:
 
 
 def build_features(
-    inputs: MarketInputs, t_ms: np.ndarray, cfg: FeaturesConfig, *, funding_required: bool = True
+    inputs: MarketInputs, t_ms: np.ndarray, cfg: FeaturesConfig, *, funding_required: bool = True,
+    trade_flow_required: bool = True,
 ) -> FeatureTable:
-    """``funding_required``: see :func:`arven.features.registry.build_registry`. For a session market the bar
+    """``funding_required`` / ``trade_flow_required``: see :func:`arven.features.registry.build_registry` (both
+    follow ``AppConfig.market.has_funding`` / ``has_trade_flow``). For a session market the bar
     features age by the session grid (the bar before a closure is not stale while the market is shut) and
     ``feat_ready`` is 0 whenever the market is closed at the decision time (NO_TRADE)."""
     t = check_decision_times(t_ms)
-    specs = build_registry(cfg, funding_required)
+    specs = build_registry(cfg, funding_required, trade_flow_required)
     columns: dict[str, np.ndarray] = {}
 
     for tf in BAR_TIMEFRAMES:

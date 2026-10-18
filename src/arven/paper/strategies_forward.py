@@ -33,6 +33,7 @@ from arven.backtest.strategy_s4_provider import ImpulseRetestProvider
 from arven.backtest.strategy_s5_provider import SqueezeBreakoutProvider
 from arven.backtest.strategy_s6_provider import TrendPullbackProvider
 from arven.core.config import CostsConfig
+from arven.core.sessions import SessionCalendar, session_decision_mask
 from arven.core.timeframes import Timeframe
 from arven.engine.signal import EngineSignal
 from arven.engine.signal_events import SignalUpdate
@@ -52,10 +53,15 @@ def load_cfd_costs(config_dir: Path) -> CostsConfig:
     return CostsConfig.model_validate(yaml.safe_load((config_dir / "costs_cfd_justmarkets.yaml").read_text(encoding="utf-8")))
 
 
-def event_times(cursor_ms: int, last_close_ms: int) -> range:
-    """15m close times strictly after ``cursor_ms`` up to and including ``last_close_ms``."""
+def event_times(cursor_ms: int, last_close_ms: int, calendar: SessionCalendar | None = None) -> Sequence[int]:
+    """15m close times strictly after ``cursor_ms`` up to and including ``last_close_ms``; for a session market only
+    those a trader could act on (:func:`arven.core.sessions.session_decision_mask`)."""
     first = (cursor_ms // MIN15 + 1) * MIN15
-    return range(first, last_close_ms + 1, MIN15)
+    times = range(first, last_close_ms + 1, MIN15)
+    if calendar is None or calendar.always_open:
+        return times
+    grid = np.arange(first, last_close_ms + 1, MIN15, dtype=np.int64)
+    return [int(t) for t in grid[session_decision_mask(calendar, grid, Timeframe.M15)]]
 
 
 def flat_context(now_ms: int) -> DecisionContext:

@@ -50,6 +50,7 @@ from arven.backtest.provider import DecisionContext, FeatureData, FeatureView, P
 from arven.backtest.types import EquityKind, Order, OrderKind, Side
 from arven.core.backtest_config import BacktestConfig
 from arven.core.config import AppConfig
+from arven.core.sessions import SessionCalendar, session_decision_mask
 from arven.core.splitguard import AllowedWindow
 from arven.core.timeframes import Timeframe
 from arven.core.types import Action
@@ -57,12 +58,14 @@ from arven.engine.clock import EventClock, SimulatedEventClock
 from arven.engine.events import BarCloseEvent
 
 
-def timeframe_grid(start_ms: int, end_ms: int, tf: Timeframe) -> np.ndarray:
-    """Epoch-aligned ``tf`` bar closes (= decision times) in ``[start_ms, end_ms)``.
+def timeframe_grid(start_ms: int, end_ms: int, tf: Timeframe, calendar: SessionCalendar | None = None) -> np.ndarray:
+    """Epoch-aligned ``tf`` bar closes (= decision times) in ``[start_ms, end_ms)``; for a session market only those
+    :func:`arven.core.sessions.session_decision_mask` allows.
 
     For ``Timeframe.H1`` and an hour-aligned window this is exactly the legacy ``engine.decision_grid``."""
     first = -(-start_ms // tf.ms) * tf.ms
-    return np.arange(first, end_ms, tf.ms, dtype=np.int64)
+    grid = np.arange(first, end_ms, tf.ms, dtype=np.int64)
+    return grid if calendar is None or calendar.always_open else grid[session_decision_mask(calendar, grid, tf)]
 
 
 class WindowEventClock:
@@ -73,14 +76,20 @@ class WindowEventClock:
     Built from :class:`SimulatedEventClock` (so the Phase 1 ordering and tie rule apply unchanged), started
     one coarsest bar earlier and filtered to the window."""
 
-    def __init__(self, symbol: str, timeframes: tuple[Timeframe, ...], start_ms: int, end_ms: int, delay_ms: int = 0) -> None:
+    def __init__(
+        self, symbol: str, timeframes: tuple[Timeframe, ...], start_ms: int, end_ms: int, delay_ms: int = 0,
+        calendar: SessionCalendar | None = None,
+    ) -> None:
         if not timeframes:
             raise ValueError("at least one timeframe is required")
         if end_ms <= start_ms:
             raise ValueError("end_ms must be after start_ms")
         coarsest = max(tf.ms for tf in timeframes)
         inner = SimulatedEventClock(symbol, timeframes, start_ms - coarsest, end_ms, delay_ms)
-        self._events: tuple[BarCloseEvent, ...] = tuple(e for e in inner.events if start_ms <= e.close_ms < end_ms)
+        events = [e for e in inner.events if start_ms <= e.close_ms < end_ms]
+        if calendar is not None and not calendar.always_open:  # a session market: only actionable closes
+            events = [e for e in events if bool(session_decision_mask(calendar, np.array([e.close_ms]), e.timeframe)[0])]
+        self._events: tuple[BarCloseEvent, ...] = tuple(events)
         self._i = -1
 
     @property
@@ -143,14 +152,15 @@ class EventBacktester:
             raise ConfigurationError("latency_minutes must be >= data.bar_availability_delay_seconds")
         if market.window_start_ms != window.start_ms or market.window_end_ms != window.end_ms:
             raise DataError("market data window does not match the allowed window")
-        hourly = timeframe_grid(window.start_ms, window.end_ms, Timeframe.H1)
+        self._calendar = app.session_calendar()
+        hourly = timeframe_grid(window.start_ms, window.end_ms, Timeframe.H1, self._calendar)
         if len(features.t_ms) != len(hourly) or (len(hourly) and np.any(features.t_ms != hourly)):
             raise DataError("feature rows do not match the hourly grid of the window")
         self.app, self.cfg, self.window, self.market, self.features, self.stress = app, cfg, window, market, features, stress
 
     def grid(self, tf: Timeframe) -> np.ndarray:
         """The decision times a provider on ``tf`` will be called at (what its ``PrepareInfo`` carries)."""
-        return timeframe_grid(self.window.start_ms, self.window.end_ms, tf)
+        return timeframe_grid(self.window.start_ms, self.window.end_ms, tf, self._calendar)
 
     def run(self, clock: EventClock, providers: Mapping[Timeframe, SignalProvider]) -> BacktestResult:
         if not providers:
