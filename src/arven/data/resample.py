@@ -8,6 +8,10 @@ Sums are computed in DECIMAL(38, 8) so the result is exact and independent of su
 A bucket with fewer 1m bars than it should have is still stored, with ``is_complete = false`` and its
 ``bar_count``; consumers must not treat incomplete bars as normal bars. Buckets with no 1m data at all
 are absent (a gap).
+
+"Should have" follows the instrument's session calendar (:mod:`arven.core.sessions`): around the clock (BTC) a
+bucket needs every minute; for a session market (gold) it needs every *open* minute, so a 4h bar that contains the
+daily halt, or the last bar before the weekend close, is complete when all its trading minutes are there.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ from datetime import datetime
 
 import duckdb
 
+from arven.core.sessions import SessionCalendar
 from arven.core.time import to_ms
 from arven.core.timeframes import Timeframe, ceil_to_bar, floor_to_bar
 from arven.data.storage.db import now_ms
@@ -33,9 +38,13 @@ def resample(
     start: datetime,
     end: datetime,
     timeframes: tuple[Timeframe, ...] = DERIVED_TIMEFRAMES,
+    calendar: SessionCalendar | None = None,
 ) -> dict[Timeframe, int]:
-    """(Re)build derived bars for every bucket overlapping ``[start, end)``. Returns rows written per timeframe."""
+    """(Re)build derived bars for every bucket overlapping ``[start, end)``. Returns rows written per timeframe.
+
+    ``calendar`` (default: around the clock) decides how many 1m bars make a bucket complete."""
     written: dict[Timeframe, int] = {}
+    session = calendar is not None and not calendar.always_open
     built_at = now_ms()
     for tf in timeframes:
         if tf is Timeframe.M1:
@@ -65,6 +74,23 @@ def resample(
                 """,
                 [tf.value, built_at, symbol, lo, hi],
             )
+            if session:
+                assert calendar is not None
+                d = con.execute(
+                    "SELECT open_time_ms, bar_count FROM ohlcv WHERE symbol = ? AND timeframe = ? "
+                    "AND open_time_ms >= ? AND open_time_ms < ? ORDER BY open_time_ms",
+                    [symbol, tf.value, lo, hi],
+                ).fetchnumpy()
+                opens = d["open_time_ms"].astype("int64")
+                complete = d["bar_count"].astype("int64") == calendar.expected_minutes(tf, opens)
+                con.execute("CREATE OR REPLACE TEMP TABLE _complete AS SELECT unnest(?::BIGINT[]) AS t",
+                            [[int(x) for x in opens[complete]]])
+                con.execute(
+                    "UPDATE ohlcv SET is_complete = (open_time_ms IN (SELECT t FROM _complete)) "
+                    "WHERE symbol = ? AND timeframe = ? AND open_time_ms >= ? AND open_time_ms < ?",
+                    [symbol, tf.value, lo, hi],
+                )
+                con.execute("DROP TABLE _complete")
             count = con.execute(
                 "SELECT count(*) FROM ohlcv WHERE symbol = ? AND timeframe = ? AND open_time_ms >= ? AND open_time_ms < ?",
                 [symbol, tf.value, lo, hi],

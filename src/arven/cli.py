@@ -67,9 +67,58 @@ def cmd_ingest(cfg: AppConfig, args: argparse.Namespace) -> int:
 def cmd_resample(cfg: AppConfig, args: argparse.Namespace) -> int:
     start, end = _range(args, cfg)
     with connect(cfg.data.database_path) as con:
-        written = resample(con, cfg.market.symbol, start, end)
+        written = resample(con, cfg.market.symbol, start, end, calendar=cfg.session_calendar())
     for tf, n in written.items():
         print(f"{tf.value:>4}: {n} bars")
+    return 0
+
+
+def cmd_duka_download(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from arven.data.dukascopy_ingestion import DukascopyIngestor
+
+    start, end = _range(args, cfg)
+    summary = DukascopyIngestor(cfg).download(start, end, progress=lambda m: print(m, flush=True))
+    print(f"planned={summary.planned} present={summary.present} downloaded={summary.downloaded} "
+          f"not_available={summary.not_available} failed={summary.failed}")
+    for err in summary.errors[:50]:
+        print(f"  ERROR {err}")
+    return 0 if summary.ok else 1
+
+
+def cmd_duka_ingest(cfg: AppConfig, args: argparse.Namespace) -> int:
+    from arven.data.dukascopy_ingestion import DukascopyIngestor
+
+    start, end = _range(args, cfg)
+    with connect(cfg.data.database_path) as con:
+        s = DukascopyIngestor(cfg).ingest(con, start, end, refresh=args.refresh)
+    print(f"run {s.run_id}: days={s.planned_days} ingested={s.ingested} skipped={s.skipped} missing_raw={s.missing_raw} "
+          f"not_available={s.not_available} failed={s.failed} rows_written={s.rows_written} "
+          f"out_of_session_dropped={s.out_of_session_dropped}")
+    for err in s.errors[:50]:
+        print(f"  ERROR {err}")
+    return 0 if s.ok else 1
+
+
+def cmd_duka_closures(cfg: AppConfig, args: argparse.Namespace) -> int:
+    """Zero-volume runs that fall inside *regular* hours: candidate holiday closures / early closes."""
+    from arven.core.sessions import SessionCalendar
+    from arven.data.adapters.dukascopy import DukaDayFile, decode_m1, mid_candles, plan_days
+    from arven.data.dukascopy_ingestion import zero_volume_runs
+
+    start, end = _range(args, cfg)
+    regular = SessionCalendar(cfg.market.session)
+    assert cfg.dukascopy is not None
+    print("start_utc,end_utc,minutes,weekday")
+    for day in plan_days(cfg.dukascopy.instrument, start, end):
+        paths = [cfg.data.raw_dir / DukaDayFile(cfg.dukascopy.instrument, day, s).key for s in ("BID", "ASK")]
+        if not all(p.exists() for p in paths):
+            continue
+        mid = mid_candles(*(decode_m1(p.read_bytes(), day, cfg.dukascopy.point) for p in paths))
+        open_ = regular.is_open(mid.time_ms)
+        for s, e in zero_volume_runs(mid, 1):
+            inside = int(open_[(mid.time_ms >= s) & (mid.time_ms < e)].sum())
+            if inside >= args.min_minutes:
+                print(f"{from_ms(s).isoformat()},{from_ms(e).isoformat()},{inside},{from_ms(s).strftime('%a')}")
     return 0
 
 
@@ -81,7 +130,7 @@ def cmd_crosscheck(cfg: AppConfig, args: argparse.Namespace) -> int:
             start, end, (Dataset.KLINES,), kline_intervals=tfs, refresh=args.refresh, command="crosscheck"
         )
         _print_summary(summary)
-        results = [compare(con, cfg.market.symbol, tf, start, end) for tf in tfs]
+        results = [compare(con, cfg.market.symbol, tf, start, end, cfg.session_calendar()) for tf in tfs]
     ok = summary.ok
     for r in results:
         ok &= r.passed
@@ -1008,6 +1057,8 @@ def cmd_dashboard(cfg: AppConfig, args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="arven", description="ARVEN data pipeline (research only, no execution)")
     parser.add_argument("--config-dir", default=None, help="configuration directory (default: <project>/config)")
+    parser.add_argument("--instrument", default=None,
+                        help="instrument overlay from config/instruments (e.g. XAUUSD, XAUUSDT); default: BTCUSDT")
     sub = parser.add_subparsers(dest="command", required=True)
 
     def with_range(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
@@ -1027,6 +1078,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_crosscheck)
 
     with_range(sub.add_parser("quality", help="run data-quality checks")).set_defaults(func=cmd_quality)
+
+    p = sub.add_parser("duka", help="Dukascopy 1m history for a spot instrument (needs --instrument, e.g. XAUUSD)")
+    dsub = p.add_subparsers(dest="duka_command", required=True)
+    with_range(dsub.add_parser("download", help="fetch BID+ASK .bi5 files into data/raw (no database access)")).set_defaults(func=cmd_duka_download)
+    q = with_range(dsub.add_parser("ingest", help="decode downloaded days into ohlcv_1m (mid price, session minutes only)"))
+    q.add_argument("--refresh", action="store_true", help="re-ingest days even if unchanged")
+    q.set_defaults(func=cmd_duka_ingest)
+    q = with_range(dsub.add_parser("closures", help="list zero-volume runs inside regular session hours (holiday evidence)"))
+    q.add_argument("--min-minutes", type=int, default=30)
+    q.set_defaults(func=cmd_duka_closures)
     sub.add_parser("export", help="export DuckDB tables to Parquet").set_defaults(func=cmd_export)
     sub.add_parser("status", help="show stored data summary").set_defaults(func=cmd_status)
 
@@ -1159,9 +1220,21 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# Commands that already work per instrument (`--instrument`). Every other command still assumes the default
+# BTCUSDT configuration (shared output directories such as the feature cache), so it refuses an overlay instead of
+# silently mixing markets.
+_INSTRUMENT_COMMANDS = frozenset({"ingest", "resample", "crosscheck", "quality", "status", "duka"})
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    cfg = load_config(args.config_dir)
+    if args.instrument is not None and args.command not in _INSTRUMENT_COMMANDS:
+        raise SystemExit(f"`{args.command}` does not support --instrument yet (supported: {sorted(_INSTRUMENT_COMMANDS)})")
+    cfg = load_config(args.config_dir, instrument=args.instrument)
+    if args.command == "duka" and cfg.market.exchange != "dukascopy":
+        raise SystemExit("`duka` needs a Dukascopy instrument, e.g. --instrument XAUUSD")
+    if args.command in ("ingest", "crosscheck") and cfg.market.exchange != "binance":
+        raise SystemExit(f"`{args.command}` reads Binance bulk files; use `duka download/ingest` for {cfg.market.symbol}")
     return args.func(cfg, args)
 
 

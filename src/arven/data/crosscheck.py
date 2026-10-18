@@ -1,4 +1,7 @@
-"""Cross-check derived higher-timeframe bars against Binance's native klines (stored in ``ohlcv_native``)."""
+"""Cross-check derived higher-timeframe bars against Binance's native klines (stored in ``ohlcv_native``).
+
+For a session market (gold) only buckets that lie wholly inside trading hours are compared: Binance's native
+klines also contain the weekend and halt minutes, which ARVEN deliberately does not store."""
 
 from __future__ import annotations
 
@@ -7,6 +10,7 @@ from datetime import datetime
 
 import duckdb
 
+from arven.core.sessions import SessionCalendar
 from arven.core.time import to_ms
 from arven.core.timeframes import Timeframe
 
@@ -42,7 +46,8 @@ class CrossCheckResult:
 
 
 def compare(
-    con: duckdb.DuckDBPyConnection, symbol: str, tf: Timeframe, start: datetime, end: datetime
+    con: duckdb.DuckDBPyConnection, symbol: str, tf: Timeframe, start: datetime, end: datetime,
+    calendar: SessionCalendar | None = None,
 ) -> CrossCheckResult:
     lo, hi = to_ms(start), to_ms(end)
     tol = VOLUME_REL_TOLERANCE
@@ -66,6 +71,12 @@ def compare(
         """,
         {"sym": symbol, "tf": tf.value, "lo": lo, "hi": hi},
     )
+    if calendar is not None and not calendar.always_open:
+        opens = calendar.bar_opens(tf, lo, hi)
+        full = opens[calendar.expected_minutes(tf, opens) == tf.ms // Timeframe.M1.ms]
+        con.execute("CREATE OR REPLACE TEMP TABLE _full AS SELECT unnest(?::BIGINT[]) AS t", [[int(x) for x in full]])
+        con.execute("DELETE FROM _xc WHERE open_time_ms NOT IN (SELECT t FROM _full)")
+        con.execute("DROP TABLE _full")
 
     def rel(a: str, b: str) -> str:
         return f"abs({a} - {b}) / greatest(abs({a}), 1e-12)"

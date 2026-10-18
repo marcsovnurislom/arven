@@ -1,0 +1,11 @@
+# Gold on Binance USD-M futures (XAUUSDT perpetual, listed 2025-12-11): the live/forward feed for gold signals.
+# Same session calendar as the Dukascopy history (config/instruments/XAUUSD.yaml): bars outside CME metals hours
+# (weekends, the daily halt, holidays) are not stored, so live gold signals only happen when the broker's
+# XAUUSD CFD is tradable, and history and live are computed the same way (CLAUDE.md rule 8).
+# Binance publishes funding for XAUUSDT but the rate has been 0 (checked 2026-10-18).
+market:
+  exchange: binance
+  market_type: usdm_perpetual
+  symbol: XAUUSDT
+  session: cme_metals
+  has_funding: false            # published but always 0 for gold: not a usable feature

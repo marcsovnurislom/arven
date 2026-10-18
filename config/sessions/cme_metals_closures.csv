@@ -1,0 +1,4 @@
+# Holiday closures and early closes of CME Globex metals (gold) on top of the regular rule in arven.core.sessions.
+# UTC, half-open [start_utc, end_utc), whole minutes. History rows are derived from Dukascopy XAUUSD zero-volume
+# runs inside regular hours (scripts/research/gold_closures.py); future rows come from the CME holiday calendar.
+start_utc,end_utc,reason,source

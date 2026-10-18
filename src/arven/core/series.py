@@ -7,6 +7,10 @@ point-in-time operations every consumer needs:
 - ``available_until(t_ms)``: the records that were known at ``t_ms`` (``available_at <= t_ms``);
 - ``BarSeries.regularized()``: put bars on a gap-free grid, marking missing/incomplete bars as NaN.
 
+A ``BarSeries`` carries its market's session calendar (:mod:`arven.core.sessions`; ``None`` = around the clock). For a
+session market (gold) "gap-free" means every bucket in which the market trades: weekends, the daily halt and holidays
+are not bars at all (as on a broker chart), so indicators continue across them and ``shift(k)`` means k *trading* bars.
+
 All times are UTC epoch milliseconds (int64). Bars cover ``[open_time, open_time + tf.ms)`` and become
 usable at ``open_time + tf.ms + delay_ms``.
 """
@@ -19,6 +23,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from arven.core.sessions import SessionCalendar
 from arven.core.timeframes import Timeframe
 
 _BAR_VALUE_FIELDS = ("open", "high", "low", "close", "volume", "trade_count", "taker_buy_volume")
@@ -45,6 +50,7 @@ class BarSeries:
     trade_count: np.ndarray
     taker_buy_volume: np.ndarray
     complete: np.ndarray  # False = bar missing or built from incomplete 1m data (values are NaN)
+    calendar: SessionCalendar | None = None  # None (or 24x7) = every UTC bucket is a bar
 
     def __post_init__(self) -> None:
         if self.delay_ms < 0:
@@ -81,7 +87,22 @@ class BarSeries:
             self.open_time_ms[sl],
             *(getattr(self, name)[sl] for name in _BAR_VALUE_FIELDS),
             self.complete[sl],
+            self.calendar,
         )
+
+    @property
+    def session(self) -> bool:
+        """True for a session market (not traded around the clock)."""
+        return self.calendar is not None and not self.calendar.always_open
+
+    def next_open_ms(self, open_ms: np.ndarray) -> np.ndarray:
+        """Open of the bar that follows each bar opening at ``open_ms`` on this market's grid (``open + tf`` around
+        the clock; across a closure for a session market). Used for staleness: a bar is superseded only once its
+        successor could have closed."""
+        if not self.session:
+            return np.asarray(open_ms, dtype=np.int64) + self.timeframe.ms
+        assert self.calendar is not None
+        return self.calendar.next_bar_opens(self.timeframe, open_ms)
 
     def available_until(self, t_ms: int) -> BarSeries:
         """Bars known at ``t_ms``: those with ``available_at <= t_ms``."""
@@ -98,9 +119,17 @@ class BarSeries:
             return self
         step = self.timeframe.ms
         first, last = int(self.open_time_ms[0]), int(self.open_time_ms[-1])
-        grid = np.arange(first, last + step, step, dtype=np.int64)
-        pos = (self.open_time_ms - first) // step
-        keep = self.complete
+        if self.session:
+            assert self.calendar is not None
+            grid = self.calendar.bar_opens(self.timeframe, first, last + step)
+            pos = np.minimum(np.searchsorted(grid, self.open_time_ms), max(len(grid) - 1, 0))
+            # a stored bar in a bucket without a single open minute (ingestion never writes one) is not a bar
+            on_grid = (grid[pos] == self.open_time_ms) if len(grid) else np.zeros(len(self), dtype=bool)
+            keep = self.complete & on_grid
+        else:
+            grid = np.arange(first, last + step, step, dtype=np.int64)
+            pos = (self.open_time_ms - first) // step
+            keep = self.complete
         cols = {}
         for name in _BAR_VALUE_FIELDS:
             col = np.full(len(grid), np.nan)
@@ -108,7 +137,7 @@ class BarSeries:
             cols[name] = col
         complete = np.zeros(len(grid), dtype=bool)
         complete[pos[keep]] = True
-        return BarSeries(self.timeframe, self.delay_ms, grid, complete=complete, **cols)
+        return BarSeries(self.timeframe, self.delay_ms, grid, complete=complete, calendar=self.calendar, **cols)
 
 
 @dataclass(frozen=True, eq=False)
@@ -214,6 +243,9 @@ class MarketInputs:
         for tf in sorted(self.bars, key=lambda x: x.ms):
             s = self.bars[tf]
             h.update(f"bars:{tf.value}:{s.delay_ms}".encode())
+            if s.session:  # the calendar shapes the bar grid; around the clock adds nothing (hashes unchanged)
+                assert s.calendar is not None
+                h.update(f"calendar:{s.calendar.kind}:{s.calendar.extra_closures}".encode())
             feed("open_time_ms", s.open_time_ms)
             for name in ("open", "high", "low", "close", "volume", "trade_count", "taker_buy_volume"):
                 feed(name, getattr(s, name))

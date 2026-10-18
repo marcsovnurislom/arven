@@ -20,7 +20,7 @@ from typing import Any
 import duckdb
 import numpy as np
 
-from arven.backtest.marketdata import MarketData, align_funding
+from arven.backtest.marketdata import MarketData, funding_schedule
 from arven.backtest.provider import FeatureData, SignalProvider
 from arven.core.backtest_config import BacktestConfig
 from arven.core.config import AppConfig
@@ -106,9 +106,9 @@ def load_paper_inputs(
     finally:
         if own:
             con.close()
-    interval_ms = app.costs.funding.default_interval_hours * HOUR_MS
-    ft, fr = align_funding(f_t, f_r, window.start_ms, window.end_ms, interval_ms)
-    market = MarketData(bars["time_ms"], bars["open"], bars["high"], bars["low"], bars["close"], window.start_ms, window.end_ms, ft, fr, interval_ms)
+    ft, fr, interval_ms = funding_schedule(app.costs.funding, f_t, f_r, window.start_ms, window.end_ms)
+    market = MarketData(bars["time_ms"], bars["open"], bars["high"], bars["low"], bars["close"], window.start_ms, window.end_ms, ft, fr, interval_ms,
+                        calendar=app.session_calendar())
 
     full_grid = decision_grid(to_ms(app.data.history_start), window.end_ms)
     full_table = build_features(inputs, full_grid, fcfg)

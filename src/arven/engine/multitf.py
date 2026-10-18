@@ -13,7 +13,8 @@ Three outcomes per requested timeframe - deliberately kept distinct:
    row that could fill this slot would be one from the future, so the view refuses rather than return
    something that looks like a reading. The caller (the Phase 3 engine) treats this as ``NO_TRADE``.
 2. **A row exists but is stale** (``t - available_at >= tf.ms``: a newer bar of that timeframe should
-   already be available but is not in the data, e.g. the feed stopped) -> the row is returned with
+   already be available but is not in the data, e.g. the feed stopped; for a session market "newer bar" is the next
+   bar on its trading grid, see ``TFFeatureTable.superseded_at_ms``) -> the row is returned with
    ``stale=True`` and **all values NaN** - never carried forward. This mirrors the Stage 3 builder exactly
    (``asof_join(..., max_age_ms=tf.ms - 1)``).
 3. **A fresh row** -> returned as is. Individual values may still be NaN (indicator warm-up, a missing or
@@ -117,7 +118,7 @@ class MultiTFView:
         available_at = int(table.available_at_ms[i])
         if available_at > t:  # cannot happen via asof_index; kept as an explicit invariant
             raise LookAheadError(f"{tf} row available at {available_at} requested at t={t}")
-        stale = t - available_at >= tf.ms
+        stale = t >= table.superseded_at(i)  # around the clock: t - available_at >= tf.ms
         if stale:
             values = dict.fromkeys(table.names, float("nan"))
         else:

@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from arven.backtest.errors import DataError
+from arven.core.config import FundingConfig
+from arven.core.sessions import SessionCalendar
 
 MINUTE_MS = 60_000
 
@@ -18,6 +20,10 @@ class MarketData:
 
     Funding times are the epoch-aligned grid of ``funding_interval_ms`` inside the window; ``funding_rate`` is
     NaN where the stored data has no rate for a grid time (handled by ``costs.funding.missing_policy``).
+
+    ``calendar`` (``None`` = around the clock) decides what a *data gap* is: a missing minute in which the market
+    was open. A weekend or the daily halt of a session market is not a gap, so a position simply carries over it
+    (a stop gapped through at the reopen fills at the reopen price, like any other gap-through).
     """
 
     time_ms: np.ndarray
@@ -30,7 +36,8 @@ class MarketData:
     funding_time_ms: np.ndarray
     funding_rate: np.ndarray
     funding_interval_ms: int
-    gap_indices: np.ndarray = field(init=False, repr=False)  # j where bar j-1 is not the previous minute
+    calendar: SessionCalendar | None = None
+    gap_indices: np.ndarray = field(init=False, repr=False)  # j where bar j-1 is not the previous open minute
     funding_bar_index: np.ndarray = field(init=False, repr=False)  # bar index of each funding time, -1 if absent
 
     def __post_init__(self) -> None:
@@ -57,7 +64,12 @@ class MarketData:
                 raise DataError("non-finite prices")
             if np.any(l <= 0) or np.any(h < l) or np.any(np.maximum(o, c) > h) or np.any(np.minimum(o, c) < l):
                 raise DataError("invalid OHLC (need 0 < low <= open, close <= high)")
-        object.__setattr__(self, "gap_indices", np.flatnonzero(np.diff(self.time_ms) > MINUTE_MS) + 1 if n else np.array([], dtype=np.int64))
+        gaps = np.flatnonzero(np.diff(self.time_ms) > MINUTE_MS) + 1 if n else np.array([], dtype=np.int64)
+        if len(gaps) and self.calendar is not None and not self.calendar.always_open:
+            # keep a jump only if at least one minute inside it was a trading minute
+            real = [j for j in gaps if len(self.calendar.open_minutes(int(self.time_ms[j - 1]) + MINUTE_MS, int(self.time_ms[j])))]
+            gaps = np.asarray(real, dtype=np.int64)
+        object.__setattr__(self, "gap_indices", gaps)
         ft = self.funding_time_ms
         if len(ft) and (np.any(np.diff(ft) <= 0) or np.any(ft % self.funding_interval_ms != 0)):
             raise DataError("funding times must be increasing and on the funding grid")
@@ -86,6 +98,8 @@ class MarketData:
             h.update(name.encode())
             h.update(a.tobytes())
         h.update(f"{self.window_start_ms}:{self.window_end_ms}:{self.funding_interval_ms}".encode())
+        if self.calendar is not None and not self.calendar.always_open:  # around the clock: hash unchanged
+            h.update(f"calendar:{self.calendar.kind}:{self.calendar.extra_closures}".encode())
         return h.hexdigest()
 
 
@@ -110,3 +124,16 @@ def align_funding(
     if len(rows_t):
         rates[np.searchsorted(grid, rows_t)] = rows_r
     return grid, rates
+
+
+def funding_schedule(
+    funding_cfg: FundingConfig, row_times_ms: np.ndarray, row_rates: np.ndarray, start_ms: int, end_ms: int
+) -> tuple[np.ndarray, np.ndarray, int]:
+    """``(funding_time_ms, funding_rate, interval_ms)`` for a window: the stored rates on the funding grid
+    (:func:`align_funding`), or no funding events at all when ``costs.funding.source`` is ``none`` (a CFD whose
+    holding cost is not a perpetual-swap funding rate)."""
+    interval_ms = funding_cfg.default_interval_hours * 3_600_000
+    if funding_cfg.source == "none":
+        return np.zeros(0, dtype=np.int64), np.zeros(0, dtype=np.float64), interval_ms
+    ft, fr = align_funding(row_times_ms, row_rates, start_ms, end_ms, interval_ms)
+    return ft, fr, interval_ms

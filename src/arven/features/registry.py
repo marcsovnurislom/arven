@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 from arven.core.features_config import FeaturesConfig
 from arven.core.timeframes import Timeframe
@@ -18,11 +18,13 @@ BAR_TIMEFRAMES: tuple[Timeframe, ...] = (Timeframe.H1, Timeframe.H4, Timeframe.M
 READY_COLUMN = "feat_ready"
 
 
-def build_registry(cfg: FeaturesConfig) -> tuple[FeatureSpec, ...]:
+def build_registry(cfg: FeaturesConfig, funding_required: bool = True) -> tuple[FeatureSpec, ...]:
+    """``funding_required=False`` for a market without meaningful funding (gold: a spot CFD, or a perpetual whose
+    rate is always 0): its funding columns are still computed but no longer gate ``feat_ready``."""
     specs: list[FeatureSpec] = []
     for tf in BAR_TIMEFRAMES:
         specs += [f.spec for f in bar_features(tf, cfg)]
-    specs += funding_specs(cfg)
+    specs += funding_specs(cfg) if funding_required else [replace(s, required=False) for s in funding_specs(cfg)]
     specs += oi_specs(cfg)
     specs += time_specs()
     specs.append(FeatureSpec(READY_COLUMN, "quality", "derived", 1, False,
@@ -33,7 +35,7 @@ def build_registry(cfg: FeaturesConfig) -> tuple[FeatureSpec, ...]:
     return tuple(specs)
 
 
-def definition_hash(cfg: FeaturesConfig) -> str:
+def definition_hash(cfg: FeaturesConfig, funding_required: bool = True) -> str:
     """Fingerprint of the feature definitions: every spec plus the feature configuration."""
-    payload = {"config": cfg.config_hash(), "specs": [asdict(s) for s in build_registry(cfg)]}
+    payload = {"config": cfg.config_hash(), "specs": [asdict(s) for s in build_registry(cfg, funding_required)]}
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()

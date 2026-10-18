@@ -1,0 +1,21 @@
+# Gold (XAUUSD spot, OTC) history for research: Dukascopy 1m BID/ASK candles -> mid price, 2020 onward.
+# Load with `python -m arven --instrument XAUUSD ...` (arven.core.config.load_config(instrument="XAUUSD")).
+# Only the keys below differ from default.yaml; data directory, database, splits and transport are shared.
+# Live signals for gold use the Binance XAUUSDT perpetual instead (config/instruments/XAUUSDT.yaml): Dukascopy
+# publishes a day only after it has ended.
+market:
+  exchange: dukascopy
+  market_type: spot_otc
+  symbol: XAUUSD
+  session: cme_metals           # Fri 17:00 -> Sun 18:00 and Mon-Thu 17:00-18:00 New York time + config/sessions CSV
+  has_funding: false            # spot CFD: no funding (overnight swap is a cost, config/costs_*)
+
+dukascopy:
+  base_url: https://datafeed.dukascopy.com/datafeed
+  instrument: XAUUSD
+  point: 1000                   # integer prices / 1000 = USD per troy ounce
+  request_interval_seconds: 1.0 # pause before each request, per worker (public feed; 503 / timeouts under load)
+  workers: 4                    # parallel downloads; failed files are simply fetched again by the next run
+  timeout_seconds: 30
+  max_attempts: 6
+  backoff_max_seconds: 60

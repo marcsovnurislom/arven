@@ -115,6 +115,10 @@ class TFFeatureTable:
     complete: np.ndarray
     names: tuple[str, ...]
     values: np.ndarray
+    # When each row is superseded: the time its successor on the market's bar grid becomes available. None =
+    # around the clock (``available_at + tf``). A session market's last bar before a weekend stays current until the
+    # first bar after the weekend could have closed, so it is not "stale" while the market is shut.
+    superseded_at_ms: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         n = len(self.open_ms)
@@ -131,6 +135,16 @@ class TFFeatureTable:
             raise ValueError("close_ms must equal open_ms + timeframe duration")
         if n and np.any(self.available_at_ms < self.close_ms):
             raise ValueError("available_at_ms must not be earlier than close_ms")
+        if self.superseded_at_ms is not None and (
+            len(self.superseded_at_ms) != n or (n and np.any(self.superseded_at_ms < self.available_at_ms + self.timeframe.ms))
+        ):
+            raise ValueError("superseded_at_ms must have one entry per row, each >= available_at + timeframe")
+
+    def superseded_at(self, i: int) -> int:
+        """When row ``i`` stops being the current bar of this timeframe."""
+        if self.superseded_at_ms is None:
+            return int(self.available_at_ms[i]) + self.timeframe.ms
+        return int(self.superseded_at_ms[i])
 
     def __len__(self) -> int:
         return len(self.open_ms)
@@ -147,6 +161,8 @@ class TFFeatureTable:
         h.update(np.ascontiguousarray(self.complete, dtype=bool).tobytes())
         v = np.ascontiguousarray(self.values, dtype=np.float64)
         h.update(np.where(np.isnan(v), np.nan, v).tobytes())
+        if self.superseded_at_ms is not None:  # session markets only; around the clock the hash is unchanged
+            h.update(np.ascontiguousarray(self.superseded_at_ms, dtype=np.int64).tobytes())
         return h.hexdigest()
 
 
@@ -180,4 +196,5 @@ def compute_tf_features(bars: BarSeries, params: TFFeatureParams = DEFAULT_PARAM
         complete=r.complete.copy(),
         names=names,
         values=values,
+        superseded_at_ms=(r.next_open_ms(r.open_time_ms) + (r.timeframe.ms + r.delay_ms)) if r.session else None,
     )

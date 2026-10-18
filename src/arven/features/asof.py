@@ -26,13 +26,15 @@ def asof_join(
     values: np.ndarray,
     t_ms: np.ndarray,
     *,
-    max_age_ms: int | None = None,
+    max_age_ms: int | np.ndarray | None = None,
     event_time_ms: np.ndarray | None = None,
 ) -> np.ndarray:
     """Value of the last record available at each ``t``; NaN if none, or if it is older than ``max_age_ms``.
 
     Age is ``t - event_time`` (``event_time_ms`` defaults to ``available_at_ms``). The staleness limit is
-    what stops a lost stream from silently repeating its last value.
+    what stops a lost stream from silently repeating its last value. ``max_age_ms`` may be one limit for all
+    records or an array with one limit per record (a session market: the last bar before a weekend stays valid
+    until its successor, after the weekend, could have closed).
     """
     if len(values) != len(available_at_ms):
         raise ValueError("values and available_at_ms must have equal length")
@@ -41,7 +43,8 @@ def asof_join(
     safe = np.where(ok, idx, 0)
     if max_age_ms is not None and len(available_at_ms):
         ref = available_at_ms if event_time_ms is None else event_time_ms
-        ok &= (t_ms - ref[safe]) <= max_age_ms
+        limit = max_age_ms[safe] if isinstance(max_age_ms, np.ndarray) else max_age_ms
+        ok &= (t_ms - ref[safe]) <= limit
     out = np.full(len(t_ms), np.nan)
     if len(values):
         out[ok] = values[safe[ok]]

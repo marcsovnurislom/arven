@@ -30,6 +30,7 @@ from pathlib import Path
 import duckdb
 
 from arven.core.config import AppConfig
+from arven.core.sessions import SessionCalendar
 from arven.core.time import to_ms
 from arven.core.timeframes import Timeframe
 from arven.data.adapters.binance_bulk import (
@@ -170,10 +171,34 @@ def _check_period(con: duckdb.DuckDBPyConnection, ts_column: str, sf: SourceFile
         raise IngestError(f"{sf.filename}: rows outside file period [{start}, {end}): min={lo} max={hi}")
 
 
+def drop_closed_minutes(
+    con: duckdb.DuckDBPyConnection, calendar: SessionCalendar, lo_ms: int, hi_ms: int, table: str = "_stage",
+    ts_column: str = "open_time_ms",
+) -> int:
+    """Delete the rows of ``table`` whose minute lies in a closed window of ``calendar`` (session markets store only
+    tradable minutes - see :mod:`arven.core.sessions`). Returns the number of rows deleted (0 for a 24x7 market)."""
+    windows = calendar.closed_windows(lo_ms, hi_ms)
+    if not windows:
+        return 0
+    con.execute(
+        "CREATE OR REPLACE TEMP TABLE _closed AS SELECT unnest(?::BIGINT[]) AS s, unnest(?::BIGINT[]) AS e",
+        [[s for s, _ in windows], [e for _, e in windows]],
+    )
+    before = _scalar(con, f"SELECT count(*) FROM {table}")
+    con.execute(
+        f"DELETE FROM {table} WHERE EXISTS (SELECT 1 FROM _closed c WHERE {table}.{ts_column} >= c.s AND {table}.{ts_column} < c.e)"
+    )
+    after = _scalar(con, f"SELECT count(*) FROM {table}")
+    con.execute("DROP TABLE _closed")
+    return int(before) - int(after)
+
+
 # --- per-dataset loaders (called inside a transaction) ------------------------------------------
 
 
-def _load_klines(con, csv: Path, sf: SourceFile, symbol: str, ingested_at: int) -> tuple[int, int]:
+def _load_klines(
+    con, csv: Path, sf: SourceFile, symbol: str, ingested_at: int, calendar: SessionCalendar | None = None
+) -> tuple[int, int]:
     assert sf.interval is not None
     tf_ms = sf.interval.ms
     header = has_header(first_line(csv), Dataset.KLINES)
@@ -195,6 +220,9 @@ def _load_klines(con, csv: Path, sf: SourceFile, symbol: str, ingested_at: int) 
     bad_close = _scalar(con, f"SELECT count(*) FROM _stage WHERE raw_close_time_ms <> open_time_ms + {tf_ms} - 1")
     if bad_close:
         raise IngestError(f"{sf.filename}: {bad_close} rows with close_time != open_time + duration - 1ms")
+    if sf.interval is Timeframe.M1 and calendar is not None:
+        # session market: keep only tradable minutes (native higher-TF klines are kept whole for the cross-check)
+        drop_closed_minutes(con, calendar, to_ms(sf.period_start), to_ms(sf.period_end))
 
     columns = (
         "open, high, low, close, volume, quote_volume, trade_count, taker_buy_volume, taker_buy_quote_volume"
@@ -433,7 +461,9 @@ class Ingestor:
             self.con.execute("BEGIN TRANSACTION")
             try:
                 if sf.dataset is Dataset.KLINES:
-                    rows, dropped = _load_klines(self.con, csv, sf, self.symbol, ingested_at)
+                    calendar = self.cfg.session_calendar()
+                    rows, dropped = _load_klines(self.con, csv, sf, self.symbol, ingested_at,
+                                                 None if calendar.always_open else calendar)
                 elif sf.dataset is Dataset.FUNDING_RATE:
                     rows, dropped = _load_funding(self.con, csv, sf, self.symbol, ingested_at)
                 else:

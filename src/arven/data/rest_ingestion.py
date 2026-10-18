@@ -74,6 +74,9 @@ def _bulk_insert_or_replace(
         Path(path).unlink(missing_ok=True)
 
 
+bulk_insert_or_replace = _bulk_insert_or_replace  # shared with arven.data.dukascopy_ingestion
+
+
 class RestIngestError(Exception):
     """A REST response violated the same normalisation contract the bulk loader enforces."""
 
@@ -166,6 +169,7 @@ class RestIngestor:
         self.downloader = downloader or Downloader(RetryPolicy.from_config(cfg.download))
         self.symbol = cfg.market.symbol
         self.base_url = cfg.download.rest_base_url
+        self.calendar = cfg.session_calendar()  # 24x7 for BTC: every fetched minute is stored, exactly as before
 
     def tail(self, end_ms: int, *, include_open_interest: bool = False) -> RestTailSummary:
         """Fetch and store every closed 1m bar and funding settlement in ``(last stored, end_ms)`` (and, if asked, the
@@ -209,6 +213,13 @@ class RestIngestor:
         tf_ms = Timeframe.M1.ms
         last = _last_stored_ms(self.con, "ohlcv_1m", "open_time_ms", self.symbol)
         cursor = (last + tf_ms) if last is not None else end_ms  # no history at all: nothing to "tail" from here
+        if not self.calendar.always_open and cursor < end_ms:
+            # a session market stores only tradable minutes: resume at the next open minute, and fetch nothing at all
+            # while the market is closed (instead of re-reading the closed stretch every poll)
+            opens = self.calendar.open_minutes(cursor, end_ms)
+            if not len(opens):
+                return
+            cursor = int(opens[0])
         while cursor < end_ms:
             try:
                 page = fetch_klines(self.downloader, self.base_url, self.symbol, "1m", cursor, end_ms)
@@ -220,8 +231,12 @@ class RestIngestor:
                 return
             summary.klines_fetched += len(page)
             source_key = f"rest/{self.symbol}/klines/1m/{cursor}"
+            rows = page
+            if not self.calendar.always_open:
+                is_open = self.calendar.is_open([k.open_time_ms for k in page])
+                rows = [k for k, ok in zip(page, is_open) if ok]
             try:
-                summary.klines_written += _write_klines(self.con, self.symbol, page, source_key)
+                summary.klines_written += _write_klines(self.con, self.symbol, rows, source_key)
             except RestIngestError as exc:
                 summary.errors.append(str(exc))
                 return

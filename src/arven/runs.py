@@ -23,7 +23,7 @@ import numpy as np
 from arven.backtest.baselines import BuyAndHold, NoTrade, RandomEntry
 from arven.backtest.engine import Backtester, BacktestResult, decision_grid
 from arven.backtest.errors import ConfigurationError, DataError
-from arven.backtest.marketdata import MarketData, align_funding
+from arven.backtest.marketdata import MarketData, funding_schedule
 from arven.backtest.metrics import compute_metrics, summarize_distribution
 from arven.backtest.provider import FeatureData, SignalProvider
 from arven.backtest.report import TABLE_ORDER, combine_hashes, fmt_value, result_tables, table_hashes
@@ -86,9 +86,9 @@ def load_inputs(
     finally:
         if own:
             con.close()
-    interval_ms = app.costs.funding.default_interval_hours * HOUR_MS
-    ft, fr = align_funding(f_t, f_r, window.start_ms, window.end_ms, interval_ms)
-    market = MarketData(bars["time_ms"], bars["open"], bars["high"], bars["low"], bars["close"], window.start_ms, window.end_ms, ft, fr, interval_ms)
+    ft, fr, interval_ms = funding_schedule(app.costs.funding, f_t, f_r, window.start_ms, window.end_ms)
+    market = MarketData(bars["time_ms"], bars["open"], bars["high"], bars["low"], bars["close"], window.start_ms, window.end_ms, ft, fr, interval_ms,
+                        calendar=app.session_calendar())
 
     directory = feature_store.cache_dir(app.data.data_dir, fcfg.version)
     manifest = feature_store.read_manifest(directory)
@@ -99,7 +99,7 @@ def load_inputs(
     ranges.append({"dataset": "features", "start_ms": window.start_ms, "end_ms": window.end_ms})
     if list(table.columns) != [c["name"] for c in manifest["columns"]]:
         raise ConfigurationError("feature cache columns do not match its manifest")
-    grid = decision_grid(window)
+    grid = decision_grid(window, app.session_calendar())
     if len(table.t_ms) != len(grid) or np.any(table.t_ms != grid):
         raise DataError("feature cache rows do not cover the window's decision grid")
     names = tuple(table.columns)

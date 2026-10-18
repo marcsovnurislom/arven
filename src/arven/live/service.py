@@ -29,7 +29,7 @@ from typing import Any
 import numpy as np
 import yaml
 
-from arven.backtest.marketdata import MarketData, align_funding
+from arven.backtest.marketdata import MarketData, funding_schedule
 from arven.core.config import AppConfig, CostsConfig
 from arven.core.features_config import FeaturesConfig
 from arven.core.live_config import LiveConfig
@@ -153,9 +153,9 @@ def run_live_tick(
         con.close()
     if len(m1["time_ms"]) == 0:
         return LiveTickOutcome("no_data", rest, detail="no 1m bars in the forward window")
-    interval_ms = app.costs.funding.default_interval_hours * HOUR_MS
-    ft, fr = align_funding(f_t, f_r, window.start_ms, window.end_ms, interval_ms)
-    market = MarketData(m1["time_ms"], m1["open"], m1["high"], m1["low"], m1["close"], window.start_ms, window.end_ms, ft, fr, interval_ms)
+    ft, fr, interval_ms = funding_schedule(app.costs.funding, f_t, f_r, window.start_ms, window.end_ms)
+    market = MarketData(m1["time_ms"], m1["open"], m1["high"], m1["low"], m1["close"], window.start_ms, window.end_ms, ft, fr, interval_ms,
+                        calendar=app.session_calendar())
 
     last_1m = int(m1["time_ms"][-1])
     through = complete_through_ms(last_1m, now_ms, live.event_delay_seconds * 1000)

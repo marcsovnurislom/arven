@@ -35,6 +35,7 @@ from arven.backtest.types import (
 )
 from arven.core.backtest_config import BacktestConfig
 from arven.core.config import AppConfig
+from arven.core.sessions import SessionCalendar, session_decision_mask
 from arven.core.splitguard import AllowedWindow
 from arven.core.types import Action
 
@@ -57,8 +58,11 @@ class BacktestResult:
     stress: bool
 
 
-def decision_grid(window: AllowedWindow) -> np.ndarray:
-    return np.arange(window.start_ms, window.end_ms, HOUR_MS, dtype=np.int64)
+def decision_grid(window: AllowedWindow, calendar: SessionCalendar | None = None) -> np.ndarray:
+    """Every 1h close in the window around the clock; a session market's tradable 1h closes only
+    (:func:`arven.core.sessions.session_decision_mask`)."""
+    grid = np.arange(window.start_ms, window.end_ms, HOUR_MS, dtype=np.int64)
+    return grid if calendar is None or calendar.always_open else grid[session_decision_mask(calendar, grid)]
 
 
 class Backtester:
@@ -77,7 +81,7 @@ class Backtester:
             raise ConfigurationError("latency_minutes must be >= data.bar_availability_delay_seconds")
         if market.window_start_ms != window.start_ms or market.window_end_ms != window.end_ms:
             raise DataError("market data window does not match the allowed window")
-        self._grid = decision_grid(window)
+        self._grid = decision_grid(window, app.session_calendar())
         if len(features.t_ms) != len(self._grid) or (len(self._grid) and np.any(features.t_ms != self._grid)):
             raise DataError("feature rows do not match the decision grid of the window")
         self.app, self.cfg, self.window, self.market, self.features, self.stress = app, cfg, window, market, features, stress

@@ -15,6 +15,7 @@ import numpy as np
 
 from arven.core.config import AppConfig
 from arven.core.series import REQUIRED_TIMEFRAMES, BarSeries, FundingSeries, MarketInputs, OpenInterestSeries
+from arven.core.sessions import SessionCalendar
 from arven.core.splitguard import AllowedWindow
 from arven.core.time import to_ms
 from arven.core.timeframes import Timeframe
@@ -34,9 +35,11 @@ def _i64(a: object) -> np.ndarray:
 
 
 def load_bars(
-    con: duckdb.DuckDBPyConnection, symbol: str, tf: Timeframe, start_ms: int, end_ms: int, delay_ms: int
+    con: duckdb.DuckDBPyConnection, symbol: str, tf: Timeframe, start_ms: int, end_ms: int, delay_ms: int,
+    calendar: SessionCalendar | None = None,
 ) -> BarSeries:
-    """Derived bars whose interval lies inside ``[start_ms, end_ms]``, oldest first."""
+    """Derived bars whose interval lies inside ``[start_ms, end_ms]``, oldest first (``calendar``: the market's
+    trading hours; ``None`` = around the clock)."""
     d = con.execute(
         "SELECT open_time_ms, open, high, low, close, volume, trade_count, taker_buy_volume, is_complete "
         "FROM ohlcv WHERE symbol = ? AND timeframe = ? AND open_time_ms >= ? AND close_time_ms <= ? "
@@ -55,6 +58,7 @@ def load_bars(
         trade_count=_f64(d["trade_count"]),
         taker_buy_volume=_f64(d["taker_buy_volume"]),
         complete=np.asarray(d["is_complete"], dtype=bool),
+        calendar=None if calendar is None or calendar.always_open else calendar,
     )
 
 
@@ -98,7 +102,7 @@ def load_feature_inputs(
     symbol = cfg.market.symbol
     delay_ms = cfg.data.bar_availability_delay_seconds * 1000
     return MarketInputs(
-        bars={tf: load_bars(con, symbol, tf, start_ms, end_ms, delay_ms) for tf in REQUIRED_TIMEFRAMES},
+        bars={tf: load_bars(con, symbol, tf, start_ms, end_ms, delay_ms, cfg.session_calendar()) for tf in REQUIRED_TIMEFRAMES},
         funding=load_funding(con, symbol, start_ms, end_ms),
         open_interest=load_open_interest(con, symbol, start_ms, end_ms),
     )

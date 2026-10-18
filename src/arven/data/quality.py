@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import duckdb
+import numpy as np
 
 from arven.core.config import AppConfig
 from arven.core.time import from_ms, to_ms
@@ -25,10 +26,13 @@ from arven.data.ingestion import (
     FUNDING_CSV_TYPES,
     KLINE_CSV_TYPES,
     METRICS_CSV_TYPES,
+    _to_ms_sql,
+    drop_closed_minutes,
     first_line,
     read_csv_sql,
     extract_single_csv,
 )
+from arven.data.dukascopy_ingestion import DATASET as DUKASCOPY_DATASET
 from arven.data.adapters.binance_bulk import Dataset, has_header
 from arven.data.resample import DERIVED_TIMEFRAMES
 from arven.data.storage.db import new_run_id, now_ms
@@ -59,6 +63,7 @@ class QualityChecker:
         self.cfg = cfg
         self.con = con
         self.symbol = cfg.market.symbol
+        self.calendar = cfg.session_calendar()
         self.results: list[CheckResult] = []
         self.gaps: list[tuple] = []
         self.run_id = new_run_id()
@@ -76,8 +81,12 @@ class QualityChecker:
         self._check_ohlcv_1m(lo, hi)
         for tf in DERIVED_TIMEFRAMES:
             self._check_derived(tf, lo, hi)
-        self._check_funding(lo, hi)
-        self._check_open_interest(lo, hi)
+        if self.cfg.market.exchange == "binance":
+            self._check_funding(lo, hi)
+            self._check_open_interest(lo, hi)
+        else:
+            self._add("funding_rates.not_applicable", "funding_rates", "info", True,
+                      f"{self.cfg.market.exchange} {self.cfg.market.market_type}: no funding or open interest")
         self._check_source_consistency(lo, hi)
         self._persist(lo, hi)
         return self.results
@@ -142,6 +151,31 @@ class QualityChecker:
 
     # -- ohlcv_1m ----------------------------------------------------------------------------------
 
+    def _session_gaps(self, ds: str, lo: int, hi: int) -> None:
+        """Gaps of a session market: runs of *open* minutes without a stored bar (closed minutes are not gaps), and
+        stored bars inside closed windows (which ingestion never writes)."""
+        stored = self.con.execute(
+            "SELECT open_time_ms FROM ohlcv_1m WHERE symbol = ? AND open_time_ms >= ? AND open_time_ms < ? ORDER BY 1",
+            [self.symbol, lo, hi],
+        ).fetchnumpy()["open_time_ms"].astype(np.int64)
+        expected = self.calendar.open_minutes(lo, hi)
+        missing = np.setdiff1d(expected, stored, assume_unique=True)
+        gaps: list[tuple[int, int, int]] = []
+        if len(missing):
+            pos = np.searchsorted(expected, missing)
+            breaks = np.flatnonzero(np.diff(pos) != 1) + 1
+            for run in np.split(np.arange(len(missing)), breaks):
+                nxt = int(pos[run[-1]]) + 1  # the first open minute after the run (its end, like the 24x7 gaps)
+                gaps.append((int(missing[run[0]]), int(expected[nxt]) if nxt < len(expected) else hi, len(run)))
+        for g_start, g_end, n_missing in gaps:
+            self.gaps.append((ds, self.symbol, "1m", g_start, g_end, n_missing))
+        self._add(f"{ds}.gaps", ds, "warning", not gaps,
+                  f"{len(gaps)} gaps, {int(len(missing))} missing open minutes (closed-market minutes are not gaps)",
+                  gaps=[{"start": _iso(a), "end": _iso(b), "missing": m} for a, b, m in gaps[:20]])
+        out_of_session = int((~self.calendar.is_open(stored)).sum()) if len(stored) else 0
+        self._add(f"{ds}.out_of_session", ds, "error", out_of_session == 0,
+                  f"{out_of_session} bars stored inside closed-market windows ({self.calendar.kind})")
+
     def _check_ohlcv_1m(self, lo: int, hi: int) -> None:
         ds, step = "ohlcv_1m", Timeframe.M1.ms
         rng = "symbol = $sym AND open_time_ms >= $lo AND open_time_ms < $hi"
@@ -149,7 +183,7 @@ class QualityChecker:
         n, n_keys, t_min, t_max = self._one(
             f"SELECT count(*), count(DISTINCT open_time_ms), min(open_time_ms), max(open_time_ms) FROM ohlcv_1m WHERE {rng}", p
         )
-        expected = (hi - lo) // step
+        expected = (hi - lo) // step if self.calendar.always_open else len(self.calendar.open_minutes(lo, hi))
         self._add(f"{ds}.row_count", ds, "warning", n == expected, f"{n} rows, expected {expected}",
                   rows=n, expected=expected)
         self._add(f"{ds}.time_range", ds, "info", t_min == lo and t_max == hi - step,
@@ -166,7 +200,10 @@ class QualityChecker:
                   misaligned=misaligned, bad_close=bad_close)
         self._add(f"{ds}.utc_ms_units", ds, "error", implausible == 0,
                   f"{implausible} timestamps outside plausible UTC-ms range")
-        self._gaps(ds, "ohlcv_1m", "open_time_ms", step, lo, hi, timeframe="1m")
+        if self.calendar.always_open:
+            self._gaps(ds, "ohlcv_1m", "open_time_ms", step, lo, hi, timeframe="1m")
+        else:
+            self._session_gaps(ds, lo, hi)
         self._ohlc_validity(ds, "ohlcv_1m", rng, p)
 
         neg, taker_gt, zero_vol = self._one(
@@ -201,7 +238,7 @@ class QualityChecker:
             f"""SELECT count(*), count(*) FILTER (NOT is_complete), count(*) FILTER (open_time_ms % {tf.ms} <> 0),
                        count(*) FILTER (close_time_ms <> open_time_ms + {tf.ms})
                 FROM ohlcv WHERE {rng}""", p)
-        expected = (hi - lo) // tf.ms
+        expected = (hi - lo) // tf.ms if self.calendar.always_open else len(self.calendar.bar_opens(tf, lo, hi))
         self._add(f"{ds}.row_count", ds, "warning", n == expected and incomplete == 0,
                   f"{n} bars ({incomplete} incomplete), expected {expected}", rows=n, incomplete=incomplete)
         self._add(f"{ds}.cadence", ds, "error", misaligned == 0 and bad_close == 0,
@@ -287,16 +324,48 @@ class QualityChecker:
     }
     _SOURCE_TYPES = {"klines": KLINE_CSV_TYPES, "fundingRate": FUNDING_CSV_TYPES, "metrics": METRICS_CSV_TYPES}
 
+    def _dukascopy_day_consistency(self, key: str, row_count: int, sha: str) -> dict | None:
+        """Re-decode one ingested Dukascopy day from its raw files and compare it with the stored rows."""
+        from arven.data.adapters.dukascopy import DukascopyFormatError, decode_m1
+        from arven.data.dukascopy_ingestion import DukascopyIngestor
+
+        ing = DukascopyIngestor(self.cfg)
+        day = date.fromisoformat(key.rsplit("/", 1)[1])
+        bid_f, ask_f = ing._day_files(day)
+        paths = [self.cfg.data.raw_dir / bid_f.key, self.cfg.data.raw_dir / ask_f.key]
+        if not all(p.exists() for p in paths):
+            return {"file": key, "problem": "raw file missing"}
+        if ing._fingerprint(day, *(sha256_file(p) for p in paths)) != sha:
+            return {"file": key, "problem": "raw files or session closures changed since ingestion (re-run `duka ingest`)"}
+        try:
+            rows, _ = ing.session_rows(*(decode_m1(p.read_bytes(), day, ing.duka.point) for p in paths))
+        except DukascopyFormatError as exc:
+            return {"file": key, "problem": str(exc)}
+        db_n, db_sum = self._one("SELECT count(*), sum(close) FROM ohlcv_1m WHERE source_key = ?", [key])
+        raw_sum = float(rows.close.sum()) if len(rows) else None
+        same_sum = (db_sum is None and raw_sum is None) or (
+            db_sum is not None and raw_sum is not None and abs(db_sum - raw_sum) <= 1e-6 * max(1.0, abs(raw_sum)))
+        if not (len(rows) == db_n == row_count and same_sum):
+            return {"file": key, "raw_rows": len(rows), "db_rows": db_n, "recorded_rows": row_count,
+                    "raw_sum": raw_sum, "db_sum": db_sum}
+        return None
+
     def _check_source_consistency(self, lo: int, hi: int) -> None:
         files = self.con.execute(
             """SELECT source_key, dataset, row_count, ingested_sha256 FROM source_files
-               WHERE status = 'ingested' AND (interval IS NULL OR interval = '1m')
+               WHERE status = 'ingested' AND (interval IS NULL OR interval = '1m') AND symbol = ?
                  AND period_start_ms < ? AND period_end_ms > ? ORDER BY source_key""",
-            [hi, lo],
+            [self.symbol, hi, lo],
         ).fetchall()
         problems: list[dict] = []
         raw_dir, tmp_dir = self.cfg.data.raw_dir, self.cfg.data.tmp_dir
+        session = not self.calendar.always_open
         for key, dataset, row_count, sha in files:
+            if dataset == DUKASCOPY_DATASET:
+                problem = self._dukascopy_day_consistency(key, row_count, sha)
+                if problem:
+                    problems.append(problem)
+                continue
             table, raw_key, raw_val, key_col, val_col = self._SOURCE_SPECS[dataset]
             local = raw_dir / key
             if not local.exists():
@@ -308,10 +377,17 @@ class QualityChecker:
             csv = extract_single_csv(local, tmp_dir)
             try:
                 header = has_header(first_line(csv), Dataset(dataset))
-                raw_n, raw_sum = self._one(
-                    f"""SELECT count(*), sum(CAST(v AS DECIMAL(38, 12))) FROM (
-                            SELECT DISTINCT {raw_key} AS k, {raw_val} AS v, * FROM {read_csv_sql(csv, self._SOURCE_TYPES[dataset], header)})""")
+                self.con.execute(
+                    f"""CREATE OR REPLACE TEMP TABLE _raw AS SELECT DISTINCT {raw_key} AS k, {raw_val} AS v, *
+                        FROM {read_csv_sql(csv, self._SOURCE_TYPES[dataset], header)}""")
+                if session and dataset == "klines":  # session market: ingestion stored the tradable minutes only
+                    period = self._one("SELECT period_start_ms, period_end_ms FROM source_files WHERE source_key = ?", [key])
+                    self.con.execute(
+                        f"CREATE OR REPLACE TEMP TABLE _raw AS SELECT CAST({_to_ms_sql('k')} AS BIGINT) AS k, v FROM _raw")
+                    drop_closed_minutes(self.con, self.calendar, period[0], period[1], table="_raw", ts_column="k")
+                raw_n, raw_sum = self._one("SELECT count(*), sum(CAST(v AS DECIMAL(38, 12))) FROM _raw")
             finally:
+                self.con.execute("DROP TABLE IF EXISTS _raw")
                 csv.unlink(missing_ok=True)
             db_n, db_sum = self._one(
                 f"SELECT count(*), sum(CAST({val_col} AS DECIMAL(38, 12))) FROM {table} WHERE source_key = ?", [key])
