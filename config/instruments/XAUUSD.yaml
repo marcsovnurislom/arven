@@ -18,7 +18,7 @@ dukascopy:
   instrument: XAUUSD
   point: 1000                   # integer prices / 1000 = USD per troy ounce
   request_interval_seconds: 1.0 # pause before each request, per worker (public feed; 503 / timeouts under load)
-  workers: 2                    # parallel downloads; failed files are simply fetched again by the next run
+  workers: 4                    # parallel downloads; failed files are simply fetched again by the next run
   timeout_seconds: 30
   max_attempts: 6
   backoff_max_seconds: 60
