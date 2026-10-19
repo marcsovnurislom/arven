@@ -1,6 +1,45 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-16 (improvement pass: S7 detector ~5x faster with identical results, forward review rule, weekly report, daily backup and retention, server deployment files, Telegram live; earlier: live signal loop: `arven live run` runs all five strategies in real time, configurable in config/live.yaml, open interest REST-tailed, Telegram-ready; earlier: every strategy's trades on the Strategies page; S7 trade-management study - no variant helps, S7 forward -7.3 R; earlier: Crowded Shorts sealed test run once: CONFIRMED by the pre-registered rule but weak - CFD +1.68 R / 25 trades, PF 1.27; earlier: web redesign v2: grouped sidebar/drawer/Ctrl+K, chart fit/full-screen/OHLC legend, S7 trade verdicts + SMC zones on the trades page; SMC-zone breakdown of S7 trades; earlier: S7 trades page + $1000 account replay + cost check; owner: no more new strategies; earlier: S7 validation run once: CFD -3.05 R / 102 trades, inside the random-entry control - the development result did not replicate, S7 EXPERIMENTAL; earlier: S7 evaluation stage, development selection CFD +47.6 R / 167 trades in-sample; earlier: S7 owner check round 2 done, variants 12/13 added, labelling stopped; earlier: S7 detector v2 from the owner's round-1 check of 100 setups; earlier: Signal-product build-out Phase 8 complete (8a API, 8b React app, 8c browser tests/Lighthouse); earlier: Strategies S5 and S6 and an ML signal filter (no value) added and evaluated; forward evaluation of S4/S5/S6 wired (first 14 weeks negative); Phase 7b, part 2c: exit-variant study + CFD cost profile; part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
+_Last updated: 2026-10-19 (gold (XAUUSD) build-out in progress on branch feat/gold-xauusd - G1-G4 code done, history download running, analysis G5 pending - see "Gold (XAUUSD)" below; new-feature plan H1-H7 in docs/FEATURES_PLAN.md; earlier: 2026-10-16 improvement pass: S7 detector ~5x faster with identical results, forward review rule, weekly report, daily backup and retention, server deployment files, Telegram live; earlier: live signal loop: `arven live run` runs all five strategies in real time, configurable in config/live.yaml, open interest REST-tailed, Telegram-ready; earlier: every strategy's trades on the Strategies page; S7 trade-management study - no variant helps, S7 forward -7.3 R; earlier: Crowded Shorts sealed test run once: CONFIRMED by the pre-registered rule but weak - CFD +1.68 R / 25 trades, PF 1.27; earlier: web redesign v2: grouped sidebar/drawer/Ctrl+K, chart fit/full-screen/OHLC legend, S7 trade verdicts + SMC zones on the trades page; SMC-zone breakdown of S7 trades; earlier: S7 trades page + $1000 account replay + cost check; owner: no more new strategies; earlier: S7 validation run once: CFD -3.05 R / 102 trades, inside the random-entry control - the development result did not replicate, S7 EXPERIMENTAL; earlier: S7 evaluation stage, development selection CFD +47.6 R / 167 trades in-sample; earlier: S7 owner check round 2 done, variants 12/13 added, labelling stopped; earlier: S7 detector v2 from the owner's round-1 check of 100 setups; earlier: Signal-product build-out Phase 8 complete (8a API, 8b React app, 8c browser tests/Lighthouse); earlier: Strategies S5 and S6 and an ML signal filter (no value) added and evaluated; forward evaluation of S4/S5/S6 wired (first 14 weeks negative); Phase 7b, part 2c: exit-variant study + CFD cost profile; part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
+
+## Gold (XAUUSD) build-out - IN PROGRESS (branch `feat/gold-xauusd`, started 2026-10-18)
+
+Owner request: add gold with every current strategy, working exactly like BTC, then the full analysis as for BTC
+(especially S7: stops, FVG, management, zones...). Owner's choices: history from Dukascopy + live from Binance
+XAUUSDT; signals only while the CME metals market is open; spread "typical value" (set from the data). Design:
+`docs/architecture.md` section 18.
+
+**Done and committed (tests: 2401+ passing, BTC results and config hash unchanged):**
+- G1 data: `arven.core.sessions` (CME metals calendar, verified on the feed), Dukascopy adapter + resumable
+  downloader + ingest (`arven --instrument XAUUSD duka download|ingest|closures`), session-aware ingestion
+  (Binance bulk/REST), resample, quality, native cross-check; instruments `config/instruments/XAUUSD.yaml`,
+  `XAUUSDT.yaml`.
+- G2 engine: session bar grid, staleness, decision masks, 1m gaps, trading time (S4 line, S6 cooldown), S7 resistance
+  window in bars, FeatureView on a session hourly grid, funding/trade-flow features optional; leakage-tested.
+- G3 costs: `config/costs_cfd_justmarkets_xauusd.yaml` (spread placeholder 1 bps/side - **to be set from the
+  Dukascopy spread**, `gold_study.py crosscheck`); swap reported as a sensitivity.
+- G4 live/web: `config/live.yaml` `markets` (gold **enabled: false** until data is verified), per-market loop state,
+  Telegram labels/commands/reports, backups of `data/markets/`, web BTC/Gold switch (`market=` on the API). Playwright:
+  70/72 passed on the last full run; 2 phone tests timed out while memory was short - **re-run when memory allows**.
+
+**Running:** the Dukascopy download as a separate hidden process (log `data/tmp/duka_download.log`; ~770 of ~4970
+files on 2026-10-19 - the feed was very slow over the weekend). Re-run the same command to resume:
+`python -m arven --instrument XAUUSD duka download --start 2020-01-01 --end <today>`. Background shells inside the
+Claude session get stopped when memory is low (7.2 GB machine) - launch long jobs as separate processes.
+
+**Next, in order:**
+1. download complete -> `python scripts/research/gold_closures.py --write` (review UNMATCHED lines) -> commit the CSV;
+2. `duka ingest`, `resample`, `quality` (all with `--instrument XAUUSD`), then Binance XAUUSDT
+   (`--instrument XAUUSDT ingest --start 2025-12-01 ...`, `resample`, `crosscheck`); DB writes collide briefly with the
+   live process (it opens the DB for each tick) - one failed tick is retried;
+3. `gold_study.py crosscheck` -> set the spread in the gold cost profile;
+4. `arven --instrument XAUUSD features build`; then `gold_study.py record development|validation|forward`, `all ...`,
+   `money`, `s7grid ...`, `s7rules`, `s7select`; S1-S3 pipeline + baselines via `arven --instrument XAUUSD backtest`;
+5. write `docs/RESULTS_GOLD.md` (Russian) and the strategy-trade exports for the web; enable gold in `live.yaml`,
+   restart the live process; re-run Playwright; merge decision with the owner.
+
+Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
+data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - to be confirmed on the full history.
 
 ## Phase
 
