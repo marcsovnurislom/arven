@@ -1,9 +1,8 @@
 # Gold (XAUUSD) CFD on JustMarkets MT5 (zero commission, spread-only costs) - the cost profile of every gold result
 # and of gold live signals (config/instruments/XAUUSD.yaml costs_file; config/live.yaml instruments).
-# Source / status (2026-10-18): JustMarkets publishes no XAUUSD spread or swap figures we could find. The spread
-# below is set from the Dukascopy XAUUSD feed itself (median ask - bid; see docs/RESULTS_GOLD.md "Costs") and is
-# NOT verified on the owner's terminal - replace fixed_bps with half the spread shown in "Market Watch -> XAUUSD"
-# (in bps of the price) when available. The stress run multiplies it by 4.
+# Source / status: the spread is verified on the owner's terminal (2026-10-21, see fixed_bps); JustMarkets publishes no
+# XAUUSD spread or swap figures we could find. If the broker's quote changes, set fixed_bps to half of (Ask - Bid) / price
+# in bps. The stress run multiplies it by 4.
 # Overnight swap is not part of this profile (BTC CFD was swap-free; gold usually is not): the gold analysis reports
 # results without swap and with an estimated swap as a separate sensitivity line.
 fees:
@@ -14,10 +13,12 @@ fees:
   stop_order_type: taker
 slippage:
   model: fixed_plus_volatility
-  # Set from the data (gold_study.py crosscheck, 2026-10-21; data/markets/XAUUSD/research/crosscheck.json): Dukascopy
-  # median ask - bid by year 2.19 / 1.99 / 2.04 / 1.70 / 1.59 / 1.74 / 1.51 bps (2020 ... 2026), p90 1.9-4.6. 1.0 bps per
-  # side = a 2.0 bps round trip: the 2020-2022 typical spread, slightly above the 2023-2026 one (deliberately conservative).
-  fixed_bps: 1.0                # per side
+  # Verified on the owner's terminal (2026-10-21, JustMarkets MT5, symbol XAUUSD.m, screenshot right after a $50 news
+  # spike): Bid 4358.75 / Ask 4359.01 = $0.26 = 0.60 bps round trip. 0.4 bps per side (0.8 round trip, ~$0.35) keeps
+  # ~35 % headroom for rollover / news hours; the x4 stress run (~$1.40) covers wide spreads. Before: 1.0 per side from
+  # the Dukascopy feed (median ask - bid 2.19 ... 1.51 bps, 2020 ... 2026; crosscheck.json) - an ECN feed, wider than
+  # this broker's quote.
+  fixed_bps: 0.4                # per side
   volatility_multiplier: 0.0    # spread only; the stress run below covers widened spreads and stop slippage
   stress_multiplier: 4.0
 funding:
