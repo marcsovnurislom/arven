@@ -4,6 +4,7 @@ from arven.engine.signal_events import SignalUpdate, SignalUpdateKind
 from arven.telegram.messages import (
     DISCLAIMER,
     DailySummarySection,
+    TrackRecord,
     format_daily_summary,
     format_new_signal,
     format_signal_update,
@@ -32,8 +33,10 @@ def test_format_new_signal_includes_every_key_fact():
     assert "98.00" in text  # stop
     assert "TP1: 102.00 (1.00R, close 50%)" in text
     assert "TP2: 104.00 (2.00R, close 50%)" in text
-    assert "1.00%" in text  # risk_fraction
-    assert "70%" in text  # confidence
+    assert "Risk: 1.00% of equity (fixed rule, the same for every signal)" in text
+    assert "Confidence" not in text and "70%" not in text  # the unvalidated per-signal confidence is never shown
+    assert "Quality: no validated per-signal estimate" in text
+    assert "Record: not available" in text  # no record passed
     assert "TREND_UP/NORMAL" in text
     assert "ema cross" in text and "adx strong" in text
     assert DISCLAIMER in text
@@ -98,3 +101,10 @@ def test_limit_entry_and_time_exit_are_spelled_out():
     assert "Entry: LIMIT 100.00 (valid until 1970-01-01 01:00 UTC)" in lim
     timed = format_new_signal(make_signal(tp_ladder=(), max_holding_minutes=1440))
     assert "No take-profit: time exit after 24 h" in timed and "TP1" not in timed
+
+
+def test_format_new_signal_shows_the_track_record():
+    since = 1_782_864_000_000  # 2026-07-01
+    assert "Record (paper since 2026-07-01): no closed signals yet" in format_new_signal(make_signal(), TrackRecord(0, 0, 0.0, since))
+    text = format_new_signal(make_signal(), TrackRecord(27, 11, -11.51, since))
+    assert "Record (paper since 2026-07-01): 27 closed, win 41%, net -11.51 R" in text

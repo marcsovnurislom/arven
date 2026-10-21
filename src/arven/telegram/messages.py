@@ -44,7 +44,29 @@ def _utc(ms: int) -> str:
     return from_ms(ms).strftime("%Y-%m-%d %H:%M UTC")
 
 
-def format_new_signal(signal: EngineSignal) -> str:
+@dataclass(frozen=True, slots=True)
+class TrackRecord:
+    """The strategy's own paper record at alert time: closed signals since ``since_ms`` (the forward start)."""
+
+    closed: int
+    wins: int
+    total_r: float
+    since_ms: int
+
+
+def _record_line(record: TrackRecord | None) -> str:
+    if record is None:
+        return "Record: not available"
+    since = from_ms(record.since_ms).strftime("%Y-%m-%d")
+    if record.closed == 0:
+        return f"Record (paper since {since}): no closed signals yet"
+    return (f"Record (paper since {since}): {record.closed} closed, win {record.wins / record.closed:.0%}, "
+            f"net {record.total_r:+.2f} R")
+
+
+def format_new_signal(signal: EngineSignal, record: TrackRecord | None = None) -> str:
+    """No per-signal confidence: none is validated (the stored ``confidence`` is a placeholder or an untested setup
+    heuristic), so the alert states that and shows the strategy's actual paper record instead."""
     tp_lines = "\n".join(
         f"  TP{i + 1}: {lvl.price:.2f} ({lvl.r_multiple:.2f}R, close {lvl.close_fraction:.0%})"
         for i, lvl in enumerate(signal.tp_ladder)
@@ -63,7 +85,9 @@ def format_new_signal(signal: EngineSignal) -> str:
         f"{entry}\n"
         f"Stop: {signal.stop:.2f}\n"
         f"{tp_lines}\n"
-        f"Risk: {signal.risk_fraction:.2%} of equity   Confidence: {signal.confidence:.0%}\n"
+        f"Risk: {signal.risk_fraction:.2%} of equity (fixed rule, the same for every signal)\n"
+        f"Quality: no validated per-signal estimate\n"
+        f"{_record_line(record)}\n"
         f"Regime: {signal.regime}\n"
         f"Reasons: {reasons}\n\n{DISCLAIMER}"
     )

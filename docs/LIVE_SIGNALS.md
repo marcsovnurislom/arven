@@ -187,7 +187,10 @@ The startup line shows how many chats are configured, whether the token is set, 
 
 You get:
 
-- **New signals:** side, entry (and whether it is a limit), stop, TPs with R, risk, reasons.
+- **New signals:** side, entry (and whether it is a limit), stop, TPs with R, risk (a fixed rule), reasons, and the
+  strategy's own paper record (closed signals since the forward start, win rate, net R). No per-signal "confidence"
+  is shown: none is validated (2026-10-22; it was a fixed 50 % placeholder for S7 and Crowded Shorts and an untested
+  setup heuristic for S4-S6, still stored with each signal).
 - **Updates:** filled, TP hit, stop moved, cancelled, closed.
 - **A daily summary.**
 - **System alerts:** started, data stale, repeated errors.

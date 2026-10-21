@@ -48,6 +48,7 @@ from arven.live.strategies import natural_key
 from arven.paper.runs import latest_forward_window_end_ms, load_paper_inputs, paper_dir, update_market_data
 from arven.paper.strategies_forward import SignalOutcome, agreement_summary, trade_log
 from arven.runs import make_guard
+from arven.telegram.messages import TrackRecord
 
 MIN15 = Timeframe.M15.ms
 MIN1 = Timeframe.M1.ms
@@ -101,6 +102,13 @@ def _read_json(path: Path, default: Any) -> Any:
 def _update_event_type(u: Any) -> str:
     digest = hashlib.sha256(f"{u.time_ms}|{u.kind.value}|{u.detail}".encode()).hexdigest()[:16]
     return f"update:{u.kind.value}:{digest}"
+
+
+def track_record(outcomes: Sequence[LiveOutcome], since_ms: int, exclude_signal_id: str | None = None) -> TrackRecord:
+    """The strategy's closed paper signals for a new-signal alert (the alerted signal itself excluded)."""
+    rs = [float(o.net_r) for o in outcomes
+          if o.state == "closed" and o.net_r is not None and o.signal.signal_id != exclude_signal_id]
+    return TrackRecord(len(rs), sum(1 for r in rs if r > 0), float(sum(rs)), since_ms)
 
 
 def summarize(outcomes: Sequence[LiveOutcome], weeks: float, min_closed: int = 30) -> dict[str, Any]:
@@ -187,6 +195,7 @@ def run_live_tick(
             stored = read_signals(signals_root, sid)
             after = cursors.get(sid, window.start_ms - 1)
             known = {natural_key(s) for s in stored}
+            fresh: list[EngineSignal] = []  # new signals to alert, formatted below once the record is known
             for s in strat.scan(ctx, after, through, stored):
                 if natural_key(s) in known:
                     continue
@@ -194,9 +203,10 @@ def run_live_tick(
                 append_signal(signals_root, s)
                 st.new_signals.append(s)
                 if now_ms - s.event_time_ms <= recency_ms:
-                    alerts.append((s.signal_id, "new_signal", format_new_signal(s)))
+                    fresh.append(s)
             cursors[sid] = max(after, through)
             have = {(u.signal_id, u.time_ms, u.kind.value, u.detail) for u in read_updates(signals_root, sid)}
+            update_alerts: list[tuple[str, str, str]] = []
             for s in [*stored, *st.new_signals]:
                 res = strat.resolve(ctx, s)
                 if res is None:
@@ -208,7 +218,10 @@ def run_live_tick(
                     append_update(signals_root, sid, u)
                     st.new_updates += 1
                     if live.telegram.send_updates and now_ms - u.time_ms <= recency_ms:
-                        alerts.append((s.signal_id, _update_event_type(u), format_signal_update(s, u)))
+                        update_alerts.append((s.signal_id, _update_event_type(u), format_signal_update(s, u)))
+            for s in fresh:  # same order as before: the strategy's new signals, then its updates
+                alerts.append((s.signal_id, "new_signal", format_new_signal(s, track_record(st.outcomes, window.start_ms, s.signal_id))))
+            alerts.extend(update_alerts)
         except Exception as exc:  # noqa: BLE001 - one strategy's failure must not stop the others
             st.error = f"{type(exc).__name__}: {exc}"
     cursor_path.write_text(json.dumps(cursors, sort_keys=True), encoding="utf-8")
@@ -244,4 +257,4 @@ def run_live_tick(
     return outcome
 
 
-__all__ = ["LiveTickOutcome", "StrategyTick", "complete_through_ms", "load_costs", "run_live_tick", "summarize"]
+__all__ = ["LiveTickOutcome", "StrategyTick", "complete_through_ms", "load_costs", "run_live_tick", "summarize", "track_record"]

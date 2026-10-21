@@ -147,3 +147,23 @@ def test_no_alerts_without_chats_or_when_disabled(env):
     run_live_tick(app, fcfg, off, config_dir, now=now, downloader=_downloader(app), chat_ids=frozenset({"1"}),
                   strategies=[Fake("y", [LAST_1M + MIN - 14 * MIN])], telegram_enqueue=put)
     assert queued == []
+
+
+def test_new_signal_alert_shows_the_strategy_record_not_a_confidence(env):
+    """A new-signal alert carries the strategy's closed paper record (the alerted signal itself excluded) instead of the
+    unvalidated per-signal confidence; the strategy's new signals still come before its updates."""
+    app, fcfg, config_dir = env
+    now = from_ms(LAST_1M + MIN + 30_000)
+    through = (LAST_1M + MIN) // (15 * MIN) * (15 * MIN)
+    fwd = T0 + 3 * DAY
+    a = Fake("fake_a", [fwd + 15 * MIN, through - 60 * MIN, through])
+    sent = []
+    run_live_tick(app, fcfg, LiveConfig(alert_recency_hours=2), config_dir, now=now, downloader=_downloader(app), chat_ids=frozenset({"1"}),
+                  strategies=[a], telegram_enqueue=lambda con, sid, et, chat, text, now_ms: sent.append((et.split(":")[0], text)))
+    assert [k for k, _ in sent] == ["new_signal", "new_signal", "update"]
+    since = from_ms(fwd).strftime("%Y-%m-%d")
+    # the signal at through - 60 min closes itself later; only the first signal counts for it
+    assert f"Record (paper since {since}): 1 closed, win 0%, net -1.00 R" in sent[0][1]
+    assert f"Record (paper since {since}): 2 closed, win 0%, net -2.00 R" in sent[1][1]
+    for _, text in sent[:2]:
+        assert "Confidence" not in text and "Quality: no validated per-signal estimate" in text

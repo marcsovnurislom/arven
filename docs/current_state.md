@@ -91,6 +91,14 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    (+10.7 / +3.7 / +0.8) - the best gold candidate, small samples; S7 (live config) -11.0 / -19.6 / +3.1; S7 lead
    "no FVG impulse + 2+ SMC zones" +3.3 / +7.3 (x4 -0.2 / +3.6); S1-S3 pipeline -10.7 % / +9.8 %.
    Still worth a second spread check near the 00:00 server rollover.
+8. **No fake "Confidence" (2026-10-22).** New-signal alerts showed `Confidence: 50%` (a placeholder for S7 / Crowded
+   Shorts, an untested setup heuristic for S4-S6). Now: `Risk: 1.00% of equity (fixed rule, the same for every
+   signal)`, `Quality: no validated per-signal estimate` and the strategy's paper record
+   (`Record (paper since <forward start>): N closed, win W%, net R`, the alerted signal excluded;
+   `arven.live.service.track_record`). New-signal alerts are formatted after the strategy's outcomes are resolved; the
+   alert order is unchanged (its new signals, then its updates). Web "Signals" page: the confidence row became the same
+   "no validated estimate" note. `confidence` stays in the signal record. Tests: telegram/live 2 new, full suite 2419
+   passed, e2e 72 passed. Live process restarted.
 
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - to be confirmed on the full history.

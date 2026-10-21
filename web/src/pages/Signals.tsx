@@ -51,7 +51,7 @@ function Detail({ s }: { s: Signal }) {
                 <tr><th>{t("timeExit")}</th><td className="num">{t("timeExitNote")} {Math.round(s.max_holding_minutes / 60)} h</td></tr>
               ) : null}
               <tr><th>{t("grade")}</th><td><Chip tone="gold">{s.grade}</Chip></td></tr>
-              <tr><th>{t("confidence")}</th><td className="num">{Math.round(s.confidence * 100)}%</td></tr>
+              <tr><th>{t("quality")}</th><td className="muted">{t("qualityNone")}</td></tr>
               <tr><th>{t("regime")}</th><td className="num">{s.regime}</td></tr>
             </tbody>
           </table>
