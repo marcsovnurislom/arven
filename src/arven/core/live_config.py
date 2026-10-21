@@ -6,7 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
@@ -32,6 +32,7 @@ class LiveTelegramConfig(_StrictModel):
     enabled: bool = True  # queue alerts (sending itself follows config/telegram.yaml dry_run and the .env secrets)
     send_updates: bool = True  # also TP hit / stop moved / filled / cancelled / closed
     charts: bool = True  # send each alert as a picture with the text as its caption (falls back to the text alone)
+    language: Literal["en", "ru"] = "en"  # wording of every alert, summary, report and bot reply (arven.telegram.ru)
     commands: bool = True  # answer bot commands from the allow-listed chats
     daily_summary_hour_utc: int | None = Field(default=0, ge=0, le=23)
     weekly_report_weekday: int | None = Field(default=0, ge=0, le=6)  # 0 = Monday, sent with the daily summary; None = off

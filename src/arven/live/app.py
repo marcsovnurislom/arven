@@ -125,6 +125,7 @@ def build_deps(
     strategies = build_strategies(live)  # validates every enabled strategy's config at start-up
     db = app.data.database_path
     alerts_on = live.telegram.enabled and bool(chat_ids)
+    lang = live.telegram.language
     markets = dict(markets or {})
     labels = {name: (m.title or name) for name, (m, _) in markets.items()}
 
@@ -148,7 +149,7 @@ def build_deps(
         quick = tcfg.model_copy(update={"command_poll_timeout_seconds": 0})  # never block the loop on a long poll
         with connect(db) as con:
             _, new_id = run_telegram_commands_tick(con, quick, app.data.data_dir / "signals", live_dir(app) / "heartbeat.json",
-                                                   last_update_id=last_update_id, allowed_chats=chat_ids,
+                                                   last_update_id=last_update_id, allowed_chats=chat_ids, lang=lang,
                                                    extra_signal_roots=tuple((labels[n], a.market_root / "signals") for n, (_, a) in markets.items()))
         return new_id
 
@@ -156,13 +157,13 @@ def build_deps(
         now_ms = to_ms(utc_now())
         with connect(db) as con:
             for chat in sorted(chat_ids):
-                enqueue(con, signal_id="system", event_type=key, chat_id=chat, text=format_system_alert(title, detail), now_ms=now_ms)
+                enqueue(con, signal_id="system", event_type=key, chat_id=chat, text=format_system_alert(title, detail, lang), now_ms=now_ms)
 
     def queue_daily(today: str) -> None:
         day = (datetime.fromisoformat(today) - timedelta(days=1)).date().isoformat()  # summarise the day that just ended
         sections = daily_summary_sections(app, day) + tuple(
             x for n, (_, a) in markets.items() for x in daily_summary_sections(a, day, labels[n]))
-        text = format_daily_summary(day, sections)
+        text = format_daily_summary(day, sections, lang)
         now_ms = to_ms(utc_now())
         with connect(db) as con:
             for chat in sorted(chat_ids):
@@ -175,7 +176,7 @@ def build_deps(
         label = f"{(end - timedelta(days=7)).isoformat()} - {(end - timedelta(days=1)).isoformat()}"
         since = app.splits.forward_start.date().isoformat()
         rows = weekly_report_rows(app, today) + tuple(x for n, (_, a) in markets.items() for x in weekly_report_rows(a, today, labels[n]))
-        text = format_weekly_report(label, since, rows)
+        text = format_weekly_report(label, since, rows, lang)
         now_ms = to_ms(utc_now())
         with connect(db) as con:
             for chat in sorted(chat_ids):

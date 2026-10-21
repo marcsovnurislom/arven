@@ -67,7 +67,7 @@ scp arven-code.zip web-dist.zip data\backups\arven-<время>.zip root@IP_СЕ
 На сервере:
 
 ```bash
-apt -y install unzip
+apt -y install unzip fonts-dejavu-core   # шрифт с кириллицей для русских подписей на картинках сигналов
 cd /opt/arven
 unzip -o arven-code.zip
 unzip -o arven-*Z.zip                 # кладёт data/ и config/ на место

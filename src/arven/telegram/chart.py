@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 from dataclasses import dataclass
+from functools import lru_cache
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -18,6 +19,7 @@ from PIL import Image, ImageDraw, ImageFont
 from arven.core.time import from_ms
 from arven.engine.signal import EngineSignal
 from arven.engine.signal_events import SignalUpdate
+from arven.telegram.ru import CHART as WORDS
 
 WIDTH, HEIGHT = 1000, 620
 LEFT, RIGHT, TOP, BOTTOM = 64, 150, 78, 56  # plot margins (the right one holds the level labels)
@@ -75,16 +77,41 @@ def candles_until(open_time_ms: np.ndarray, tf_ms: int, o: np.ndarray, h: np.nda
     return Candles(open_time_ms[idx], close_ms[idx], o[idx], h[idx], lo[idx], c[idx], label)
 
 
-def level_labels(signal: EngineSignal) -> list[tuple[str, float, str]]:
+def level_labels(signal: EngineSignal, lang: str = "en") -> list[tuple[str, float, str]]:
     """(label, price, colour key) of every level drawn - entry, stop, each take-profit - with the alert text's ``.2f``."""
-    entry = "LIMIT" if signal.entry_type == "limit" else "ENTRY"
-    out = [(f"{entry} {signal.entry_reference:.2f}", signal.entry_reference, "entry"), (f"STOP {signal.stop:.2f}", signal.stop, "stop")]
+    w = WORDS[lang]
+    entry = w["limit"] if signal.entry_type == "limit" else w["entry"]
+    out = [(f"{entry} {signal.entry_reference:.2f}", signal.entry_reference, "entry"),
+           (f"{w['stop']} {signal.stop:.2f}", signal.stop, "stop")]
     out += [(f"TP{i + 1} {lvl.price:.2f}", lvl.price, "tp") for i, lvl in enumerate(signal.tp_ladder)]
     return out
 
 
-def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    return ImageFont.load_default(size=size)
+# Pillow's built-in font (Aileron) has no Cyrillic: Russian words need a system font that has it. The first one found
+# is used; with none, the picture stays in English (the alert text under it is Russian either way).
+CYRILLIC_FONTS = ("DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "arial.ttf", "segoeui.ttf",
+                  "LiberationSans-Regular.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf")
+
+
+@lru_cache(maxsize=1)
+def cyrillic_font() -> str | None:
+    for name in CYRILLIC_FONTS:
+        try:
+            ImageFont.truetype(name, 12)
+        except OSError:
+            continue
+        return name
+    return None
+
+
+def chart_language(lang: str) -> str:
+    """The language the picture can actually be drawn in: Russian only with a Cyrillic font installed."""
+    return "ru" if lang == "ru" and cyrillic_font() is not None else "en"
+
+
+def _font(size: int, lang: str = "en") -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    path = cyrillic_font() if lang == "ru" else None
+    return ImageFont.truetype(path, size) if path else ImageFont.load_default(size=size)
 
 
 def _spread_labels(ys: list[float], top: float, bottom: float, gap: float) -> list[float]:
@@ -137,12 +164,13 @@ def _label(draw: ImageDraw.ImageDraw, xy: tuple[float, float], text: str, font, 
     draw.text(xy, text, font=font, fill=color)
 
 
-def _draw_overlay(draw: ImageDraw.ImageDraw, overlay: ChartOverlay, candles: Candles, x, y, slot: float, x0: float, x1: float, font) -> None:
+def _draw_overlay(draw: ImageDraw.ImageDraw, overlay: ChartOverlay, candles: Candles, x, y, slot: float, x0: float, x1: float, font,
+                  words: dict[str, str]) -> None:
     if overlay.zone is not None:
         zl, zh, label = overlay.zone
         zs = x(max(_x_index(candles, overlay.zone_from_ms), 0.0)) if overlay.zone_from_ms is not None else x0
         draw.rectangle([zs, y(zh), x1, y(zl)], fill=(*COLORS["zone"], 46), outline=(*COLORS["zone"], 140))
-        _label(draw, (zs + 4, y(zh) - 16), label, font, COLORS["zone"])
+        _label(draw, (zs + 4, y(zh) - 16), words.get(label, label), font, COLORS["zone"])
     for price, label in overlay.levels:
         yy = y(price)
         for xx in range(int(x0), int(x1), 6):
@@ -154,7 +182,7 @@ def _draw_overlay(draw: ImageDraw.ImageDraw, overlay: ChartOverlay, candles: Can
             continue
         i0, p0, i1, p1 = seg
         draw.line([(x(i0), y(p0)), (x(i1), y(p1))], fill=COLORS["line"], width=3)
-        _label(draw, (x(i0) + 6, y(p0) + 4), ln[4], font, COLORS["line"])
+        _label(draw, (x(i0) + 6, y(p0) + 4), words.get(ln[4], ln[4]), font, COLORS["line"])
     for t, price in overlay.points:
         i = _x_index(candles, t)
         if 0 <= i <= len(candles.close) - 1:
@@ -163,9 +191,12 @@ def _draw_overlay(draw: ImageDraw.ImageDraw, overlay: ChartOverlay, candles: Can
 
 
 def render_signal_chart(signal: EngineSignal, candles: Candles, title: str, *, update: SignalUpdate | None = None,
-                        update_label: str | None = None, overlay: ChartOverlay | None = None) -> bytes:
+                        update_label: str | None = None, overlay: ChartOverlay | None = None, lang: str = "en") -> bytes:
     """PNG bytes of the signal (or of one of its updates: ``update`` marks its time and ``update_label`` names it),
-    with the strategy's ``overlay`` drawn under the level lines."""
+    with the strategy's ``overlay`` drawn under the level lines. ``lang``: the picture's own words (``title`` and
+    ``update_label`` come from the caller in the same language; see ``chart_language``)."""
+    lang = chart_language(lang)
+    words = WORDS[lang]
     if len(candles.close) == 0:
         raise ValueError("no closed candles before the cut-off - nothing to draw")
     if signal.event_time_ms - int(candles.close_ms[-1]) > MAX_GAP_MS:
@@ -173,7 +204,7 @@ def render_signal_chart(signal: EngineSignal, candles: Candles, title: str, *, u
     img = Image.new("RGB", (WIDTH, HEIGHT), COLORS["bg"])
     draw = ImageDraw.Draw(img, "RGBA")
     x0, x1, y0, y1 = LEFT, WIDTH - RIGHT, TOP, HEIGHT - BOTTOM
-    levels = level_labels(signal)
+    levels = level_labels(signal, lang)
     extra = [p for _, p, _ in levels] + _visible_overlay_prices(overlay, candles)
     lo_p = float(min(candles.low.min(), *extra))
     hi_p = float(max(candles.high.max(), *extra))
@@ -190,7 +221,7 @@ def render_signal_chart(signal: EngineSignal, candles: Candles, title: str, *, u
     def x(i: float) -> float:
         return x0 + (i + 0.5) * slot
 
-    small, mid, big = _font(13), _font(15), _font(20)
+    small, mid, big = _font(13, lang), _font(15, lang), _font(20, lang)
     # grid and price ticks (left)
     for k in range(6):
         p = lo_p + (hi_p - lo_p) * k / 5
@@ -212,7 +243,7 @@ def render_signal_chart(signal: EngineSignal, candles: Candles, title: str, *, u
     draw.rectangle([sx, min(y(signal.entry_reference), y(signal.stop)), x1, max(y(signal.entry_reference), y(signal.stop))], fill=(*COLORS["stop"], 40))
 
     if overlay is not None:
-        _draw_overlay(draw, overlay, candles, x, y, slot, x0, x1, small)
+        _draw_overlay(draw, overlay, candles, x, y, slot, x0, x1, small, words)
 
     # candles
     for i in range(n):
@@ -226,7 +257,7 @@ def render_signal_chart(signal: EngineSignal, candles: Candles, title: str, *, u
     # signal time and (optionally) the update time
     for yy in range(int(y0), int(y1), 8):
         draw.line([(sx, yy), (sx, yy + 4)], fill=COLORS["faint"], width=1)
-    draw.text((sx + 4, y0 + 2), "signal", font=small, fill=COLORS["faint"])
+    draw.text((sx + 4, y0 + 2), words["signal"], font=small, fill=COLORS["faint"])
     if update is not None:
         ui = int(np.searchsorted(candles.close_ms, update.time_ms, side="right")) - 1
         ux = x(min(max(ui, 0), n - 1)) + slot / 2
@@ -249,13 +280,13 @@ def render_signal_chart(signal: EngineSignal, candles: Candles, title: str, *, u
 
     # caption
     draw.text((LEFT, 14), title, font=big, fill=COLORS["text"])
-    sub = f"{candles.label} candles to {from_ms(int(candles.close_ms[-1])).strftime('%Y-%m-%d %H:%M')} UTC  ·  paper signal, not an order"
+    sub = words["sub"].format(tf=candles.label, t=from_ms(int(candles.close_ms[-1])).strftime('%Y-%m-%d %H:%M'))
     draw.text((LEFT, 44), sub, font=small, fill=COLORS["faint"])
-    draw.text((LEFT, HEIGHT - 22), "ARVEN decision support - simulated, not financial advice", font=small, fill=COLORS["faint"])
+    draw.text((LEFT, HEIGHT - 22), words["foot"], font=small, fill=COLORS["faint"])
 
     buf = io.BytesIO()
     img.save(buf, format="PNG", optimize=True)
     return buf.getvalue()
 
 
-__all__ = ["COLORS", "Candles", "ChartOverlay", "candles_until", "level_labels", "render_signal_chart"]
+__all__ = ["COLORS", "Candles", "ChartOverlay", "candles_until", "chart_language", "cyrillic_font", "level_labels", "render_signal_chart"]

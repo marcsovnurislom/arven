@@ -191,6 +191,12 @@ You get:
   strategy's own paper record (closed signals since the forward start, win rate, net R). No per-signal "confidence"
   is shown: none is validated (2026-10-22; it was a fixed 50 % placeholder for S7 and Crowded Shorts and an untested
   setup heuristic for S4-S6, still stored with each signal).
+- **Language** (`telegram.language: en | ru` in `config/live.yaml`, `ru` since 2026-10-22): every alert, update, daily
+  summary, weekly report, system alert and bot reply, and the picture's words (`arven.telegram.ru`). A signal's stored
+  reasons and update details stay English (they are part of its content hash) and are translated at display time by
+  fixed patterns; an unknown text is shown as it is. Russian words on the picture need a system font with Cyrillic
+  (DejaVu Sans / Arial / Segoe UI / Liberation Sans; on a Linux server `apt install fonts-dejavu-core`); without one the
+  picture stays in English and the caption is still Russian.
 - **Updates:** filled, TP hit, stop moved, cancelled, closed.
 - **Pictures** (`telegram.charts: true`, 2026-10-22): every new signal and update goes out as a PNG with the text as
   its caption - the 15m candles closed by that moment (never later ones), entry / stop / take-profit lines with their

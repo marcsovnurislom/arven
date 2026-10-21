@@ -114,6 +114,16 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    from fib 1 on) - nothing is stored and the signal record / `signal_id` are untouched, so update pictures of older
    signals get it too. The window widens back to the line's start (`candles_until(since_ms=...)`, cap 240 candles).
    Tests: overlay mapping (long and short, fake setup) + clipping, widening, no look-ahead with an overlay.
+   Owner's check: one stored gold S7 signal sent as a TEST picture to both chats - arrived, works.
+10. **Telegram in Russian (2026-10-22, owner: "signals in Russian").** `config/live.yaml` `telegram.language: ru`
+   (`LiveTelegramConfig.language`, default `en`). `arven.telegram.ru`: Russian new-signal text, readable update details
+   ("TP1: закрыто 50 % позиции по 4135.12", "Позиция закрыта по стопу", cancel reasons in words), daily summary, weekly
+   report, system alerts, bot replies (`CommandContext.lang`) and the picture's words. Stored reasons / details stay
+   English (they are hashed) and are translated by fixed patterns - checked on every stored record: 426 signals and
+   854 updates, 0 untranslated; the longest Russian alert is 878 characters (caption limit 1024). The English wording
+   is unchanged (all old tests pass as they were). Cyrillic on the picture needs a system font (`chart.cyrillic_font`:
+   DejaVu / Arial / Segoe UI / Liberation; on Linux `fonts-dejavu-core`), otherwise the picture falls back to English.
+   Tests: `tests/telegram/test_ru.py` (30) + 1 live-tick test.
 
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - to be confirmed on the full history.

@@ -190,3 +190,18 @@ def test_every_alert_gets_its_picture_unless_switched_off(env, charts):
         assert out.charts == 3 and all(p is not None and p.startswith(b"\x89PNG") for p in pictures)
     else:
         assert out.charts == 0 and all(p is None for p in pictures)
+
+
+def test_alerts_are_queued_in_the_configured_language(env):
+    from arven.core.live_config import LiveTelegramConfig
+
+    app, fcfg, config_dir = env
+    now = from_ms(LAST_1M + MIN + 30_000)
+    through = (LAST_1M + MIN) // (15 * MIN) * (15 * MIN)
+    a = Fake("fake_a", [T0 + 3 * DAY + 15 * MIN, through - 60 * MIN, through])
+    texts = []
+    live = LiveConfig(alert_recency_hours=2, telegram=LiveTelegramConfig(language="ru", charts=False))
+    run_live_tick(app, fcfg, live, config_dir, now=now, downloader=_downloader(app), chat_ids=frozenset({"1"}), strategies=[a],
+                  telegram_enqueue=lambda con, sid, et, chat, text, now_ms: texts.append(text))
+    assert [t.split("\n")[0].split(" [")[0].split(":")[0] for t in texts] == ["НОВЫЙ СИГНАЛ", "НОВЫЙ СИГНАЛ", "Закрыто"]
+    assert "Позиция закрыта по стопу" in texts[2]

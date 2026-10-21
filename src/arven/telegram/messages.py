@@ -11,6 +11,9 @@ from dataclasses import dataclass
 from arven.core.time import from_ms
 from arven.engine.signal import EngineSignal
 from arven.engine.signal_events import SignalUpdate, SignalUpdateKind
+from arven.telegram import ru
+
+LANGUAGES = ("en", "ru")  # config/live.yaml telegram.language; "en" is the original wording, unchanged
 
 DISCLAIMER = "Paper signal only - simulated, not a real order, not financial advice (CLAUDE.md rules 6/12)."
 
@@ -64,9 +67,13 @@ def _record_line(record: TrackRecord | None) -> str:
             f"net {record.total_r:+.2f} R")
 
 
-def format_new_signal(signal: EngineSignal, record: TrackRecord | None = None) -> str:
+def format_new_signal(signal: EngineSignal, record: TrackRecord | None = None, lang: str = "en") -> str:
     """No per-signal confidence: none is validated (the stored ``confidence`` is a placeholder or an untested setup
     heuristic), so the alert states that and shows the strategy's actual paper record instead."""
+    if lang == "ru":
+        rec = (ru.record_line(None, 0, 0.0, None) if record is None
+               else ru.record_line(record.closed, record.wins, record.total_r, record.since_ms))
+        return ru.new_signal(signal, rec)
     tp_lines = "\n".join(
         f"  TP{i + 1}: {lvl.price:.2f} ({lvl.r_multiple:.2f}R, close {lvl.close_fraction:.0%})"
         for i, lvl in enumerate(signal.tp_ladder)
@@ -93,19 +100,25 @@ def format_new_signal(signal: EngineSignal, record: TrackRecord | None = None) -
     )
 
 
-def chart_title(signal: EngineSignal, update: SignalUpdate | None = None) -> str:
+def chart_title(signal: EngineSignal, update: SignalUpdate | None = None, lang: str = "en") -> str:
     """The picture's headline (``arven.telegram.chart``), worded like the alert text."""
+    if lang == "ru":
+        return ru.chart_title(signal, update)
     head = f"{symbol_label(signal.symbol)} · {_side_word(signal.side)} · {signal.strategy_id} {_version(signal.strategy_version)}"
     return head if update is None else f"{_UPDATE_VERB[update.kind]}: {head}"
 
 
-def update_label(update: SignalUpdate) -> str:
+def update_label(update: SignalUpdate, lang: str = "en") -> str:
     """The event's name on the picture, with the exit reason when the detail carries one ("Closed: STOP")."""
+    if lang == "ru":
+        return ru.update_label(update)
     reason = next((p.split("=", 1)[1] for p in update.detail.split(";") if p.startswith("reason=")), None)
     return f"{_UPDATE_VERB[update.kind]}: {reason}" if reason else _UPDATE_VERB[update.kind]
 
 
-def format_signal_update(signal: EngineSignal, update: SignalUpdate) -> str:
+def format_signal_update(signal: EngineSignal, update: SignalUpdate, lang: str = "en") -> str:
+    if lang == "ru":
+        return ru.signal_update(signal, update)
     verb = _UPDATE_VERB[update.kind]
     return (
         f"{verb}: {symbol_label(signal.symbol)} {_side_word(signal.side)} ({signal.strategy_id})  {_utc(update.time_ms)}\n"
@@ -114,7 +127,9 @@ def format_signal_update(signal: EngineSignal, update: SignalUpdate) -> str:
     )
 
 
-def format_system_alert(title: str, detail: str) -> str:
+def format_system_alert(title: str, detail: str, lang: str = "en") -> str:
+    if lang == "ru":
+        return ru.system_alert(title, detail)
     return f"SYSTEM ALERT: {title}\n{detail}"
 
 
@@ -127,7 +142,9 @@ class DailySummarySection:
     net_r: float
 
 
-def format_daily_summary(date_label: str, sections: tuple[DailySummarySection, ...]) -> str:
+def format_daily_summary(date_label: str, sections: tuple[DailySummarySection, ...], lang: str = "en") -> str:
+    if lang == "ru":
+        return ru.daily_summary(date_label, [(s.strategy_id, s.grade, s.n_signals, s.n_closed, s.net_r) for s in sections])
     if not sections:
         body = "No signals today."
     else:
@@ -169,11 +186,15 @@ def _num(x: float | None, spec: str) -> str:
     return "n/a" if x is None else format(x, spec)
 
 
-def format_weekly_report(week_label: str, since_label: str, rows: tuple[WeeklyReportRow, ...]) -> str:
+def format_weekly_report(week_label: str, since_label: str, rows: tuple[WeeklyReportRow, ...], lang: str = "en") -> str:
     blocks = []
     for r in rows:
         ci = f"[{_num(r.ci_low, '+.2f')}, {_num(r.ci_high, '+.2f')}]" if r.ci_low is not None else "n/a"
         win = _num(None if r.win_rate is None else r.win_rate * 100, ".0f")
+        if lang == "ru":
+            blocks.append(ru.weekly_block(r.strategy_id, r.grade, r.week_closed, r.week_r, since_label, r.n_closed, r.n_open, r.total_r,
+                                          win, _num(r.mean_r, '+.3f'), ci, _num(r.max_dd_r, '.1f'), r.verdict))
+            continue
         blocks.append(
             f"{r.strategy_id} [{r.grade}]\n"
             f"  this week: {r.week_closed} closed, {r.week_r:+.2f}R\n"
@@ -181,6 +202,8 @@ def format_weekly_report(week_label: str, since_label: str, rows: tuple[WeeklyRe
             f"mean {_num(r.mean_r, '+.3f')}R, 95% CI {ci}, max DD {_num(r.max_dd_r, '.1f')}R\n"
             f"  review: {VERDICT_TEXT.get(r.verdict, r.verdict)}"
         )
+    if lang == "ru":
+        return ru.weekly_report(week_label, blocks)
     body = "\n".join(blocks) if blocks else "No strategies."
     return (f"Weekly forward report - {week_label}\n{body}\n\n"
             f"Net of costs, each signal tracked on its own. No strategy has a proven edge.\n{DISCLAIMER}")
