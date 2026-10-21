@@ -37,9 +37,18 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    22-24 and 29-31 December 2026/2027. Christmas Eve / New Year's Eve now have no own pattern (their early closes are
    part of the Christmas / New Year runs). Two observed ends run a few minutes past the 23:00 reopen (2021-11-25 23:18,
    2025-12-25 23:04: quiet feed minutes) - kept, harmless (a few NO_TRADE minutes);
-2. `duka ingest`, `resample`, `quality` (all with `--instrument XAUUSD`), then Binance XAUUSDT
-   (`--instrument XAUUSDT ingest --start 2025-12-01 ...`, `resample`, `crosscheck`); DB writes collide briefly with the
-   live process (it opens the DB for each tick) - one failed tick is retried;
+2. ~~`duka ingest`, `resample`, `quality`, then Binance XAUUSDT~~ **done 2026-10-21** (no DB collision seen):
+   - XAUUSD (Dukascopy, download topped up to 2026-10-20): 2 485 days ingested, 2 413 193 1m rows in session
+     (out-of-session minutes dropped), 2020-01-01 23:00 -> 2026-10-20 23:59 UTC; `quality` 2020-01-01..2026-10-21:
+     **all PASS, no warnings**.
+   - XAUUSDT (Binance, listed 2025-12-11 08:05 UTC): 354 files ingested, 11 not available (before the listing);
+     `quality`: 1m rows = expected minus the pre-listing minutes exactly (no gap after the listing); funding through
+     2026-09-30 (October's monthly file not published yet); open interest has 237 small 5m gaps (unused for gold).
+   - `crosscheck` XAUUSDT **FAIL, understood**: 554 of 60 655 5m bars (and 179 15m / 44 1h / 6 4h) differ from
+     Binance's native klines, **only between 2025-12-11 and 2026-01-15** (the illiquid first weeks after the listing),
+     always in the *open* (high/low only where that open was the extreme); close, volume, quote/taker volumes and trade
+     counts match exactly everywhere. A Binance data quirk in the native klines, not a resampling error; nothing
+     changed. Gold research uses the Dukascopy history; XAUUSDT comparisons are cleanest from 2026-01-16;
 3. `gold_study.py crosscheck` -> set the spread in the gold cost profile;
 4. `arven --instrument XAUUSD features build`; then `gold_study.py record development|validation|forward`, `all ...`,
    `money`, `s7grid ...`, `s7rules`, `s7select`; S1-S3 pipeline + baselines via `arven --instrument XAUUSD backtest`;
