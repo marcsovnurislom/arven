@@ -80,9 +80,10 @@ def us_holidays(y: int) -> dict[date, str]:
         _nth_weekday(y, 11, 3, 4): "Thanksgiving",
         _nth_weekday(y, 11, 3, 4) + timedelta(days=1): "Day after Thanksgiving",
         _observed(date(y, 12, 25)): "Christmas",
-        date(y, 12, 24): "Christmas Eve",
-        date(y, 12, 31): "New Year's Eve",
     }
+    # the eves never displace an observed holiday on the same date (Christmas on a Saturday is observed on the 24th)
+    h.setdefault(date(y, 12, 24), "Christmas Eve")
+    h.setdefault(date(y, 12, 31), "New Year's Eve")
     if y >= 2022:
         h[_observed(date(y, 6, 19))] = "Juneteenth"
     return h
@@ -90,11 +91,13 @@ def us_holidays(y: int) -> dict[date, str]:
 
 def holiday_of(t_ms: int, span_ms: int) -> tuple[date, str] | None:
     """The holiday a closure belongs to: the New York date of the closure's middle, else the day after (an evening
-    early close before a holiday, e.g. Christmas Eve), else the day before."""
+    early close before a holiday, e.g. Christmas Eve), else the day before. Weekend dates are skipped: a Friday-to-
+    Monday closure belongs to the Monday holiday, not to an eve that fell on the Sunday (its pattern, projected onto a
+    weekday eve, would close ordinary trading days)."""
     d = from_ms(t_ms + span_ms // 2).astimezone(ZoneInfo("America/New_York")).date()
     for cand in (d, d + timedelta(days=1), d - timedelta(days=1)):
         name = us_holidays(cand.year).get(cand)
-        if name:
+        if name and cand.weekday() < 5:
             return cand, name
     return None
 

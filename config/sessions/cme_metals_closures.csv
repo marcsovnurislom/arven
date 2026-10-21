@@ -1,4 +1,90 @@
 # Holiday closures and early closes of CME Globex metals (gold) on top of the regular rule in arven.core.sessions.
 # UTC, half-open [start_utc, end_utc), whole minutes. History rows are derived from Dukascopy XAUUSD zero-volume
-# runs inside regular hours (scripts/research/gold_closures.py); future rows come from the CME holiday calendar.
+# runs inside regular hours (scripts/research/gold_closures.py); future rows repeat each holiday's latest observed
+# pattern in Chicago time ("projected").
 start_utc,end_utc,reason,source
+2020-01-01T00:00:00Z,2020-01-01T22:00:00Z,New Year's Day,dukascopy zero-volume run
+2020-01-20T18:00:00Z,2020-01-20T22:00:00Z,Martin Luther King Jr. Day,dukascopy zero-volume run
+2020-02-17T18:00:00Z,2020-02-17T22:00:00Z,Presidents' Day,dukascopy zero-volume run
+2020-04-09T22:00:00Z,2020-04-10T21:00:00Z,Good Friday,dukascopy zero-volume run
+2020-05-25T17:00:00Z,2020-05-25T21:00:00Z,Memorial Day,dukascopy zero-volume run
+2020-07-03T17:00:00Z,2020-07-03T21:00:00Z,Independence Day,dukascopy zero-volume run
+2020-09-07T17:00:00Z,2020-09-07T21:00:00Z,Labor Day,dukascopy zero-volume run
+2020-11-26T18:00:00Z,2020-11-26T22:00:00Z,Thanksgiving,dukascopy zero-volume run
+2020-11-27T18:45:00Z,2020-11-27T22:00:00Z,Day after Thanksgiving,dukascopy zero-volume run
+2020-12-24T18:45:00Z,2020-12-25T22:00:00Z,Christmas,dukascopy zero-volume run
+2020-12-31T23:00:00Z,2021-01-01T22:00:00Z,New Year's Day,dukascopy zero-volume run
+2021-01-18T18:00:00Z,2021-01-18T22:00:00Z,Martin Luther King Jr. Day,dukascopy zero-volume run
+2021-02-15T18:00:00Z,2021-02-15T22:00:00Z,Presidents' Day,dukascopy zero-volume run
+2021-04-01T22:00:00Z,2021-04-02T21:00:00Z,Good Friday,dukascopy zero-volume run
+2021-05-31T17:00:00Z,2021-05-31T21:00:00Z,Memorial Day,dukascopy zero-volume run
+2021-07-05T17:00:00Z,2021-07-05T21:00:00Z,Independence Day,dukascopy zero-volume run
+2021-09-06T17:00:00Z,2021-09-06T21:00:00Z,Labor Day,dukascopy zero-volume run
+2021-11-25T18:00:00Z,2021-11-25T23:18:00Z,Thanksgiving,dukascopy zero-volume run
+2021-11-26T18:45:00Z,2021-11-26T22:00:00Z,Day after Thanksgiving,dukascopy zero-volume run
+2021-12-23T22:00:00Z,2021-12-24T22:00:00Z,Christmas,dukascopy zero-volume run
+2022-01-17T18:00:00Z,2022-01-17T22:00:00Z,Martin Luther King Jr. Day,dukascopy zero-volume run
+2022-02-21T19:30:00Z,2022-02-21T22:00:00Z,Presidents' Day,dukascopy zero-volume run
+2022-04-14T21:00:00Z,2022-04-15T21:00:00Z,Good Friday,dukascopy zero-volume run
+2022-05-30T18:30:00Z,2022-05-30T21:00:00Z,Memorial Day,dukascopy zero-volume run
+2022-06-20T18:30:00Z,2022-06-20T21:00:00Z,Juneteenth,dukascopy zero-volume run
+2022-07-04T18:30:00Z,2022-07-04T21:00:00Z,Independence Day,dukascopy zero-volume run
+2022-09-05T18:30:00Z,2022-09-05T21:00:00Z,Labor Day,dukascopy zero-volume run
+2022-11-24T19:30:00Z,2022-11-24T22:00:00Z,Thanksgiving,dukascopy zero-volume run
+2022-11-25T18:45:00Z,2022-11-25T22:00:00Z,Day after Thanksgiving,dukascopy zero-volume run
+2022-12-23T22:00:00Z,2022-12-26T22:00:00Z,Christmas,dukascopy zero-volume run
+2022-12-30T22:00:00Z,2023-01-02T22:00:00Z,New Year's Day,dukascopy zero-volume run
+2023-01-16T18:00:00Z,2023-01-16T22:00:00Z,Martin Luther King Jr. Day,dukascopy zero-volume run
+2023-02-20T19:30:00Z,2023-02-20T22:00:00Z,Presidents' Day,dukascopy zero-volume run
+2023-04-06T21:00:00Z,2023-04-07T21:00:00Z,Good Friday,dukascopy zero-volume run
+2023-05-29T18:30:00Z,2023-05-29T21:00:00Z,Memorial Day,dukascopy zero-volume run
+2023-06-19T18:30:00Z,2023-06-19T21:00:00Z,Juneteenth,dukascopy zero-volume run
+2023-07-04T18:30:00Z,2023-07-04T21:00:00Z,Independence Day,dukascopy zero-volume run
+2023-09-04T18:30:00Z,2023-09-04T21:00:00Z,Labor Day,dukascopy zero-volume run
+2023-11-23T18:30:00Z,2023-11-23T22:00:00Z,Thanksgiving,dukascopy zero-volume run
+2023-11-24T17:45:00Z,2023-11-24T22:00:00Z,Day after Thanksgiving,dukascopy zero-volume run
+2023-12-22T22:00:00Z,2023-12-25T22:00:00Z,Christmas,dukascopy zero-volume run
+2023-12-29T22:00:00Z,2024-01-01T22:00:00Z,New Year's Day,dukascopy zero-volume run
+2024-01-15T19:30:00Z,2024-01-15T22:00:00Z,Martin Luther King Jr. Day,dukascopy zero-volume run
+2024-02-19T19:30:00Z,2024-02-19T22:00:00Z,Presidents' Day,dukascopy zero-volume run
+2024-03-28T21:00:00Z,2024-03-29T21:00:00Z,Good Friday,dukascopy zero-volume run
+2024-05-27T18:30:00Z,2024-05-27T21:00:00Z,Memorial Day,dukascopy zero-volume run
+2024-06-19T18:30:00Z,2024-06-19T21:00:00Z,Juneteenth,dukascopy zero-volume run
+2024-07-04T18:30:00Z,2024-07-04T21:00:00Z,Independence Day,dukascopy zero-volume run
+2024-09-02T18:30:00Z,2024-09-02T21:00:00Z,Labor Day,dukascopy zero-volume run
+2024-11-28T19:30:00Z,2024-11-28T22:00:00Z,Thanksgiving,dukascopy zero-volume run
+2024-11-29T19:45:00Z,2024-11-29T22:00:00Z,Day after Thanksgiving,dukascopy zero-volume run
+2024-12-24T18:45:00Z,2024-12-25T22:00:00Z,Christmas,dukascopy zero-volume run
+2024-12-31T22:00:00Z,2025-01-01T22:00:00Z,New Year's Day,dukascopy zero-volume run
+2025-01-20T19:30:00Z,2025-01-20T22:00:00Z,Martin Luther King Jr. Day,dukascopy zero-volume run
+2025-02-17T19:30:00Z,2025-02-17T22:00:00Z,Presidents' Day,dukascopy zero-volume run
+2025-04-17T21:00:00Z,2025-04-18T21:00:00Z,Good Friday,dukascopy zero-volume run
+2025-05-26T18:30:00Z,2025-05-26T21:00:00Z,Memorial Day,dukascopy zero-volume run
+2025-06-19T18:30:00Z,2025-06-19T21:00:00Z,Juneteenth,dukascopy zero-volume run
+2025-07-04T17:00:00Z,2025-07-04T21:00:00Z,Independence Day,dukascopy zero-volume run
+2025-09-01T18:30:00Z,2025-09-01T21:00:00Z,Labor Day,dukascopy zero-volume run
+2025-11-27T19:30:00Z,2025-11-27T22:00:00Z,Thanksgiving,dukascopy zero-volume run
+2025-11-28T19:45:00Z,2025-11-28T22:00:00Z,Day after Thanksgiving,dukascopy zero-volume run
+2025-12-24T18:45:00Z,2025-12-25T23:04:00Z,Christmas,dukascopy zero-volume run
+2025-12-31T22:00:00Z,2026-01-01T22:00:00Z,New Year's Day,dukascopy zero-volume run
+2026-01-19T19:30:00Z,2026-01-19T22:00:00Z,Martin Luther King Jr. Day,dukascopy zero-volume run
+2026-02-16T19:30:00Z,2026-02-16T22:00:00Z,Presidents' Day,dukascopy zero-volume run
+2026-04-02T21:00:00Z,2026-04-03T21:00:00Z,Good Friday,dukascopy zero-volume run
+2026-05-25T18:30:00Z,2026-05-25T21:00:00Z,Memorial Day,dukascopy zero-volume run
+2026-06-19T17:00:00Z,2026-06-19T21:00:00Z,Juneteenth,dukascopy zero-volume run
+2026-07-03T17:00:00Z,2026-07-03T21:00:00Z,Independence Day,dukascopy zero-volume run
+2026-09-07T18:30:00Z,2026-09-07T21:00:00Z,Labor Day,dukascopy zero-volume run
+2026-11-26T19:30:00Z,2026-11-26T22:00:00Z,Thanksgiving,projected from 2025-11-27
+2026-11-27T19:45:00Z,2026-11-27T22:00:00Z,Day after Thanksgiving,projected from 2025-11-28
+2026-12-24T18:45:00Z,2026-12-25T23:04:00Z,Christmas,projected from 2025-12-25
+2026-12-31T22:00:00Z,2027-01-01T22:00:00Z,New Year's Day,projected from 2026-01-01
+2027-01-18T19:30:00Z,2027-01-18T22:00:00Z,Martin Luther King Jr. Day,projected from 2026-01-19
+2027-02-15T19:30:00Z,2027-02-15T22:00:00Z,Presidents' Day,projected from 2026-02-16
+2027-03-25T21:00:00Z,2027-03-26T21:00:00Z,Good Friday,projected from 2026-04-03
+2027-05-31T18:30:00Z,2027-05-31T21:00:00Z,Memorial Day,projected from 2026-05-25
+2027-06-18T17:00:00Z,2027-06-18T21:00:00Z,Juneteenth,projected from 2026-06-19
+2027-07-05T17:00:00Z,2027-07-05T21:00:00Z,Independence Day,projected from 2026-07-03
+2027-09-06T18:30:00Z,2027-09-06T21:00:00Z,Labor Day,projected from 2026-09-07
+2027-11-25T19:30:00Z,2027-11-25T22:00:00Z,Thanksgiving,projected from 2025-11-27
+2027-11-26T19:45:00Z,2027-11-26T22:00:00Z,Day after Thanksgiving,projected from 2025-11-28
+2027-12-23T18:45:00Z,2027-12-24T23:04:00Z,Christmas,projected from 2025-12-25
