@@ -10,7 +10,13 @@ Same schema for all: entry/exit times and prices, stop, targets, exit reasons, n
 - S7: the development-selected configuration (``scripts/s7_study.py``), development / validation / forward.
 - Crowded Shorts: the pre-registered rules (``scripts/research/cs_sealed_test.py``): development+validation, the already
   evaluated sealed test (displayed only - the access is logged by SplitGuard with that reason), forward.
-Usage: PYTHONPATH=src python scripts/strategy_trades_export.py [strategy ...]
+
+Gold (``--instrument XAUUSD``): the same export for the Dukascopy gold history into ``data/markets/XAUUSD/strategy_trades/``
+(the web's gold research root), with the gold CFD profile and 1 oz lots (``size`` / ``size_unit``). S4-S6 replay the
+signals recorded by ``scripts/research/gold_study.py record <period>`` for all three periods (the live XAUUSDT store is a
+different feed; the research forward keeps the report's numbers); S7 uses the live configuration unchanged, as in
+docs/RESULTS_GOLD.md; Crowded Shorts does not apply (no funding on gold).
+Usage: PYTHONPATH=src python scripts/strategy_trades_export.py [--instrument XAUUSD] [strategy ...]
 """
 
 from __future__ import annotations
@@ -38,16 +44,30 @@ from arven.engine.grading import Grade  # noqa: E402
 from arven.engine.signal import EngineSignal, SignalVersions, TPLevel  # noqa: E402
 from arven.runs import load_inputs, make_guard  # noqa: E402
 
-OUT = Path("data/strategy_trades")
 H = 3_600_000
 LABELS = {"development": "2020 - mid 2023", "validation": "mid 2023 - 2024", "devval": "2020 - 2024", "test": "2025 - mid 2026 (sealed test)",
           "forward": "Jul 2026 - now (fresh data)"}
 TITLES = {"s4_impulse_retest": "S4 Impulse-Retest", "s5_squeeze_breakout": "S5 Squeeze-Breakout", "s6_trend_pullback": "S6 Trend-Pullback",
           "s7": "S7 Trend-Break Fib (owner's method)", "crowded_shorts": "Crowded Shorts (funding + OI)"}
 
-APP, FCFG = load_config(), load_features_config()
-GUARD = make_guard(APP)
-CFD = CostsConfig.model_validate(yaml.safe_load(Path("config/costs_cfd_justmarkets.yaml").read_text(encoding="utf-8")))
+INSTRUMENT: str | None = None  # None = BTC (the default configuration); set by ``setup`` from ``--instrument``
+
+
+def setup(instrument: str | None) -> None:
+    """The market's configuration: BTC as before, or a config/instruments overlay (gold) with its own costs and lots."""
+    global INSTRUMENT, APP, FCFG, GUARD, CFD, OUT, RULES, UNIT
+    INSTRUMENT = instrument
+    APP, FCFG = load_config(instrument=instrument), load_features_config()
+    GUARD = make_guard(APP)
+    if instrument is None:
+        CFD = CostsConfig.model_validate(yaml.safe_load(Path("config/costs_cfd_justmarkets.yaml").read_text(encoding="utf-8")))
+        OUT, RULES, UNIT = Path("data/strategy_trades"), AccountRules(), None
+    else:  # the instrument's own CFD profile; one lot step = 1 unit of the instrument (1 oz for XAUUSD)
+        CFD = APP.costs
+        OUT, RULES, UNIT = APP.market_root / "strategy_trades", AccountRules(min_lot=1.0, lot_step=1.0), "oz"
+
+
+setup(None)
 
 
 def window(period: str):
@@ -90,14 +110,15 @@ def candles(bars, t0: int, t1: int, before_h: int = 48, after_h: int = 24, cap: 
 
 def finish(sid: str, period: str, trades: list[dict], bars) -> dict:
     trades.sort(key=lambda x: x["entry_time_ms"])
-    steps = replay_account([TradeForAccount(x["risk_per_unit"], x["net_r"]) for x in trades], AccountRules())
+    steps = replay_account([TradeForAccount(x["risk_per_unit"], x["net_r"]) for x in trades], RULES)
     for n, (x, st) in enumerate(zip(trades, steps, strict=True), start=1):
-        x.update({"n": n, "size_btc": st.size, "risk_usd": st.risk_usd, "pnl_usd": st.pnl_usd, "equity_after": st.equity_after, "skipped": st.skipped,
+        size = {"size_btc": st.size} if UNIT is None else {"size": st.size, "size_unit": UNIT}
+        x.update({"n": n, **size, "risk_usd": st.risk_usd, "pnl_usd": st.pnl_usd, "equity_after": st.equity_after, "skipped": st.skipped,
                   "candles": candles(bars, x["entry_time_ms"], x["exit_time_ms"])})
     r = np.array([x["net_r"] for x in trades])
     payload = {"strategy": sid, "title": TITLES[sid], "period": period, "period_label": LABELS[period], "costs": "cfd",
                "summary": {"trades": len(trades), "win_rate": float(np.mean(r > 0)) if len(r) else 0.0, "total_r": float(r.sum()) if len(r) else 0.0,
-                           "account": summarize_account(steps, AccountRules())},
+                           "account": summarize_account(steps, RULES)},
                "trades": trades}
     (OUT / sid).mkdir(parents=True, exist_ok=True)
     (OUT / sid / f"{period}.json").write_text(json.dumps(payload, default=float), encoding="utf-8")
@@ -126,7 +147,7 @@ def replay_signals(signals: list[dict], market) -> list[dict]:
             continue
         try:
             ladder = tuple(TPLevel.from_r_multiple((p - fill) * side / risk, f, entry=fill, stop=stop, side=side) for _, f, p in rec["ladder"])
-            sig = EngineSignal(symbol="BTCUSDT", side=side, strategy_id="replay", strategy_version="v1", grade=Grade.EXPERIMENTAL, event_time_ms=t,
+            sig = EngineSignal(symbol=APP.market.symbol, side=side, strategy_id="replay", strategy_version="v1", grade=Grade.EXPERIMENTAL, event_time_ms=t,
                                entry_reference=fill, stop=stop, tp_ladder=ladder, risk_fraction=0.01, confidence=0.5, regime="replay",
                                reasons=("replay",), risk_checks=(), versions=SignalVersions("v1", "replay", None))
         except ValueError:
@@ -145,7 +166,12 @@ def replay_signals(signals: list[dict], market) -> list[dict]:
 def export_s456(sid: str) -> None:
     short = {"s4_impulse_retest": "s4", "s5_squeeze_breakout": "s5", "s6_trend_pullback": "s6"}[sid]
     for period in ("development", "validation", "forward"):
-        if period == "forward":
+        if INSTRUMENT is not None:  # gold: the research record of every period (gold_study.py record)
+            path = APP.market_root / "research" / f"signals_{period}.json"
+            if not path.exists():
+                continue
+            sigs = json.loads(path.read_text(encoding="utf-8"))["signals"][sid]
+        elif period == "forward":
             path = Path(f"data/signals/{sid}/signals.jsonl")
             sigs = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()] if path.exists() else []
             sigs = [{"event_time_ms": s["event_time_ms"], "side": s["side"], "stop": s["stop"], "ladder": s["tp_ladder"]} for s in sigs]
@@ -161,9 +187,13 @@ def export_s456(sid: str) -> None:
 
 def export_s7() -> None:
     import s7_study as st
-    cfg = json.loads(Path("data/s7_study/development.json").read_text(encoding="utf-8"))["report"]["selected"]["config"]
+    if INSTRUMENT is None:
+        cfg = json.loads(Path("data/s7_study/development.json").read_text(encoding="utf-8"))["report"]["selected"]["config"]
+    else:  # the live configuration (BTC's development selection), unchanged - as in docs/RESULTS_GOLD.md
+        from arven.core.live_config import load_live_config
+        cfg = dict(next(s.params for s in load_live_config().strategies if s.kind == "s7"))
     for period in (BacktestPeriod.DEVELOPMENT, BacktestPeriod.VALIDATION, BacktestPeriod.FORWARD):
-        study = st.Study(period)
+        study = st.Study(period, instrument=INSTRUMENT)
         tf, p, _ = st.split(cfg)
         setups = study.setups(tf, p)
         bars = study.bars[st.TFS[tf]]
@@ -201,7 +231,13 @@ def export_cs() -> None:
 
 
 def main() -> None:
-    which = sys.argv[1:] or ["s4_impulse_retest", "s5_squeeze_breakout", "s6_trend_pullback", "s7", "crowded_shorts"]
+    args = sys.argv[1:]
+    if args[:1] == ["--instrument"]:
+        setup(args[1])
+        args = args[2:]
+    which = args or ["s4_impulse_retest", "s5_squeeze_breakout", "s6_trend_pullback", "s7"] + (["crowded_shorts"] if INSTRUMENT is None else [])
+    if INSTRUMENT is not None and "crowded_shorts" in which:
+        raise SystemExit("crowded_shorts needs funding and open interest: not available for this instrument")
     for sid in which:
         {"s7": export_s7, "crowded_shorts": export_cs}.get(sid, lambda s=sid: export_s456(s))()
     index = []
