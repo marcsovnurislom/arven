@@ -16,7 +16,8 @@ from arven.live.strategies import natural_key, s7_outcome, s7_params
 
 def test_repo_live_config_is_valid_and_every_kind_is_registered():
     live = load_live_config()
-    assert [s.id for s in live.strategies] == ["s4_impulse_retest", "s5_squeeze_breakout", "s6_trend_pullback", "s7_trend_break_fib", "crowded_shorts"]
+    assert [s.id for s in live.strategies] == ["s4_impulse_retest", "s5_squeeze_breakout", "s6_trend_pullback", "s7_trend_break_fib", "s7_smc",
+                                               "crowded_shorts"]
     assert all(s.kind in KINDS for s in live.strategies)
     strategies = build_strategies(live)
     assert [s.strategy_id for s in strategies] == [s.id for s in live.enabled()]
@@ -124,3 +125,34 @@ def test_s7_overlay_is_the_setup_geometry_at_bar_close_times():
         assert ov.zone == (94.0, 96.0, "entry zone") and ov.zone_from_ms == close(24) and ov.start_ms == close(5)
     other = _signal(event_time_ms=1)
     assert strat.overlay(ctx, other) is None  # a signal whose setup is not in this tick's data
+
+
+def test_s7_smc_is_the_frozen_pre_registered_rule_on_every_market():
+    """s7_smc = the live S7 with exactly two changes - no FVG impulse and at least two different SMC zone types - the
+    rule of scripts/research/s7_smc_btc.py (committed 8be9268 before its one BTC run). Any other change needs a new id."""
+    live = load_live_config()
+    for strategies in (live.strategies, *(m.strategies for m in live.markets)):
+        by_id = {s.id: s for s in strategies}
+        base, smc = dict(by_id["s7_trend_break_fib"].params), dict(by_id["s7_smc"].params)
+        assert smc.pop("min_smc_types") == 2 and smc.pop("impulse") == "none" and base.pop("impulse") == "fvg"
+        assert smc == base and by_id["s7_smc"].version == "v1" and by_id["s7_smc"].enabled
+
+
+def test_smc_types_counts_distinct_smc_zones_but_not_levels():
+    from types import SimpleNamespace
+
+    from arven.live.strategies import smc_types
+
+    z = lambda k: SimpleNamespace(kind=k)  # noqa: E731
+    assert smc_types(SimpleNamespace(confluence=(z("level"), z("level")))) == 0
+    assert smc_types(SimpleNamespace(confluence=(z("fvg"), z("fvg"), z("level")))) == 1
+    assert smc_types(SimpleNamespace(confluence=(z("fvg"), z("ifvg"), z("level")))) == 2
+    assert smc_types(SimpleNamespace(confluence=(z("fvg"), z("ifvg"), z("order_block")))) == 3
+
+
+def test_min_smc_types_is_validated():
+    s7 = dict(next(s for s in load_live_config().strategies if s.kind == "s7").params)
+    s7_params(s7 | {"min_smc_types": 2})
+    for bad in (4, -1, "2"):
+        with pytest.raises(ValueError, match="min_smc_types"):
+            s7_params(s7 | {"min_smc_types": bad})

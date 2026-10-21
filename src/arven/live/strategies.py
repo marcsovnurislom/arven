@@ -82,13 +82,24 @@ S7_HIGHER = {"15m": Timeframe.H1, "1h": Timeframe.H4, "4h": None}
 S7_DETECTOR_KEYS = {"min_touches", "freeze_pullback", "count_every_touch", "level0_range_bottom", "skip_beyond_line_start",
                     "break_on_cross", "line_from_major_high", "shallow_zone"}
 S7_TRADE_KEYS = {"entry", "stop", "breakeven_after_tp1", "min_tp1_r", "management"}
+# setup filter (live only, 2026-10-22): keep a setup only if at least this many *different* SMC zone types overlap its
+# entry zone at the arming close - the rule pre-registered and checked once on BTC in scripts/research/s7_smc_btc.py
+S7_FILTER_KEYS = {"min_smc_types"}
+SMC_KINDS = ("fvg", "ifvg", "order_block")
+
+
+def smc_types(s: S7Setup) -> int:
+    """How many different SMC zone types (FVG, iFVG, order block) the setup's confluence has (prior levels not counted)."""
+    return len({z.kind for z in s.confluence if z.kind in SMC_KINDS})
 
 
 def s7_params(params: dict[str, Any]) -> tuple[str, S7Params, S7TradeParams]:
     """The study's configuration dict (``scripts/s7_study.py`` ``split``) -> detector and trade parameters."""
-    unknown = set(params) - S7_DETECTOR_KEYS - S7_TRADE_KEYS - {"tf", "impulse"}
+    unknown = set(params) - S7_DETECTOR_KEYS - S7_TRADE_KEYS - S7_FILTER_KEYS - {"tf", "impulse"}
     if unknown:
         raise ValueError(f"unknown S7 params: {sorted(unknown)}")
+    if params.get("min_smc_types", 0) not in (0, 1, 2, 3):
+        raise ValueError("S7 min_smc_types must be 0, 1, 2 or 3")
     if params.get("tf") not in S7_TFS:
         raise ValueError(f"S7 tf must be one of {sorted(S7_TFS)}")
     impulse = params.get("impulse", "none")
@@ -109,6 +120,7 @@ class S7Strategy:
         self.version = cfg.version
         self.params_hash = cfg.params_hash()
         self.tf, self.p, self.tp = s7_params(cfg.params)
+        self.min_smc_types = int(cfg.params.get("min_smc_types", 0))
 
     def _state(self, ctx: LiveContext) -> dict[str, Any]:
         """Setups since the forward start, their planned signals and the simulator context - once per tick."""
@@ -118,7 +130,8 @@ class S7Strategy:
             b = ctx.bars[tf]
             close_ms = b.open_time_ms + tf.ms
             found = detect_setups(b.open, b.high, b.low, b.close, self.p, volume=b.volume)
-            setups = [s for s in found if ctx.window.start_ms <= int(close_ms[s.arm_index]) <= ctx.through_ms]
+            setups = [s for s in found if ctx.window.start_ms <= int(close_ms[s.arm_index]) <= ctx.through_ms
+                      and smc_types(s) >= self.min_smc_types]
             higher = S7_HIGHER[self.tf]
             sim = make_context(S7Bars.from_series(b), S7Bars.from_series(ctx.bars[S7_LOWER[self.tf]]), ctx.market, ctx.costs, self.p, self.tp,
                                higher=None if higher is None else S7Bars.from_series(ctx.bars[higher]), calendar=ctx.app.session_calendar())

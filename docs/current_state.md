@@ -124,6 +124,15 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    is unchanged (all old tests pass as they were). Cyrillic on the picture needs a system font (`chart.cyrillic_font`:
    DejaVu / Arial / Segoe UI / Liberation; on Linux `fonts-dejavu-core`), otherwise the picture falls back to English.
    Tests: `tests/telegram/test_ru.py` (30) + 1 live-tick test.
+11. **S7-SMC as a frozen paper forward check (2026-10-22, owner: "start with point 1").** New live strategy `s7_smc`
+   (BTC and gold, `config/live.yaml`): the live S7 with exactly the two changes pre-registered in
+   `scripts/research/s7_smc_btc.py` (`8be9268`) - `impulse: none` and the new S7 setup filter `min_smc_types: 2`
+   (`arven.live.strategies.smc_types`: distinct FVG / iFVG / order-block zones overlapping the entry zone; default 0 =
+   the old S7 unchanged). A test pins the params to the live S7's except those two, on every market. Parity on real
+   BTC data: the live strategy finds exactly the research check's 9 forward setups. Clean, never-seen evidence starts
+   2026-10-22 (July-October forward was already looked at: 7 trades, -1.3 R) - judge it on signals from that date on,
+   with the forward review rule (30 closed signals). Expected pace (from the history): BTC ~0.6 setups a week (9 in
+   16 weeks), gold ~0.3 trades a week (validation 24 in 18 months) - 30 closed signals take roughly half a year or more.
 
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - to be confirmed on the full history.

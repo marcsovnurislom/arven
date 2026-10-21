@@ -71,6 +71,32 @@ strategies:
       line_from_major_high: false
       shallow_zone: true
       management: V0
+  - id: s7_smc
+    kind: s7
+    title: S7-SMC (no FVG impulse, 2+ SMC zone types in the entry zone)
+    enabled: true
+    version: v1
+    # Frozen forward check, added 2026-10-22: the rule pre-registered in scripts/research/s7_smc_btc.py (commit 8be9268)
+    # and checked once on BTC (dev +31.1 R, val +8.5 R, verdict "not supported" - just below the random-entry bar).
+    # Do not change these params; a new idea gets a new id. Clean, never-seen data starts on 2026-10-22 (the July-October
+    # forward part was already looked at in that check: 7 trades, -1.3 R).
+    params:
+      tf: 15m
+      min_touches: 3
+      impulse: none
+      freeze_pullback: 0.382
+      entry: E3
+      stop: S1
+      breakeven_after_tp1: false
+      min_tp1_r: null
+      count_every_touch: false
+      level0_range_bottom: false
+      skip_beyond_line_start: true
+      break_on_cross: false
+      line_from_major_high: false
+      shallow_zone: true
+      management: V0
+      min_smc_types: 2
   - id: crowded_shorts
     kind: crowded_shorts
     title: Crowded Shorts (funding + OI)
@@ -129,3 +155,25 @@ markets:
           line_from_major_high: false
           shallow_zone: true
           management: V0
+      - id: s7_smc
+        kind: s7
+        title: S7-SMC (no FVG impulse, 2+ SMC zone types in the entry zone)
+        enabled: true
+        version: v1
+        params:                 # identical to the BTC s7_smc entry above (frozen; gold check: dev +3.3 R, val +7.3 R)
+          tf: 15m
+          min_touches: 3
+          impulse: none
+          freeze_pullback: 0.382
+          entry: E3
+          stop: S1
+          breakeven_after_tp1: false
+          min_tp1_r: null
+          count_every_touch: false
+          level0_range_bottom: false
+          skip_beyond_line_start: true
+          break_on_cross: false
+          line_from_major_high: false
+          shallow_zone: true
+          management: V0
+          min_smc_types: 2
