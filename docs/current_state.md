@@ -68,9 +68,21 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    impulse + 2+ SMC zone types, stop fib 0.1 - dev 96 trades +31.1 R, val 48 +8.5 R (mean +0.177 vs random p95 +0.212),
    x4 +11.2 / +2.8 R, forward 7 -1.3 R -> **verdict "not supported"** (just below the random-control bar). Strongest S7
    lead so far; only a forward check of the unchanged rule can settle it;
-6. **open (owner):** enable gold in `live.yaml` as a paper forward check (recommended) and restart the live process;
-   verify the XAUUSD spread on the JustMarkets terminal; gold trades on the web need `strategy_trades_export.py` to
-   learn markets (BTC-only today); re-run Playwright; merge decision.
+6. **Finished 2026-10-21 (owner: "start with point 1"):**
+   - gold live **on** (`config/live.yaml` market XAUUSDT `enabled: true`, paper only). Live process stopped with the
+     stop file, `arven --instrument XAUUSDT live tick` back-filled the forward period (S4 5 / S5 14 / S6 128 / S7 20
+     signals; live S7 gold -1.26 R vs research +2.9 R - different feeds, XAUUSDT vs Dukascopy), restarted via the
+     "ARVEN Live" task; its start line lists the Gold strategies;
+   - `scripts/strategy_trades_export.py --instrument XAUUSD` -> `data/markets/XAUUSD/strategy_trades/` (gold CFD
+     profile, 1 oz lots as `size`/`size_unit`, research signals of all periods, S7 live config, no Crowded Shorts).
+     Totals equal docs/RESULTS_GOLD.md exactly; BTC development/validation output byte-identical to before;
+   - the "ARVEN Web" process (running since 2026-10-16, older than the BTC/Gold switch) restarted and `web/dist`
+     rebuilt: `/api/strategy_trades?market=gold` serves the gold trades;
+   - Playwright: one flaky failure ("S7 check" key right after a save) traced to a real UI race - the key handler was
+     swapped in a passive effect after the next setup was painted; now `useLayoutEffect`. Full e2e **72 passed**,
+     4 skipped (screenshots);
+   - `feat/gold-xauusd` fast-forwarded into `main` and pushed.
+   **Still open (owner):** verify the XAUUSD spread on the JustMarkets terminal.
 
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - to be confirmed on the full history.
