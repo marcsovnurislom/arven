@@ -89,7 +89,7 @@ markets:
   - instrument: XAUUSDT
     title: Gold
     history_instrument: XAUUSD  # Dukascopy history 2020 -> (research, charts before the XAUUSDT listing)
-    enabled: false              # switched on once the gold history is ingested and verified
+    enabled: true               # on since 2026-10-21: history ingested and verified (docs/RESULTS_GOLD.md); paper forward check
     cost_profile: costs_cfd_justmarkets_xauusd.yaml
     include_open_interest: false
     run_legacy_paper: true      # the hourly S1-S3 paper run for gold as well
