@@ -14,7 +14,10 @@ fees:
   stop_order_type: taker
 slippage:
   model: fixed_plus_volatility
-  fixed_bps: 1.0                # half of a ~2 bps round-trip spread, per side (placeholder until set from the data)
+  # Set from the data (gold_study.py crosscheck, 2026-10-21; data/markets/XAUUSD/research/crosscheck.json): Dukascopy
+  # median ask - bid by year 2.19 / 1.99 / 2.04 / 1.70 / 1.59 / 1.74 / 1.51 bps (2020 ... 2026), p90 1.9-4.6. 1.0 bps per
+  # side = a 2.0 bps round trip: the 2020-2022 typical spread, slightly above the 2023-2026 one (deliberately conservative).
+  fixed_bps: 1.0                # per side
   volatility_multiplier: 0.0    # spread only; the stress run below covers widened spreads and stop slippage
   stress_multiplier: 4.0
 funding:
