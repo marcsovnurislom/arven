@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { api, type S7Label, type S7Setup } from "../api";
 import type { ChartLine, ChartMarker, ChartOverlay } from "../CandleChart";
 import { useI18n } from "../i18n";
@@ -64,7 +64,9 @@ export function S7Review() {
     }
   }, [s, note, saving, setups.length]);
 
-  useEffect(() => {
+  // layout effect: the handler is swapped before the browser paints the next setup, so a key pressed right after a save
+  // never reaches the previous render's handler (its `saving` and setup are stale)
+  useLayoutEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).tagName === "TEXTAREA") return;
       const k = e.key.toLowerCase();
