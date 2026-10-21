@@ -63,7 +63,11 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    (touches 3/2 x impulse fvg/none x stops F0/F01/F02/F03/S2/C0 x zones all/fvg/ifvg/ob/any/2+ SMC); none positive on
    validation under x4 costs; the pick (t2|none|F0|2plus_smc) dev +20.3 R -> val -2.5 R. Only lead: "2+ SMC zone types
    in the entry zone" (6 of the 9 dev+val-positive configs, all without the FVG impulse) - found after seeing
-   validation, so it needs BTC as one pre-registered hypothesis (owner's call);
+   validation, so it needs BTC as one pre-registered hypothesis (owner's call). **BTC check run once 2026-10-21**
+   (`scripts/research/s7_smc_btc.py`, rule committed in `8be9268`, logged in `data/s7_study/evaluations.log`): no FVG
+   impulse + 2+ SMC zone types, stop fib 0.1 - dev 96 trades +31.1 R, val 48 +8.5 R (mean +0.177 vs random p95 +0.212),
+   x4 +11.2 / +2.8 R, forward 7 -1.3 R -> **verdict "not supported"** (just below the random-control bar). Strongest S7
+   lead so far; only a forward check of the unchanged rule can settle it;
 6. **open (owner):** enable gold in `live.yaml` as a paper forward check (recommended) and restart the live process;
    verify the XAUUSD spread on the JustMarkets terminal; gold trades on the web need `strategy_trades_export.py` to
    learn markets (BTC-only today); re-run Playwright; merge decision.
