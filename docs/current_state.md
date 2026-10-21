@@ -22,13 +22,21 @@ XAUUSDT; signals only while the CME metals market is open; spread "typical value
   Telegram labels/commands/reports, backups of `data/markets/`, web BTC/Gold switch (`market=` on the API). Playwright:
   70/72 passed on the last full run; 2 phone tests timed out while memory was short - **re-run when memory allows**.
 
-**Running:** the Dukascopy download as a separate hidden process (log `data/tmp/duka_download.log`; ~770 of ~4970
-files on 2026-10-19 - the feed was very slow over the weekend). Re-run the same command to resume:
+**Done 2026-10-21:** the Dukascopy download (2020-01-01 -> 2026-10-19) is complete after five resumed passes (the
+feed answered 503 / timeouts for ~40 % of requests): 4 966 of 4 966 files (BID 2 483, ASK 2 483), 0 failed,
+0 not available, no `.part` or empty files, 66 MB. Logs `data/tmp/duka_download*.log`. Resume command for later days:
 `python -m arven --instrument XAUUSD duka download --start 2020-01-01 --end <today>`. Background shells inside the
 Claude session get stopped when memory is low (7.2 GB machine) - launch long jobs as separate processes.
 
 **Next, in order:**
-1. download complete -> `python scripts/research/gold_closures.py --write` (review UNMATCHED lines) -> commit the CSV;
+1. ~~download complete -> `gold_closures.py --write` -> commit the CSV~~ **done 2026-10-21**: 87 rows (71 observed
+   2020-01 -> 2026-09, 16 projected through 2027). One UNMATCHED run left out as a feed gap (2024-10-09 23:06 -> 00:11
+   UTC, 65 min after the daily reopen). Fix in the script first (test `tests/unit/test_gold_closures.py`): a
+   Friday-to-Monday closure was labelled with an eve that fell on the Sunday (2023), and Christmas observed on the 24th
+   (2021) was overwritten by "Christmas Eve" - projected, those patterns would have closed ordinary trading days
+   22-24 and 29-31 December 2026/2027. Christmas Eve / New Year's Eve now have no own pattern (their early closes are
+   part of the Christmas / New Year runs). Two observed ends run a few minutes past the 23:00 reopen (2021-11-25 23:18,
+   2025-12-25 23:04: quiet feed minutes) - kept, harmless (a few NO_TRADE minutes);
 2. `duka ingest`, `resample`, `quality` (all with `--instrument XAUUSD`), then Binance XAUUSDT
    (`--instrument XAUUSDT ingest --start 2025-12-01 ...`, `resample`, `crosscheck`); DB writes collide briefly with the
    live process (it opens the DB for each tick) - one failed tick is retried;
@@ -40,6 +48,34 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
 
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - to be confirmed on the full history.
+
+## S7 owner-label outcomes (2026-10-21, analysis only, nothing changed)
+
+Owner asked how the setups they marked "my pattern / unsure / not mine" in the two review rounds actually traded.
+One-off script `data/tmp/s7_label_outcomes.py` (git-ignored; output `data/tmp/s7_label_outcomes.json`): 171 of 191
+labels re-detected with their round's detector parameters (matched by id and levels), each simulated on its own (no
+one-trade-at-a-time), CFD costs, $1000 / 1 % account replay per group. All setups are development-period (2020-2023.07).
+
+| Trade plan | yes (39 setups) | unsure (113) | no (19) |
+|---|---|---|---|
+| live E3/S1 | 19 tr, win 47 %, +2.40 R, $1002 | 57 tr, 58 %, +10.91 R, $1145 | 9 tr, 22 %, -3.11 R, $953 |
+| baseline E1/S2 | 15 tr, 80 %, +7.07 R, $1094 | 45 tr, 44 %, +4.62 R, $1104 | 8 tr, 25 %, -1.32 R, $1010 |
+| E3/S3 (close) | 19 tr, 58 %, +1.19 R, $1070 | 57 tr, 42 %, +1.32 R, $1001 | 9 tr, 56 %, -0.23 R, $1030 |
+
+"no" is the worst group under every plan, but the samples are tiny (8-19 trades): only yes+E1/S2 has a 95 % bootstrap
+interval above 0 (+0.05..+0.87 R), one cell of nine and in-sample - a lead, not evidence. The labelled setups are the
+baseline detector's (no FVG, freeze 0.236), not the live configuration's.
+
+## S7 position-sizing study (2026-10-21, analysis only, strategy unchanged)
+
+`scripts/research/s7_risk_study.py` -> `data/s7_study/risk_study.json`: the exported S7 trades (dev 167 / val 102 /
+forward 21, CFD) replayed on $1000 with fixed 0.25-5 %, a drawdown brake (half risk below -10 %, quarter below -20 %) and
+half Kelly fitted on development (7.9 %), plus a seeded 100-trade bootstrap. Mean R dev +0.285, val+forward -0.084.
+Continuous 2020 -> 2026-10: 0.5 % $1179 (DD 10 %), 1 % $1331 (DD 17 %), 2 % $1845 (DD 35 %), 5 % $3455 (DD 70 %),
+half Kelly $4382 (DD 86 %); validation+forward alone: 0.5 % $940, 1 % $874, 2 % $798, half Kelly $270. With 0.01 BTC
+lots a $1000 account cannot size below ~0.35 % on average (single trades up to 2 %). Sizing does not create an edge:
+every rule loses out of sample; the larger the risk, the larger the loss. Recommendation given to the owner: no real
+money; paper at 0.25-0.5 %; 0.5-1 % with the drawdown brake only after an out-of-sample edge is shown; never > 2 %.
 
 ## Phase
 
