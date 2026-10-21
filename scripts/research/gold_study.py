@@ -17,6 +17,8 @@ Steps (``python scripts/research/gold_study.py <step> [period]``; periods: devel
     s7rules               S7 "range before the break -> stop fib 0.3", management variants, SMC zone filters, random
                           control and breakdowns, on all three periods
     s7select              S7's 14-question selection re-run on gold development; the result checked on validation/forward
+    s7full <period>       S7 grid: touches {3,2} x impulse {fvg,none} x 6 stops x SMC zone filters (FVG/iFVG/OB), CFD and x4
+    s7full_select         the pre-registered pick on development (max mean R, >= 50 trades), validation/forward read once
 S1-S3 as the full Stage 5 pipeline (decision + risk engine) and its baselines run through the CLI:
     python -m arven --instrument XAUUSD features build
     python -m arven --instrument XAUUSD backtest run --provider pipeline --period development|validation [--stress]
@@ -568,6 +570,95 @@ def s7select() -> None:
     save("s7select.json", out)
 
 
+# --- S7: full grid - touches x impulse x stop x SMC zone filter ----------------------------------------------------
+# Pre-registered 2026-10-21, before the first run (owner: "full S7 report: different stops, extra zones iFVG / FVG /
+# order blocks, and S7 with two touches of the line; gold first, BTC if it shows something"):
+# - grid: min_touches {3, 2} x break impulse {fvg (live), none} x stop {F0, F01 (live), F02, F03, S2, C0} x zone filter
+#   below; everything else is the live configuration (15m, E3 limit at fib 0.5, TP fib 1.0 / 1.272-1.618 / 2.0 at
+#   50/30/20 %, no breakeven, one trade at a time), CFD costs and x4;
+# - zone filters use only the setup's confluence zones (known at the arming close, overlapping the entry zone);
+# - selection: on development CFD only, the highest mean R among configurations with >= 50 trades (ties: more trades);
+#   validation and forward are then read once for that configuration, with x4 costs, a bootstrap CI and the
+#   random-entry control. The whole grid is reported for every period, with how many configurations are positive.
+
+FULL_STOPS = ("F01", "F0", "F02", "F03", "S2", "C0")
+SMC = ("fvg", "ifvg", "order_block")
+FULL_ZONES = {
+    "all": lambda s: True,
+    "fvg": lambda s: any(z.kind == "fvg" for z in s.confluence),
+    "ifvg": lambda s: any(z.kind == "ifvg" for z in s.confluence),
+    "ob": lambda s: any(z.kind == "order_block" for z in s.confluence),
+    "any_smc": lambda s: any(z.kind in SMC for z in s.confluence),
+    "2plus_smc": lambda s: len({z.kind for z in s.confluence if z.kind in SMC}) >= 2,
+}
+FULL_MIN_TRADES = 50
+
+
+def full_key(touches: int, impulse: str, stop: str, zone: str) -> str:
+    return f"t{touches}|{impulse}|{stop}|{zone}"
+
+
+def s7full(period: str) -> None:
+    study = st.Study(PERIODS[period], instrument=INSTRUMENT, config_dir=CONFIG_DIR)
+    sim.stop_price, sim.management_plan = _grid_stop, _grid_mgmt
+    out: dict[str, Any] = {"period": period, "grid": {}, "setups": {}}
+    try:
+        for touches in (3, 2):
+            for impulse in ("fvg", "none"):
+                tf, p, _ = st.split(dict(S7_CFG, impulse=impulse, min_touches=touches))
+                setups = study.setups(tf, p)
+                subsets = {z: [s for s in setups if keep(s)] for z, keep in FULL_ZONES.items()}
+                out["setups"][f"t{touches}|{impulse}"] = {z: len(v) for z, v in subsets.items()}
+                print(period, f"touches={touches} impulse={impulse}", {z: len(v) for z, v in subsets.items()}, flush=True)
+                for stop in FULL_STOPS:
+                    CUR.update(stop=stop, tp3=2.0, after=None)
+                    for zone, chosen in subsets.items():
+                        row = {}
+                        for c, stress in (("cfd", False), ("x4", True)):
+                            outs = sim.run_setups(study.context(tf, p, _grid_tp(), "cfd", stress), chosen)
+                            row[c] = _stats([o.net_r for o in outs if o.status == "trade"]) | {"setups": len(chosen)}
+                            if c == "cfd":
+                                row["account_1pct"] = _account(outs)
+                        out["grid"][full_key(touches, impulse, stop, zone)] = row
+        save(f"s7full_{period}.json", out)
+    finally:
+        sim.stop_price, sim.management_plan = _ORIG_STOP, _ORIG_MGMT
+
+
+def s7full_select() -> None:
+    """The pre-registered selection on development, then validation / forward read once (see the block comment)."""
+    grids = {p: load(f"s7full_{p}.json")["grid"] for p in PERIODS}
+    dev = grids["development"]
+    eligible = [k for k, v in dev.items() if v["cfd"].get("n", 0) >= FULL_MIN_TRADES]
+    best = max(eligible, key=lambda k: (dev[k]["cfd"]["mean_r"], dev[k]["cfd"]["n"]))
+    touches, impulse, stop, zone = best.split("|")
+    touches_n = int(touches[1:])
+    out: dict[str, Any] = {"rule": f"max mean R on development CFD, >= {FULL_MIN_TRADES} trades", "eligible": len(eligible),
+                           "configurations": len(dev), "selected": best, "periods": {}}
+    rng = np.random.default_rng(st.SEED)
+    sim.stop_price, sim.management_plan = _grid_stop, _grid_mgmt
+    try:
+        for period, pk in PERIODS.items():
+            g = grids[period]
+            positive = {c: sum(1 for v in g.values() if v[c].get("n", 0) and v[c]["total_r"] > 0) for c in ("cfd", "x4")}
+            study = st.Study(pk, instrument=INSTRUMENT, config_dir=CONFIG_DIR)
+            tf, p, _ = st.split(dict(S7_CFG, impulse=impulse, min_touches=touches_n))
+            chosen = [s for s in study.setups(tf, p) if FULL_ZONES[zone](s)]
+            CUR.update(stop=stop, tp3=2.0, after=None)
+            outs = sim.run_setups(study.context(tf, p, _grid_tp(), "cfd", False), chosen)
+            rs = np.array([o.net_r for o in outs if o.status == "trade"])
+            ci = np.percentile([rng.choice(rs, len(rs)).mean() for _ in range(4000)], [2.5, 97.5]).tolist() if len(rs) else None
+            out["periods"][period] = {"selected": g[best], "mean_r_ci95": ci,
+                                      "random_control_cfd": st.random_control(study, outs, study.costs["cfd"], 200),
+                                      "positive_configs": positive, "configs_with_trades": sum(1 for v in g.values() if v["cfd"].get("n", 0))}
+            v = g[best]["cfd"]
+            print(f"{period:11s} {best}: n={v.get('n')} R={v.get('total_r', 0):+.2f} mean={v.get('mean_r', 0):+.3f} CI={ci} "
+                  f"x4 R={g[best]['x4'].get('total_r', 0):+.2f}  positive configs cfd {positive['cfd']}/{len(g)} x4 {positive['x4']}/{len(g)}", flush=True)
+    finally:
+        sim.stop_price, sim.management_plan = _ORIG_STOP, _ORIG_MGMT
+    save("s7full_select.json", out)
+
+
 def main() -> None:
     step = sys.argv[1]
     t0 = time.perf_counter()
@@ -585,6 +676,10 @@ def main() -> None:
         s7rules()
     elif step == "s7select":
         s7select()
+    elif step == "s7full":
+        s7full(sys.argv[2])
+    elif step == "s7full_select":
+        s7full_select()
     else:
         raise SystemExit(__doc__)
     print(f"{step} finished in {time.perf_counter() - t0:.0f}s")
