@@ -170,3 +170,51 @@ def test_update_label_names_the_exit_reason():
 
     assert update_label(SignalUpdate("s", 0, SignalUpdateKind.CLOSED, "reason=STOP;fraction=1.00000000")) == "Closed: STOP"
     assert update_label(SignalUpdate("s", 0, SignalUpdateKind.TP_HIT, "TP1")) == "TP hit"
+
+
+# --- a strategy's own drawing (S7: trend line, fib levels, entry zone) ------------------------------------------------
+
+
+def _overlay(t_start: int, t_end: int):
+    from arven.telegram.chart import ChartOverlay
+
+    return ChartOverlay(lines=((t_start, 95.0, t_end, 99.0, "trend line"),), points=((t_end, 99.0),),
+                        levels=((98.5, "fib 0"), (100.0, "fib 0.5")), zone=(99.5, 100.5, "entry zone"), zone_from_ms=t_end, start_ms=t_start)
+
+
+def test_the_overlay_is_drawn_and_widens_the_window_back_to_its_start():
+    s = _signal_at(180)
+    t, o, h, lo, c = _bars()
+    start = int(t[20]) + M15  # 160 candles before the signal: more than the default one-day window
+    plain = candles_until(t, M15, o, h, lo, c, s.event_time_ms, "15m")
+    wide = candles_until(t, M15, o, h, lo, c, s.event_time_ms, "15m", since_ms=start)
+    assert len(plain.close) == 96 and wide.close_ms[0] < start and len(wide.close) == 169
+    capped = candles_until(t, M15, o, h, lo, c, s.event_time_ms, "15m", since_ms=int(t[0]))
+    assert len(capped.close) == 181 and capped.close_ms[-1] == s.event_time_ms  # all there are (cap is 240)
+    ov = _overlay(start, int(t[150]) + M15)
+    with_ov = render_signal_chart(s, wide, chart_title(s), overlay=ov)
+    assert with_ov.startswith(PNG_MAGIC) and with_ov != render_signal_chart(s, wide, chart_title(s))
+
+
+def test_a_line_starting_before_the_window_is_clipped_to_it():
+    from arven.telegram.chart import _clip_segment
+
+    s = _signal_at(120)
+    cand = _candles(s.event_time_ms)
+    first = int(cand.close_ms[0])
+    seg = _clip_segment(cand, (first - 10 * M15, 90.0, first + 10 * M15, 100.0, "x"))
+    assert seg is not None and seg[0] == 0.0 and abs(seg[1] - 95.0) < 1e-9 and abs(seg[2] - 10.0) < 1e-9 and seg[3] == 100.0
+    assert _clip_segment(cand, (first - 20 * M15, 90.0, first - 10 * M15, 100.0, "x")) is None  # wholly before the window
+
+
+def test_the_overlay_never_needs_bars_after_the_signal():
+    """The overlay is drawn on the same no-look-ahead candles: later bars still do not change the picture."""
+    t, o, h, lo, c = _bars()
+    s = _signal_at(120)
+    ov = _overlay(int(t[60]) + M15, int(t[110]) + M15)
+    later = c.copy()
+    later[121:] -= 40.0
+    a = render_signal_chart(s, candles_until(t, M15, o, h, lo, c, s.event_time_ms, "15m", since_ms=ov.start_ms), chart_title(s), overlay=ov)
+    b = render_signal_chart(s, candles_until(t, M15, o, h, np.minimum(lo, later), later, s.event_time_ms, "15m", since_ms=ov.start_ms),
+                            chart_title(s), overlay=ov)
+    assert a == b

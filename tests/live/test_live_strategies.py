@@ -90,3 +90,37 @@ def test_two_legs_are_tagged():
     f2 = S7Fill(0.5, 1_600_000, 99.0, 98.0, (102.0,), (1.0,), (), False)
     out = s7_outcome(sig, S7Outcome(0, "unresolved", entry_time_ms=1_500_000, fills=(f1, f2)))
     assert [u.detail for u in out.updates] == ["price=100.00000000;weight=0.5;leg=1", "price=99.00000000;weight=0.5;leg=2"]
+
+
+def test_s7_overlay_is_the_setup_geometry_at_bar_close_times():
+    """The picture's S7 drawing (docs/FEATURES_PLAN.md H5) comes straight from the setup: the trend line from its first
+    anchor to the break, the touches on the highs (long) / lows (short), fib 0 / 0.5 / 1 and the entry zone from fib 1 on."""
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    from arven.core.live_config import LiveStrategyConfig
+    from arven.core.timeframes import Timeframe
+    from arven.live.strategies import S7Strategy
+
+    s7 = next(s for s in load_live_config().strategies if s.kind == "s7")
+    strat = S7Strategy(LiveStrategyConfig(id="s7x", kind="s7", params=s7.params))
+    t0, m15 = 1_782_864_000_000, 15 * 60_000
+    n = 40
+    bars = SimpleNamespace(open_time_ms=t0 + np.arange(n) * m15, high=100.0 + np.arange(n), low=50.0 + np.arange(n))
+    for side, touch_prices in ((1, bars.high), (-1, bars.low)):
+        line = SimpleNamespace(a_index=5, a_price=120.0, at=lambda i: 120.0 - 0.5 * (i - 5))
+        fibs = {0.0: 90.0, 0.5: 95.0, 1.0: 100.0}
+        setup = SimpleNamespace(side=side, line=line, cross_index=20, touches=(5, 11, 17), fib=fibs.__getitem__,
+                                zone_low=94.0, zone_high=96.0, level0_index=8, level1_index=24)
+        sig = _signal(side=side, entry_reference=95.0, stop=90.0 if side == 1 else 101.0,
+                      tp_ladder=(TPLevel(1.0, 1.0, 100.0 if side == 1 else 89.0),))
+        ctx = SimpleNamespace(bars={Timeframe.M15: bars}, cache={f"s7:{strat.strategy_id}": {"by_key": {natural_key(sig): setup}}})
+        ov = strat.overlay(ctx, sig)
+        close = lambda i: t0 + (i + 1) * m15  # noqa: E731
+        assert ov.lines == ((close(5), 120.0, close(20), 112.5, "trend line"),)
+        assert ov.points == tuple((close(i), float(touch_prices[i])) for i in (5, 11, 17))
+        assert ov.levels == ((90.0, "fib 0"), (95.0, "fib 0.5"), (100.0, "fib 1"))
+        assert ov.zone == (94.0, 96.0, "entry zone") and ov.zone_from_ms == close(24) and ov.start_ms == close(5)
+    other = _signal(event_time_ms=1)
+    assert strat.overlay(ctx, other) is None  # a signal whose setup is not in this tick's data

@@ -194,7 +194,9 @@ You get:
 - **Updates:** filled, TP hit, stop moved, cancelled, closed.
 - **Pictures** (`telegram.charts: true`, 2026-10-22): every new signal and update goes out as a PNG with the text as
   its caption - the 15m candles closed by that moment (never later ones), entry / stop / take-profit lines with their
-  prices, the risk and reward areas, and the event's mark ("Closed: STOP"). If the picture cannot be drawn or sent,
+  prices, the risk and reward areas, and the event's mark ("Closed: STOP"). S7 pictures also show the broken trend
+  line with its touches, fib 0 / 0.5 / 1 and the entry zone (the window widens to show the whole line, up to 240
+  candles). If the picture cannot be drawn or sent,
   or the text is longer than Telegram's 1024-character caption, the text goes out alone - an alert is never lost.
   Pictures are files in `data/telegram/charts/` (one per signal and event, shared by all chats).
 - **A daily summary.**

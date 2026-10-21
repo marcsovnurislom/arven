@@ -192,14 +192,18 @@ def run_live_tick(
     alerts: list[tuple[str, str, str]] = []  # (signal_id, event_type, text)
     charts_on = live.telegram.enabled and live.telegram.charts and bool(chat_ids)
 
-    def picture(s: EngineSignal, event_type: str, u: Any = None) -> None:
-        """The alert's picture, from the 15m candles closed by the signal (or the update) - never later ones."""
+    def picture(strat: LiveStrategy, s: EngineSignal, event_type: str, u: Any = None) -> None:
+        """The alert's picture, from the 15m candles closed by the signal (or the update) - never later ones - with
+        the strategy's own drawing if it has one (S7: trend line, fib levels, entry zone)."""
         if not charts_on:
             return
         try:
             cut = s.event_time_ms if u is None else u.time_ms
-            c = candles_until(m15.open_time_ms, Timeframe.M15.ms, m15.open, m15.high, m15.low, m15.close, cut, "15m")
-            png = render_signal_chart(s, c, chart_title(s, u), update=u, update_label=None if u is None else update_label(u))
+            draw = getattr(strat, "overlay", None)
+            ov = draw(ctx, s) if draw is not None else None
+            c = candles_until(m15.open_time_ms, Timeframe.M15.ms, m15.open, m15.high, m15.low, m15.close, cut, "15m",
+                              since_ms=None if ov is None else ov.start_ms)
+            png = render_signal_chart(s, c, chart_title(s, u), update=u, update_label=None if u is None else update_label(u), overlay=ov)
             save_chart(charts_dir(app.data.data_dir), s.signal_id, event_type, png)
             outcome.charts += 1
         except Exception as exc:  # noqa: BLE001 - the picture is optional; the alert still goes out as text
@@ -235,10 +239,10 @@ def run_live_tick(
                     append_update(signals_root, sid, u)
                     st.new_updates += 1
                     if live.telegram.send_updates and now_ms - u.time_ms <= recency_ms:
-                        picture(s, _update_event_type(u), u)
+                        picture(strat, s, _update_event_type(u), u)
                         update_alerts.append((s.signal_id, _update_event_type(u), format_signal_update(s, u)))
             for s in fresh:  # same order as before: the strategy's new signals, then its updates
-                picture(s, "new_signal")
+                picture(strat, s, "new_signal")
                 alerts.append((s.signal_id, "new_signal", format_new_signal(s, track_record(st.outcomes, window.start_ms, s.signal_id))))
             alerts.extend(update_alerts)
         except Exception as exc:  # noqa: BLE001 - one strategy's failure must not stop the others

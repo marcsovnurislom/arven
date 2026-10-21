@@ -36,6 +36,7 @@ from arven.engine.strategy_s7 import S7Params, S7Setup, detect_setups
 from arven.engine.strategy_s7_plan import S7TradeParams, ladder_r, limit_orders, management_plan, stop_price
 from arven.live.base import LiveContext, LiveOutcome
 from arven.paper.strategies_forward import event_times, process_events, resolve_signal
+from arven.telegram.chart import ChartOverlay
 
 SYMBOL_RISK_FRACTION = 0.01  # the owner's rule: 1 % of equity at the stop
 HOUR_MS = 3_600_000
@@ -170,6 +171,24 @@ class S7Strategy:
         if s is None:
             return None  # the setup is not in this tick's data (e.g. armed before the forward window)
         return s7_outcome(signal, simulate_setup(st["sim"], s, st["setups"].index(s)))
+
+    def overlay(self, ctx: LiveContext, signal: EngineSignal) -> ChartOverlay | None:
+        """The setup behind ``signal`` for its alert picture: the broken trend line and its touches, fib 0 / 0.5 / 1
+        and the entry zone - all known at the arming close (``None`` if the setup is not in this tick's data)."""
+        st = self._state(ctx)
+        s = st["by_key"].get(natural_key(signal))
+        if s is None:
+            return None
+        b, tf_ms = ctx.bars[S7_TFS[self.tf]], S7_TFS[self.tf].ms
+        t = lambda i: int(b.open_time_ms[i]) + tf_ms  # noqa: E731 - bar close times, as the picture's candles
+        touches = tuple((t(i), float(b.high[i] if s.side == 1 else b.low[i])) for i in s.touches)
+        return ChartOverlay(
+            lines=((t(s.line.a_index), s.line.a_price, t(s.cross_index), float(s.line.at(s.cross_index)), "trend line"),),
+            points=touches,
+            levels=((s.fib(0.0), "fib 0"), (s.fib(0.5), "fib 0.5"), (s.fib(1.0), "fib 1")),
+            zone=(s.zone_low, s.zone_high, "entry zone"), zone_from_ms=t(s.level1_index),
+            start_ms=t(min(s.line.a_index, s.level0_index)),
+        )
 
 
 def bar_close_after(calendar: SessionCalendar, tf: Timeframe, open_ms: int, n: int) -> int:

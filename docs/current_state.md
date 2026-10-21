@@ -108,7 +108,12 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    sender (`telegram.runs`) uses `sendPhoto` with the text as caption and falls back to `sendMessage` if the picture
    fails or the text exceeds 1024 characters. Switch: `config/live.yaml` `telegram.charts`. No DB schema change.
    Tests: `tests/telegram/test_chart.py` (13) + 2 in `tests/live/test_live_service.py`; full suite 2434 passed.
-   Not drawn yet: S7's line / Fibonacci zone (the signal record does not carry them).
+   **S7 drawing added (same day, owner: "add the S7 line and zone"):** `ChartOverlay` (lines, points, levels, zone)
+   in `telegram/chart.py`; `S7Strategy.overlay(ctx, signal)` returns the setup behind a signal from the tick's own
+   setup cache (trend line from its first anchor to the break, touches on highs / lows, fib 0 / 0.5 / 1, entry zone
+   from fib 1 on) - nothing is stored and the signal record / `signal_id` are untouched, so update pictures of older
+   signals get it too. The window widens back to the line's start (`candles_until(since_ms=...)`, cap 240 candles).
+   Tests: overlay mapping (long and short, fake setup) + clipping, widening, no look-ahead with an overlay.
 
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - to be confirmed on the full history.
