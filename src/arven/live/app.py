@@ -119,7 +119,7 @@ def build_deps(
     """``markets``: the further markets to run (``config/live.yaml`` ``markets``), by instrument, with their loaded
     instrument configuration; their legacy S1-S3 paper ticks in ``market_legacy_ticks``."""
     from arven.telegram.messages import format_daily_summary, format_system_alert
-    from arven.telegram.outbox import enqueue
+    from arven.telegram.outbox import charts_dir, enqueue
     from arven.telegram.runs import run_telegram_commands_tick, run_telegram_send_tick
 
     strategies = build_strategies(live)  # validates every enabled strategy's config at start-up
@@ -142,7 +142,7 @@ def build_deps(
 
     def send() -> Any:
         with connect(db) as con:
-            return run_telegram_send_tick(con, tcfg)
+            return run_telegram_send_tick(con, tcfg, charts_root=charts_dir(app.data.data_dir))
 
     def commands(last_update_id: int) -> int:
         quick = tcfg.model_copy(update={"command_poll_timeout_seconds": 0})  # never block the loop on a long poll

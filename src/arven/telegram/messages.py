@@ -93,6 +93,18 @@ def format_new_signal(signal: EngineSignal, record: TrackRecord | None = None) -
     )
 
 
+def chart_title(signal: EngineSignal, update: SignalUpdate | None = None) -> str:
+    """The picture's headline (``arven.telegram.chart``), worded like the alert text."""
+    head = f"{symbol_label(signal.symbol)} · {_side_word(signal.side)} · {signal.strategy_id} {_version(signal.strategy_version)}"
+    return head if update is None else f"{_UPDATE_VERB[update.kind]}: {head}"
+
+
+def update_label(update: SignalUpdate) -> str:
+    """The event's name on the picture, with the exit reason when the detail carries one ("Closed: STOP")."""
+    reason = next((p.split("=", 1)[1] for p in update.detail.split(";") if p.startswith("reason=")), None)
+    return f"{_UPDATE_VERB[update.kind]}: {reason}" if reason else _UPDATE_VERB[update.kind]
+
+
 def format_signal_update(signal: EngineSignal, update: SignalUpdate) -> str:
     verb = _UPDATE_VERB[update.kind]
     return (

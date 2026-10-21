@@ -99,6 +99,16 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    alert order is unchanged (its new signals, then its updates). Web "Signals" page: the confidence row became the same
    "no validated estimate" note. `confidence` stays in the signal record. Tests: telegram/live 2 new, full suite 2419
    passed, e2e 72 passed. Live process restarted.
+9. **H5: signals as pictures in Telegram (2026-10-22, owner: "do H5").** `arven.telegram.chart` draws a PNG with
+   Pillow (already installed with streamlit, now declared `pillow>=10.1`; no matplotlib): 15m candles closed by the
+   signal / update time only (`candles_until`; a test proves later bars never change the picture), entry / stop / TP
+   lines with the alert text's `.2f` prices (`level_labels`; tested against the text), risk / reward areas, the event
+   mark ("Closed: STOP"), refused on stale data (> 1 day between the newest candle and the signal). `live/service.py`
+   draws one picture per queued alert into `data/telegram/charts/` (`telegram.outbox.save_chart`, atomic write); the
+   sender (`telegram.runs`) uses `sendPhoto` with the text as caption and falls back to `sendMessage` if the picture
+   fails or the text exceeds 1024 characters. Switch: `config/live.yaml` `telegram.charts`. No DB schema change.
+   Tests: `tests/telegram/test_chart.py` (13) + 2 in `tests/live/test_live_service.py`; full suite 2434 passed.
+   Not drawn yet: S7's line / Fibonacci zone (the signal record does not carry them).
 
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - to be confirmed on the full history.

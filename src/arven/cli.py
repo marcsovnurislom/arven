@@ -687,7 +687,9 @@ def cmd_live_tick(cfg: AppConfig, args: argparse.Namespace) -> int:
         for s in st.new_signals:
             print(f"    {from_ms(s.event_time_ms).isoformat()} {'LONG' if s.side == 1 else 'SHORT'} {s.entry_type} {s.entry_reference:.2f} stop {s.stop:.2f}")
     if out.queued_alerts:
-        print(f"Telegram alerts queued: {out.queued_alerts}")
+        print(f"Telegram alerts queued: {out.queued_alerts}  (pictures drawn: {out.charts})")
+    for err in out.chart_errors:
+        print(f"  picture not drawn, the alert goes as text: {err}")
     print("Paper signals on live data - not orders, not evidence of profitability (CLAUDE.md rules 6/12).")
     return 0 if out.status in ("ok", "not_started") else 1
 
@@ -960,12 +962,15 @@ def cmd_news_show(cfg: AppConfig, args: argparse.Namespace) -> int:
 
 def cmd_telegram_send(cfg: AppConfig, args: argparse.Namespace) -> int:
     from arven.core.telegram_config import load_telegram_config
+    from arven.telegram.outbox import charts_dir
     from arven.telegram.runs import run_telegram_send_tick
 
     tcfg = load_telegram_config(args.config_dir)
     with connect(cfg.data.database_path) as con:
-        summary = run_telegram_send_tick(con, tcfg)
-    print(f"sent={summary.sent}  skipped_paused={summary.skipped_paused}  failed={summary.failed}  dry_run={summary.dry_run}")
+        summary = run_telegram_send_tick(con, tcfg, charts_root=charts_dir(cfg.data.data_dir))
+    print(f"sent={summary.sent} (as pictures {summary.photos})  skipped_paused={summary.skipped_paused}  failed={summary.failed}  dry_run={summary.dry_run}")
+    for note in summary.photo_fallbacks:
+        print(f"  picture not sent, text instead: {note}")
     for err in summary.errors:
         print(f"  ERROR {err}")
     if tcfg.dry_run:

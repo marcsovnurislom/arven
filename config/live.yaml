@@ -12,6 +12,7 @@ run_legacy_paper: true        # also run the Stage 8 hourly `paper run` here, so
 telegram:
   enabled: true               # queue alerts in the outbox (actual sending: config/telegram.yaml dry_run + .env)
   send_updates: true          # entry filled / TP hit / stop moved / cancelled / closed
+  charts: true                # each alert as a picture (candles, entry, stop, TPs) with the text as caption
   commands: true              # answer /status /signals ... from allow-listed chats
   daily_summary_hour_utc: 0   # one summary per day at this UTC hour (null = off)
   weekly_report_weekday: 0    # weekly forward report (0 = Monday), sent with the daily summary (null = off)

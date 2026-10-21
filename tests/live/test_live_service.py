@@ -167,3 +167,26 @@ def test_new_signal_alert_shows_the_strategy_record_not_a_confidence(env):
     assert f"Record (paper since {since}): 2 closed, win 0%, net -2.00 R" in sent[1][1]
     for _, text in sent[:2]:
         assert "Confidence" not in text and "Quality: no validated per-signal estimate" in text
+
+
+@pytest.mark.parametrize("charts", [True, False])
+def test_every_alert_gets_its_picture_unless_switched_off(env, charts):
+    """docs/FEATURES_PLAN.md H5: one picture per queued alert (same signal_id and event type as the outbox entry);
+    ``telegram.charts: false`` draws none. The pictures themselves are tested in tests/telegram/test_chart.py."""
+    from arven.core.live_config import LiveTelegramConfig
+    from arven.telegram.outbox import charts_dir, load_chart
+
+    app, fcfg, config_dir = env
+    now = from_ms(LAST_1M + MIN + 30_000)
+    through = (LAST_1M + MIN) // (15 * MIN) * (15 * MIN)
+    a = Fake("fake_a", [T0 + 3 * DAY + 15 * MIN, through - 60 * MIN, through])
+    queued = []
+    live = LiveConfig(alert_recency_hours=2, telegram=LiveTelegramConfig(charts=charts))
+    out = run_live_tick(app, fcfg, live, config_dir, now=now, downloader=_downloader(app), chat_ids=frozenset({"1"}), strategies=[a],
+                        telegram_enqueue=lambda con, sid, et, chat, text, now_ms: queued.append((sid, et)))
+    assert len(queued) == 3 and out.chart_errors == []
+    pictures = [load_chart(charts_dir(app.data.data_dir), sid, et) for sid, et in queued]
+    if charts:
+        assert out.charts == 3 and all(p is not None and p.startswith(b"\x89PNG") for p in pictures)
+    else:
+        assert out.charts == 0 and all(p is None for p in pictures)

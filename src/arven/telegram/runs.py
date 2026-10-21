@@ -15,9 +15,9 @@ import duckdb
 
 from arven.core.telegram_config import TelegramConfig
 from arven.core.time import to_ms, utc_now
-from arven.telegram.client import get_updates, send_message
+from arven.telegram.client import CAPTION_LIMIT, get_updates, send_message, send_photo
 from arven.telegram.commands import NOT_AUTHORIZED_TEXT, CommandContext, handle_command
-from arven.telegram.outbox import is_paused, mark_failed, mark_sent, pending_entries
+from arven.telegram.outbox import is_paused, load_chart, mark_failed, mark_sent, pending_entries
 
 
 @dataclass
@@ -27,6 +27,8 @@ class SendTickSummary:
     failed: int = 0
     dry_run: bool = False
     errors: list[str] = field(default_factory=list)
+    photos: int = 0  # sent as a picture with the text as its caption
+    photo_fallbacks: list[str] = field(default_factory=list)  # a picture failed; the text was sent instead
 
     @property
     def ok(self) -> bool:
@@ -35,9 +37,11 @@ class SendTickSummary:
 
 def run_telegram_send_tick(
     con: duckdb.DuckDBPyConnection, cfg: TelegramConfig, *,
-    token: str | None = None, opener=urllib.request.urlopen, sleep=time.sleep, now=None,
+    token: str | None = None, opener=urllib.request.urlopen, sleep=time.sleep, now=None, charts_root: Path | None = None,
 ) -> SendTickSummary:
-    """Drain pending outbox entries, oldest first. Never raises: one entry's send failure is recorded on
+    """Drain pending outbox entries, oldest first. An entry with a stored picture (``charts_root``,
+    ``telegram.outbox.save_chart``) goes out as a photo with its text as the caption; if the picture cannot be sent
+    (or the text is longer than a caption may be) the text is sent on its own. Never raises: one entry's send failure is recorded on
     its own row (``mark_failed``) and the tick continues with the next entry - the same
     never-let-one-bad-item-stop-the-rest discipline ``arven.news.runs.run_news_tick`` already uses."""
     summary = SendTickSummary(dry_run=cfg.dry_run)
@@ -51,7 +55,16 @@ def run_telegram_send_tick(
             summary.sent += 1
             continue
         try:
-            sent = send_message(entry.chat_id, entry.text, token=token, max_attempts=cfg.max_send_attempts, opener=opener, sleep=sleep)
+            png = load_chart(charts_root, entry.signal_id, entry.event_type)
+            sent = None
+            if png is not None and len(entry.text) <= CAPTION_LIMIT:
+                try:
+                    sent = send_photo(entry.chat_id, png, entry.text, token=token, max_attempts=cfg.max_send_attempts, opener=opener, sleep=sleep)
+                    summary.photos += 1
+                except Exception as exc:  # noqa: BLE001 - the picture is optional: fall back to the text, never lose the alert
+                    summary.photo_fallbacks.append(f"{entry.outbox_id}: {exc}")
+            if sent is None:
+                sent = send_message(entry.chat_id, entry.text, token=token, max_attempts=cfg.max_send_attempts, opener=opener, sleep=sleep)
             mark_sent(con, entry.outbox_id, telegram_message_id=sent.message_id, now_ms=now_ts)
             summary.sent += 1
         except Exception as exc:  # noqa: BLE001 - recorded on this row only, other entries still get a chance

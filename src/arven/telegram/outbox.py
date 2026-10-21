@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from pathlib import Path
 
 import duckdb
 
@@ -84,6 +85,35 @@ def get_entry(con: duckdb.DuckDBPyConnection, oid: str) -> OutboxEntry | None:
         [oid],
     ).fetchone()
     return _row_to_entry(row) if row else None
+
+
+# --- signal pictures (docs/FEATURES_PLAN.md H5): one PNG per (signal_id, event_type), shared by every chat ---------
+# Files next to the outbox instead of a table column: the entry stays text (the fallback), the picture is optional.
+
+
+def charts_dir(data_dir: Path) -> Path:
+    """Every market's pictures in one place: the one outbox (and its sender) serves all markets."""
+    return data_dir / "telegram" / "charts"
+
+
+def chart_path(root: Path, signal_id: str, event_type: str) -> Path:
+    return root / f"{hashlib.sha256(f'{signal_id}:{event_type}'.encode()).hexdigest()[:32]}.png"
+
+
+def save_chart(root: Path, signal_id: str, event_type: str, png: bytes) -> Path:
+    path = chart_path(root, signal_id, event_type)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_bytes(png)
+    tmp.replace(path)  # atomic: the sender never reads a half-written picture
+    return path
+
+
+def load_chart(root: Path | None, signal_id: str, event_type: str) -> bytes | None:
+    if root is None:
+        return None
+    path = chart_path(root, signal_id, event_type)
+    return path.read_bytes() if path.exists() else None
 
 
 # --- per-chat pause/resume (section 5.4's /pause, /resume - notification muting only, never the trading loop) ---

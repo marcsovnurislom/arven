@@ -87,6 +87,8 @@ class LiveTickOutcome:
     queued_alerts: int = 0
     summary: dict[str, Any] | None = None
     detail: str = ""
+    charts: int = 0  # alert pictures drawn (docs/FEATURES_PLAN.md H5)
+    chart_errors: list[str] = field(default_factory=list)  # a picture that could not be drawn: that alert goes as text
 
     @property
     def errors(self) -> list[str]:
@@ -131,8 +133,9 @@ def run_live_tick(
 ) -> LiveTickOutcome:
     """One tick (see the module docstring). ``telegram_enqueue(con, signal_id, event_type, chat_id, text, now_ms)``
     is injectable for tests; by default the real outbox."""
-    from arven.telegram.messages import format_new_signal, format_signal_update
-    from arven.telegram.outbox import enqueue
+    from arven.telegram.chart import candles_until, render_signal_chart
+    from arven.telegram.messages import chart_title, format_new_signal, format_signal_update, update_label
+    from arven.telegram.outbox import charts_dir, enqueue, save_chart
 
     now = now or utc_now()
     now_ms = to_ms(now)
@@ -187,6 +190,20 @@ def run_live_tick(
 
     cursors: dict[str, int] = _read_json(cursor_path, {})
     alerts: list[tuple[str, str, str]] = []  # (signal_id, event_type, text)
+    charts_on = live.telegram.enabled and live.telegram.charts and bool(chat_ids)
+
+    def picture(s: EngineSignal, event_type: str, u: Any = None) -> None:
+        """The alert's picture, from the 15m candles closed by the signal (or the update) - never later ones."""
+        if not charts_on:
+            return
+        try:
+            cut = s.event_time_ms if u is None else u.time_ms
+            c = candles_until(m15.open_time_ms, Timeframe.M15.ms, m15.open, m15.high, m15.low, m15.close, cut, "15m")
+            png = render_signal_chart(s, c, chart_title(s, u), update=u, update_label=None if u is None else update_label(u))
+            save_chart(charts_dir(app.data.data_dir), s.signal_id, event_type, png)
+            outcome.charts += 1
+        except Exception as exc:  # noqa: BLE001 - the picture is optional; the alert still goes out as text
+            outcome.chart_errors.append(f"{s.signal_id} {event_type}: {type(exc).__name__}: {exc}")
     recency_ms = int(live.alert_recency_hours * HOUR_MS)
     for strat in strategies:
         sid = strat.strategy_id
@@ -218,8 +235,10 @@ def run_live_tick(
                     append_update(signals_root, sid, u)
                     st.new_updates += 1
                     if live.telegram.send_updates and now_ms - u.time_ms <= recency_ms:
+                        picture(s, _update_event_type(u), u)
                         update_alerts.append((s.signal_id, _update_event_type(u), format_signal_update(s, u)))
             for s in fresh:  # same order as before: the strategy's new signals, then its updates
+                picture(s, "new_signal")
                 alerts.append((s.signal_id, "new_signal", format_new_signal(s, track_record(st.outcomes, window.start_ms, s.signal_id))))
             alerts.extend(update_alerts)
         except Exception as exc:  # noqa: BLE001 - one strategy's failure must not stop the others

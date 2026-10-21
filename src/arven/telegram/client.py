@@ -7,6 +7,7 @@ CLAUDE.md: "Secrets only via environment variables / .env, git-ignored").
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
@@ -60,12 +61,14 @@ def _bot_token() -> str:
 
 def _call(
     method: str, params: dict[str, object], *, token: str, max_attempts: int, opener, sleep,
+    body: bytes | None = None, content_type: str = "application/json",
 ) -> dict:
     """One Bot API call, retried on transient failure and on HTTP 429 (waiting exactly
-    ``retry_after`` seconds, Telegram's own rate-limit contract - section 5.4's "respect 429 retry_after")."""
+    ``retry_after`` seconds, Telegram's own rate-limit contract - section 5.4's "respect 429 retry_after").
+    ``body`` / ``content_type``: a ready request body instead of JSON ``params`` (the photo upload)."""
     url = f"{API_BASE}{token}/{method}"
-    body = json.dumps(params).encode()
-    headers = {"content-type": "application/json", "User-Agent": USER_AGENT}
+    body = json.dumps(params).encode() if body is None else body
+    headers = {"content-type": content_type, "User-Agent": USER_AGENT}
     last_error: Exception | None = None
     for attempt in range(1, max_attempts + 1):
         request = urllib.request.Request(url, data=body, headers=headers, method="POST")
@@ -103,6 +106,30 @@ def send_message(
         "sendMessage", {"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
         token=token or _bot_token(), max_attempts=max_attempts, opener=opener, sleep=sleep,
     )
+    return SentMessage(result["message_id"], chat_id)
+
+
+CAPTION_LIMIT = 1024  # Telegram's limit for a photo caption, in characters
+
+
+def _multipart(fields: dict[str, str], file_field: str, filename: str, data: bytes, content_type: str) -> tuple[bytes, str]:
+    boundary = "arven-" + hashlib.sha256(data).hexdigest()[:24]
+    parts = [f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode() for k, v in fields.items()]
+    parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'
+                 f"Content-Type: {content_type}\r\n\r\n".encode() + data + b"\r\n")
+    return b"".join(parts) + f"--{boundary}--\r\n".encode(), f"multipart/form-data; boundary={boundary}"
+
+
+def send_photo(
+    chat_id: str, png: bytes, caption: str, *, token: str | None = None, max_attempts: int = 5,
+    opener=urllib.request.urlopen, sleep=time.sleep,
+) -> SentMessage:
+    """``sendPhoto`` with a PNG upload (multipart/form-data) and the alert text as the caption."""
+    if len(caption) > CAPTION_LIMIT:
+        raise TelegramRequestError(f"caption has {len(caption)} characters, Telegram allows {CAPTION_LIMIT}")
+    body, content_type = _multipart({"chat_id": chat_id, "caption": caption}, "photo", "signal.png", png, "image/png")
+    result = _call("sendPhoto", {}, token=token or _bot_token(), max_attempts=max_attempts, opener=opener, sleep=sleep,
+                   body=body, content_type=content_type)
     return SentMessage(result["message_id"], chat_id)
 
 
