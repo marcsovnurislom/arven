@@ -14,10 +14,11 @@ const Journal = lazy(() => import("./pages/Journal").then((m) => ({ default: m.J
 const Lab = lazy(() => import("./pages/Lab").then((m) => ({ default: m.Lab })));
 const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
 const S7Review = lazy(() => import("./pages/S7Review").then((m) => ({ default: m.S7Review })));
+const Sessions = lazy(() => import("./pages/Sessions").then((m) => ({ default: m.Sessions })));
 const S7Trades = lazy(() => import("./pages/S7Trades").then((m) => ({ default: m.S7Trades })));
 const Tour = lazy(() => import("./Tour").then((m) => ({ default: m.Tour })));
 
-const PAGES = ["home", "overview", "signals", "screener", "charts", "strategies", "journal", "lab", "s7review", "s7trades", "settings"] as const;
+const PAGES = ["home", "overview", "signals", "screener", "charts", "strategies", "journal", "lab", "s7review", "s7trades", "settings", "sessions"] as const;
 type Page = (typeof PAGES)[number];
 
 function pageFromHash(): Page {
@@ -105,7 +106,7 @@ function Shell() {
 
   const view = {
     home: <Home go={go} startTour={() => setTour(true)} />, overview: <Overview />, signals: <Signals />, screener: <Screener />, charts: <Charts />,
-    strategies: <Strategies />, journal: <Journal />, lab: <Lab />, s7review: <S7Review />, s7trades: <S7Trades />, settings: <Settings theme={theme} setTheme={setTheme} />,
+    strategies: <Strategies />, journal: <Journal />, lab: <Lab />, s7review: <S7Review />, s7trades: <S7Trades />, sessions: <Sessions />, settings: <Settings theme={theme} setTheme={setTheme} />,
   }[page];
 
   const label = (p: Page) => t(`nav_${p}` as Key);
@@ -192,7 +193,7 @@ function Shell() {
 
 const GROUPS: { key: string; pages: Page[] }[] = [
   { key: "main", pages: ["home"] },
-  { key: "grp_market", pages: ["overview", "charts", "screener", "signals"] },
+  { key: "grp_market", pages: ["overview", "sessions", "charts", "screener", "signals"] },
   { key: "grp_s7", pages: ["s7trades", "s7review"] },
   { key: "grp_research", pages: ["strategies", "lab"] },
   { key: "grp_me", pages: ["journal", "settings"] },
@@ -210,6 +211,7 @@ const ICONS: Record<Page, string> = {
   journal: "M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3zm0 13a3 3 0 0 1 3-3h11",
   s7review: "M4 4h16v16H4zm4 8 3 3 5-6",
   s7trades: "M4 18 9 12l4 3 7-9M15 6h5v5",
+  sessions: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3.6 9h16.8M3.6 15h16.8M12 3c2.5 2.5 3.8 5.5 3.8 9s-1.3 6.5-3.8 9c-2.5-2.5-3.8-5.5-3.8-9s1.3-6.5 3.8-9z",
   settings: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm0-6v3m0 14v3M2 12h3m14 0h3M4.9 4.9 7 7m10 10 2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1",
 };
 

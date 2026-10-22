@@ -37,6 +37,14 @@ def read_candles(con: duckdb.DuckDBPyConnection, symbol: str, timeframe: str, li
     return [{"t": int(r[0]), "o": r[1], "h": r[2], "l": r[3], "c": r[4], "v": r[5], "complete": bool(r[6])} for r in reversed(rows)]
 
 
+def read_hourly_bars(con: duckdb.DuckDBPyConnection, symbol: str, since_ms: int) -> list[tuple]:
+    """Completed stored 1h bars from ``since_ms``: ``(open_time_ms, open, high, low, close_time_ms)``, ascending."""
+    return con.execute(
+        "SELECT open_time_ms, open, high, low, close_time_ms FROM ohlcv WHERE symbol = ? AND timeframe = '1h' AND is_complete "
+        "AND open_time_ms >= ? ORDER BY open_time_ms", [symbol, since_ms],
+    ).fetchall()
+
+
 def last_bar_time_ms(con: duckdb.DuckDBPyConnection, symbol: str) -> int | None:
     row = con.execute("SELECT max(open_time_ms) FROM ohlcv_1m WHERE symbol = ?", [symbol]).fetchone()
     return int(row[0]) if row and row[0] is not None else None

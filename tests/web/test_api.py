@@ -262,3 +262,27 @@ def test_gold_reads_its_own_record_and_charts_continue_into_the_history(env):
     s2 = client.get("/api/screener").json()
     assert [r["market"] for r in s2["rows"]] == ["btc", "gold"]
     assert s2["rows"][1]["symbol"] == "XAUUSD" and s2["rows"][1]["price"] == 2002.0  # history until the live feed has bars
+
+
+def test_sessions_report_every_market_from_its_own_calendar_and_the_centres(env):
+    cfg, client, _ = env
+    r = client.get("/api/sessions").json()
+    by_id = {m["id"]: m for m in r["markets"]}
+    assert by_id["btc"]["state"] == "always_open" and by_id["btc"]["next_holiday"] is None
+    gold = by_id["gold"]
+    gold_cal = load_config(instrument="XAUUSDT").session_calendar()
+    assert gold["session"] == "cme_metals" and gold["open"] == bool(gold_cal.is_open(r["now_ms"] // 60_000 * 60_000))
+    assert gold["next_change_ms"] > r["now_ms"]
+    assert [c["id"] for c in r["centres"]] == ["sydney", "tokyo", "london", "new_york"]
+    assert all(c["next_change_ms"] > r["now_ms"] for c in r["centres"])
+
+
+def test_activity_grid_from_stored_hourly_bars(env):
+    _, client, _ = env
+    a = client.get("/api/activity").json()
+    assert a["source"] == "BTCUSDT" and a["bars"] == 30 and sum(map(sum, a["n"])) == 30
+    values = [v for row in a["mean_range_pct"] for v in row if v is not None]
+    assert values and all(v == 2.0 for v in values)  # every fixture bar: (101 - 99) / 100
+    g = client.get("/api/activity", params={"market": "gold"}).json()
+    assert g["bars"] == 0 and all(v is None for row in g["mean_range_pct"] for v in row)
+    assert client.get("/api/activity", params={"days": 3}).status_code == 422

@@ -199,6 +199,34 @@ export type S7Trades = {
   trades: S7Trade[];
 };
 
+export type MarketSession = {
+  id: string;
+  label: string;
+  session: string;
+  state: "always_open" | "open" | "halt" | "weekend" | "holiday";
+  open: boolean;
+  next_change_ms: number | null;
+  reason: string | null;
+  closure_ends_ms: number | null;
+  next_holiday: { start_ms: number; end_ms: number; reason: string } | null;
+};
+
+export type CentreSession = { id: string; name: string; tz: string; lat: number; lon: number; open_local: string; close_local: string; open: boolean; next_change_ms: number };
+
+export type Sessions = { now_ms: number; markets: MarketSession[]; centres: CentreSession[]; note: string };
+
+export type Activity = {
+  market: string;
+  source: string;
+  days: number;
+  mean_range_pct: (number | null)[][]; // [weekday Monday=0][UTC hour]
+  n: number[][];
+  bars: number;
+  from_ms: number | null;
+  to_ms: number | null;
+  note: string;
+};
+
 export type Market = { id: string; label: string; symbol: string; history_symbol: string | null; session: string; enabled: boolean };
 
 /** The market every market-aware request is about ("btc" or e.g. "gold"); remembered per browser. */
@@ -264,6 +292,8 @@ export const api = {
   signals: (strategy?: string, limit = 200) =>
     request<{ signals: Signal[] }>(withMarket(`/api/signals?limit=${limit}${strategy ? `&strategy=${strategy}` : ""}`)),
   strategies: () => request<{ forward_summary: ForwardSummary | null; strategies: string[] }>(withMarket("/api/strategies")),
+  sessions: () => request<Sessions>("/api/sessions"),
+  activity: () => request<Activity>(withMarket("/api/activity")),
   screener: () => request<{ supported_symbols: string[]; rows: ScreenerRow[]; note: string }>("/api/screener"),
   research: () => request<{ runs: ResearchRun[] }>(withMarket("/api/research")),
   journal: () => request<{ entries: JournalEntry[]; stats: JournalStats }>("/api/journal"),

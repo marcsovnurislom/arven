@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import duckdb
+import numpy as np
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -24,9 +25,11 @@ from arven.core.telegram_config import allowed_chat_ids, load_telegram_config
 from arven.core.time import to_ms, utc_now
 from arven.web import journal as jr
 from arven.web import service as svc
+from arven.web import sessions as ses
 
 HEARTBEAT_MAX_AGE_MS = 5 * 60_000  # a live tick can take a couple of minutes; longer than this without a check-in = stale
 DATA_STALE_MS = 3 * 3_600_000
+ACTIVITY_CACHE_MS = 3_600_000
 
 
 @dataclass(frozen=True)
@@ -41,6 +44,7 @@ class WebMarket:
     research_root: Path  # strategy_trades/, s7_study/, backtests/ of the research exports
     calendar: Any  # arven.core.sessions.SessionCalendar
     enabled: bool = True
+    holidays: tuple[tuple[int, int, str], ...] = ()  # the calendar's holiday / early-close windows with their names
 
     def describe(self) -> dict[str, Any]:
         return {"id": self.id, "label": self.label, "symbol": self.symbol, "history_symbol": self.history_symbol,
@@ -59,8 +63,9 @@ def web_markets(cfg: AppConfig, config_dir: Path | str | None) -> dict[str, WebM
         live_app = load_config(config_dir, instrument=m.instrument)
         hist = m.history_instrument
         mid = (m.title or m.instrument).lower().replace(" ", "_")
+        holidays = tuple((to_ms(c.start), to_ms(c.end), c.reason) for c in live_app.market.session_closures)
         out[mid] = WebMarket(mid, f"{m.title} ({hist or m.instrument})" if m.title else m.instrument, live_app.market.symbol, hist,
-                             root / m.instrument, root / (hist or m.instrument), live_app.session_calendar(), m.enabled)
+                             root / m.instrument, root / (hist or m.instrument), live_app.session_calendar(), m.enabled, holidays)
     return out
 
 
@@ -151,6 +156,48 @@ def create_app(cfg: AppConfig, config_dir: Path | str | None = None, dist_dir: P
             return {"symbol": m.symbol, "source": source, "timeframe": tf, "candles": rows}
         finally:
             con.close()
+
+    @app.get("/api/sessions")
+    def sessions() -> dict[str, Any]:
+        """Every market's open/closed state (its real session calendar) and the four trading centres' working hours."""
+        now_ms = to_ms(utc_now())
+        return {
+            "now_ms": now_ms,
+            "markets": [{"id": m.id, "label": m.label, "session": m.calendar.kind, **ses.market_state(m.calendar, now_ms, m.holidays),
+                         "next_holiday": ses.next_holiday(m.holidays, now_ms)} for m in markets.values()],
+            "centres": [ses.centre_status(c, now_ms) for c in ses.CENTRES],
+            "note": "centres: conventional local working hours, Monday to Friday - context only, not an exchange schedule",
+        }
+
+    activity_cache: dict[tuple[str, int], tuple[int, dict[str, Any]]] = {}  # a year of hourly ranges barely moves in an hour
+
+    @app.get("/api/activity")
+    def activity(market: str = market_param, days: int = Query(365, ge=7, le=1000)) -> dict[str, Any]:
+        """Mean 1h range by weekday and hour (UTC) over the trailing ``days``, from the feed with more bars there."""
+        m = resolve(market)
+        now_ms = to_ms(utc_now())
+        cached = activity_cache.get((m.id, days))
+        if cached is not None and now_ms - cached[0] < ACTIVITY_CACHE_MS:
+            return cached[1]
+        con = open_db()
+        try:
+            best: tuple[str, list[tuple]] | None = None
+            for symbol in (m.symbol, m.history_symbol):
+                if symbol is None:
+                    continue
+                rows = svc.read_hourly_bars(con, symbol, now_ms - days * 86_400_000)
+                if best is None or len(rows) > len(best[1]):
+                    best = (symbol, rows)
+        finally:
+            con.close()
+        assert best is not None
+        symbol, rows = best
+        cols = list(zip(*rows, strict=True)) if rows else [[], [], [], [], []]
+        grid = ses.activity_grid(*(np.asarray(c) for c in cols), now_ms=now_ms)
+        payload = {"market": m.id, "source": symbol, "days": days, "timezone": "UTC", "weekday_start": "monday", **grid,
+                   "note": "mean (high - low) / open of completed 1h bars - how much the price moved, not which way; past, not a forecast"}
+        activity_cache[(m.id, days)] = (now_ms, payload)
+        return payload
 
     @app.get("/api/signals")
     def signals(strategy: str | None = None, limit: int = Query(100, ge=1, le=1000), market: str = market_param) -> dict[str, Any]:

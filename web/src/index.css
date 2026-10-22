@@ -349,3 +349,24 @@ kbd { font-family: "JetBrains Mono", Consolas, monospace; font-size: 11px; paddi
   color: var(--text); cursor: pointer; transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s; }
 .strategy-card:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--gold) 40%, var(--border)); }
 .strategy-card.on { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold-soft), 0 10px 30px var(--gold-soft); }
+
+/* Sessions page (H2): globe, status rows, activity heat map */
+.globe-wrap { display: flex; justify-content: center; min-height: 280px; }
+.globe { max-width: 100%; }
+.globe:active { cursor: grabbing; }
+.globe-key { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.session-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--card); }
+.session-row .dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--faint); }
+.session-row .dot.on { background: var(--up); box-shadow: 0 0 0 4px var(--up-soft); animation: ses-pulse 2s ease-in-out infinite; }
+@keyframes ses-pulse { 50% { box-shadow: 0 0 0 7px transparent; } }
+.heat-scroll { overflow-x: auto; padding-bottom: 4px; }
+.heat { display: grid; gap: 3px; min-width: 300px; }
+@media (max-width: 640px) { .heat, .heat-row { gap: 2px; } .heat-row { grid-template-columns: 24px repeat(24, minmax(0, 1fr)); } .heat-cell { border-radius: 2px; } }
+.heat-row { display: grid; grid-template-columns: 34px repeat(24, minmax(0, 1fr)); gap: 3px; align-items: center; }
+.heat-day { font-size: 12px; color: var(--muted); }
+.heat-hour { font-size: 10px; color: var(--faint); text-align: left; }
+.heat-cell { aspect-ratio: 1; border-radius: 4px; background: var(--card); border: 1px solid transparent; }
+.heat-cell.none { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--border) 3px 4px); }
+.heat-cell.now { border-color: var(--text); }
+.heat-legend { display: inline-block; width: 90px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, color-mix(in srgb, var(--gold) 8%, transparent), var(--gold)); }
+@media (prefers-reduced-motion: reduce) { .session-row .dot.on { animation: none; } }
