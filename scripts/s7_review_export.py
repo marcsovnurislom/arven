@@ -2,8 +2,9 @@
 
 Runs the detector on development-period BTC bars of one timeframe and writes ``data/s7_review/setups_<tf>.json`` with a
 seeded sample of setups. Each setup carries only the candles **up to its arming bar** - nothing after it - so the owner
-judges the pattern definition, never the outcome. Usage:
-    PYTHONPATH=src python scripts/s7_review_export.py [1h|4h|15m] [sample_size]
+judges the pattern definition, never the outcome. ``--instrument XAUUSD``: the same on the gold history (its session
+bar grid), into ``data/markets/XAUUSD/s7_review/`` - gold's labels stay apart from BTC's. Usage:
+    PYTHONPATH=src python scripts/s7_review_export.py [--instrument XAUUSD] [1h|4h|15m] [sample_size]
 """
 
 from __future__ import annotations
@@ -47,8 +48,8 @@ def to_json(s: S7Setup, tf: str, t_ms, o, h, lo, c, v) -> dict:
     }
 
 
-def main(tf: str = "1h", sample: int = 40) -> None:
-    app = load_config()
+def main(tf: str = "1h", sample: int = 40, instrument: str | None = None) -> None:
+    app = load_config(instrument=instrument)
     window = make_guard(app).resolve(BacktestPeriod.DEVELOPMENT)
     con = open_readonly(app.data.database_path)
     try:
@@ -59,10 +60,10 @@ def main(tf: str = "1h", sample: int = 40) -> None:
     setups = detect_setups(bars.open, bars.high, bars.low, bars.close, params, volume=bars.volume)
     picked = sorted(random.Random(SEED).sample(range(len(setups)), min(sample, len(setups))))
     commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False).stdout.strip() or None
-    out_dir = app.data.data_dir / "s7_review"
+    out_dir = (app.data.data_dir if instrument is None else app.market_root) / "s7_review"
     out_dir.mkdir(parents=True, exist_ok=True)
     payload = {
-        "timeframe": tf, "period": "development", "params": asdict(params), "git_commit": commit, "total_setups": len(setups),
+        "timeframe": tf, "period": "development", "instrument": instrument or app.market.symbol, "params": asdict(params), "git_commit": commit, "total_setups": len(setups),
         "setups": [to_json(setups[i], tf, bars.open_time_ms, bars.open, bars.high, bars.low, bars.close, bars.volume) for i in picked],
         "note": "each setup shows only the candles up to its arming bar (no future data); sample seeded with 7",
     }
@@ -72,4 +73,8 @@ def main(tf: str = "1h", sample: int = 40) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "1h", int(sys.argv[2]) if len(sys.argv) > 2 else 40)
+    args = sys.argv[1:]
+    inst = None
+    if args[:1] == ["--instrument"]:
+        inst, args = args[1], args[2:]
+    main(args[0] if args else "1h", int(args[1]) if len(args) > 1 else 40, inst)

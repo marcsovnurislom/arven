@@ -186,6 +186,19 @@ def test_s7_review_returns_the_export_and_stores_owner_labels(env):
     assert client.post("/api/s7/labels", json={"setup_id": "../../etc", "verdict": "yes"}).status_code == 422
 
 
+def test_s7_review_of_gold_has_its_own_setups_and_labels(env):
+    cfg, client, _ = env
+    gold = cfg.data.data_dir / "markets" / "XAUUSD" / "s7_review"
+    gold.mkdir(parents=True)
+    (gold / "setups_1h.json").write_text(json.dumps({"timeframe": "1h", "total_setups": 1, "setups": [{"id": "1h-2000-S"}]}))
+    assert client.get("/api/s7/review", params={"market": "gold"}).json()["setups"][0]["id"] == "1h-2000-S"
+    assert client.get("/api/s7/review").json()["setups"] == []  # BTC has no export in this fixture
+    assert client.post("/api/s7/labels", params={"market": "gold"}, json={"setup_id": "1h-2000-S", "verdict": "no", "note": ""}).status_code == 200
+    assert client.get("/api/s7/labels", params={"market": "gold"}).json()["labels"]["1h-2000-S"]["verdict"] == "no"
+    assert client.get("/api/s7/labels").json()["labels"] == {}  # BTC's labels untouched
+    assert not (cfg.data.data_dir / "s7_review").exists()
+
+
 def test_s7_trades_serves_the_study_export_read_only(env):
     cfg, client, _ = env
     assert client.get("/api/s7/trades").json() == {"period": "development", "trades": [], "summary": None}

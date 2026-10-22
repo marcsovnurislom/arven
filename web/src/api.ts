@@ -301,16 +301,16 @@ export const api = {
     request<JournalEntry>("/api/journal", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
   deleteJournal: (id: string) => request<{ deleted: string }>(`/api/journal/${id}`, { method: "DELETE" }),
   telegram: () => request<TelegramStatus>("/api/telegram"),
-  s7Review: (tf: string) => request<S7Review>(`/api/s7/review?tf=${tf}`),
+  s7Review: (tf: string) => request<S7Review>(withMarket(`/api/s7/review?tf=${tf}`)),
   s7Trades: (period: string) => request<S7Trades>(withMarket(`/api/s7/trades?period=${period}`)),
   strategyTradesIndex: () => request<{ entries: StrategyTradesEntry[] }>(withMarket("/api/strategy_trades/index")),
   strategyTrades: (strategy: string, period: string) => request<StrategyTradesFile>(withMarket(`/api/strategy_trades?strategy=${strategy}&period=${period}`)),
   s7TradeLabels: () => request<{ labels: Record<string, S7TradeLabel> }>("/api/s7/trade_labels"),
   s7TradeLabel: (trade_id: string, verdict: string, note: string) =>
     request<{ saved: string; count: number }>("/api/s7/trade_labels", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ trade_id, verdict, note }) }),
-  s7Labels: (tf: string) => request<{ labels: Record<string, S7Label> }>(`/api/s7/labels?tf=${tf}`),
+  s7Labels: (tf: string) => request<{ labels: Record<string, S7Label> }>(withMarket(`/api/s7/labels?tf=${tf}`)),
   s7Label: (setup_id: string, verdict: string, note: string) =>
-    request<{ saved: string; count: number }>("/api/s7/labels", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ setup_id, verdict, note }) }),
+    request<{ saved: string; count: number }>(withMarket("/api/s7/labels"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ setup_id, verdict, note }) }),
 };
 
 /** "0.05 BTC" / "3 oz": a trade's position size in its market's unit (BTC exports carry size_btc only). */

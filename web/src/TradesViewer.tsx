@@ -86,7 +86,7 @@ export function TradeChart({ tr }: { tr: TradeRec }) {
     <ChartFrame height={500} labels={{ fit: t("chartFit"), full: t("chartFull"), exit: t("chartExit") }}>
       {({ fill, fitKey }) => (
         <Suspense fallback={<Skeleton h={500} />}>
-          <CandleChart key={tr.id} candles={tr.candles} lines={lines} overlays={overlays} markers={markers} range={range} fitKey={fitKey} fill={fill} />
+          <CandleChart key={tr.id} candles={tr.candles} lines={lines} overlays={overlays} markers={markers} range={range} fitKey={fitKey} fill={fill} fixEdges />
         </Suspense>
       )}
     </ChartFrame>

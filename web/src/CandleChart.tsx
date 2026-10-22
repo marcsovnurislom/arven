@@ -29,13 +29,15 @@ type Props = {
   fitKey?: number;
   /** Fill the parent's height instead of ``height`` (full-screen frames). */
   fill?: boolean;
+  /** Pin both edges to the first / last candle: a fixed window (a trade) never shows empty space when zoomed out. */
+  fixEdges?: boolean;
 };
 
 type Hover = { t: number; o: number; h: number; l: number; c: number };
 const fmtPx = (x: number) => x.toLocaleString("en-US", { maximumFractionDigits: 2 });
 
 /** Candlestick chart that keeps its view when older bars are prepended, so panning left keeps loading history. */
-export function CandleChart({ candles, lines = [], markers = [], height = 420, focusTimeMs, onNeedOlder, overlays = [], range, fitKey = 0, fill = false }: Props) {
+export function CandleChart({ candles, lines = [], markers = [], height = 420, focusTimeMs, onNeedOlder, overlays = [], range, fitKey = 0, fill = false, fixEdges = false }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -56,8 +58,7 @@ export function CandleChart({ candles, lines = [], markers = [], height = 420, f
       layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: css("--muted") || "#9aa3b2", fontFamily: "JetBrains Mono, Consolas, monospace" },
       grid: { vertLines: { color: "rgba(128,128,128,0.08)" }, horzLines: { color: "rgba(128,128,128,0.08)" } },
       rightPriceScale: { borderColor: "rgba(128,128,128,0.25)" },
-      // a fixed set of candles (a trade's window, no `onNeedOlder`) keeps its edges: zooming or panning out never shows empty space
-      timeScale: { borderColor: "rgba(128,128,128,0.25)", timeVisible: true, secondsVisible: false, rightOffset: 4, fixLeftEdge: !needOlder.current, fixRightEdge: !needOlder.current },
+      timeScale: { borderColor: "rgba(128,128,128,0.25)", timeVisible: true, secondsVisible: false, rightOffset: 4, fixLeftEdge: fixEdges, fixRightEdge: fixEdges },
       crosshair: { mode: 1 },
     });
     const series = chart.addSeries(CandlestickSeries, {
@@ -82,7 +83,7 @@ export function CandleChart({ candles, lines = [], markers = [], height = 420, f
       overlaySeries.current = [];
       firstT.current = null;
     };
-  }, [height]);
+  }, [height, fixEdges]);
 
   useEffect(() => {
     const chart = chartRef.current, series = seriesRef.current;

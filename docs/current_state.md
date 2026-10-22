@@ -183,6 +183,15 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    history, gold's CFD profile, the live S7 configuration (as the Strategies page and docs/RESULTS_GOLD.md), 1 oz lots
    (`size` / `size_unit`). Totals equal the Strategies page exactly (development 144 trades, $1000 -> $929.88;
    validation 64, $816.48). BTC output path and content unchanged. The page's subtitle names the gold rules on Gold.
+15. **S7 check for gold + its chart scrolls again (2026-10-22, owner: "S7 check works only on BTC, the chart looks bad
+   and does not scroll").** The scroll was a regression of item 12: fixed chart edges applied to every chart without
+   `onNeedOlder`, including the S7 check (no right offset, no panning). Now an explicit `CandleChart fixEdges` prop, set
+   only by the trade charts (`TradesViewer`). Gold: `scripts/s7_review_export.py --instrument XAUUSD [tf] [n]` -> 
+   `data/markets/XAUUSD/s7_review/setups_<tf>.json` (gold history on its session grid, today's `S7Params()` defaults,
+   seed 7): 15m 30 of 487, 1h 40 of 132, 4h all 34. `/api/s7/review` and `/api/s7/labels` (GET/POST) take `market=`;
+   gold's labels are stored under `data/markets/XAUUSD/s7_review/`, BTC's stay in `data/s7_review/` (test
+   `test_s7_review_of_gold_has_its_own_setups_and_labels`). Web restarted (web processes only). e2e S7 / charts /
+   strategies subset: 23 passed.
 
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - confirmed on the full history: S4-S6 trade
