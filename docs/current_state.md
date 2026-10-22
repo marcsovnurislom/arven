@@ -1,8 +1,23 @@
 # ARVEN — Current state
 
-_Last updated: 2026-10-21 (gold (XAUUSD): history downloaded and checked, holiday calendar fixed, full research run done - docs/RESULTS_GOLD.md; live enable awaits the owner; earlier 2026-10-19: G1-G4 code done - see "Gold (XAUUSD)" below; new-feature plan H1-H7 in docs/FEATURES_PLAN.md; earlier: 2026-10-16 improvement pass: S7 detector ~5x faster with identical results, forward review rule, weekly report, daily backup and retention, server deployment files, Telegram live; earlier: live signal loop: `arven live run` runs all five strategies in real time, configurable in config/live.yaml, open interest REST-tailed, Telegram-ready; earlier: every strategy's trades on the Strategies page; S7 trade-management study - no variant helps, S7 forward -7.3 R; earlier: Crowded Shorts sealed test run once: CONFIRMED by the pre-registered rule but weak - CFD +1.68 R / 25 trades, PF 1.27; earlier: web redesign v2: grouped sidebar/drawer/Ctrl+K, chart fit/full-screen/OHLC legend, S7 trade verdicts + SMC zones on the trades page; SMC-zone breakdown of S7 trades; earlier: S7 trades page + $1000 account replay + cost check; owner: no more new strategies; earlier: S7 validation run once: CFD -3.05 R / 102 trades, inside the random-entry control - the development result did not replicate, S7 EXPERIMENTAL; earlier: S7 evaluation stage, development selection CFD +47.6 R / 167 trades in-sample; earlier: S7 owner check round 2 done, variants 12/13 added, labelling stopped; earlier: S7 detector v2 from the owner's round-1 check of 100 setups; earlier: Signal-product build-out Phase 8 complete (8a API, 8b React app, 8c browser tests/Lighthouse); earlier: Strategies S5 and S6 and an ML signal filter (no value) added and evaluated; forward evaluation of S4/S5/S6 wired (first 14 weeks negative); Phase 7b, part 2c: exit-variant study + CFD cost profile; part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
+_Last updated: 2026-10-22 (gold build-out G1-G5 closed - small leftovers listed in the gold section; heartbeat "stale" this morning was the laptop asleep, not a bug; earlier 2026-10-21: gold (XAUUSD): history downloaded and checked, holiday calendar fixed, full research run done - docs/RESULTS_GOLD.md; live enable awaits the owner; earlier 2026-10-19: G1-G4 code done - see "Gold (XAUUSD)" below; new-feature plan H1-H7 in docs/FEATURES_PLAN.md; earlier: 2026-10-16 improvement pass: S7 detector ~5x faster with identical results, forward review rule, weekly report, daily backup and retention, server deployment files, Telegram live; earlier: live signal loop: `arven live run` runs all five strategies in real time, configurable in config/live.yaml, open interest REST-tailed, Telegram-ready; earlier: every strategy's trades on the Strategies page; S7 trade-management study - no variant helps, S7 forward -7.3 R; earlier: Crowded Shorts sealed test run once: CONFIRMED by the pre-registered rule but weak - CFD +1.68 R / 25 trades, PF 1.27; earlier: web redesign v2: grouped sidebar/drawer/Ctrl+K, chart fit/full-screen/OHLC legend, S7 trade verdicts + SMC zones on the trades page; SMC-zone breakdown of S7 trades; earlier: S7 trades page + $1000 account replay + cost check; owner: no more new strategies; earlier: S7 validation run once: CFD -3.05 R / 102 trades, inside the random-entry control - the development result did not replicate, S7 EXPERIMENTAL; earlier: S7 evaluation stage, development selection CFD +47.6 R / 167 trades in-sample; earlier: S7 owner check round 2 done, variants 12/13 added, labelling stopped; earlier: S7 detector v2 from the owner's round-1 check of 100 setups; earlier: Signal-product build-out Phase 8 complete (8a API, 8b React app, 8c browser tests/Lighthouse); earlier: Strategies S5 and S6 and an ML signal filter (no value) added and evaluated; forward evaluation of S4/S5/S6 wired (first 14 weeks negative); Phase 7b, part 2c: exit-variant study + CFD cost profile; part 2 + validation/forward check: S4 validation +0.7 % (40 trades), forward 4 trades; part 2: S4 evaluated on development - negative, -20.5 %, 108 trades, 14.8 % win rate; earlier Phase 7b, part 1: S4's SignalProvider adapter wired end to end and hand-verified; the development backtest/WFO/baselines/stress/per-regime/forward-paper evaluation itself is still to come)_
 
-## Gold (XAUUSD) build-out - IN PROGRESS (branch `feat/gold-xauusd`, started 2026-10-18)
+## Gold (XAUUSD) build-out - DONE, G1-G5 closed 2026-10-22 (branch `feat/gold-xauusd`, started 2026-10-18)
+
+**Closed 2026-10-22 (owner's request).** G1 data, G2 engine, G3 costs, G4 live/web and G5 the full gold evaluation
+(`docs/RESULTS_GOLD.md`, items 4-7 below) are finished; gold paper signals run live next to BTC. Nothing in the gold
+results is evidence of an edge: S4 is the best lead, S7-SMC is being checked forward (item 11). Leftovers, none
+blocking: a second spread check near the 00:00 server rollover (owner, in MT5); a re-run of the 2 phone Playwright
+tests that once timed out (the last full run was 72 passed). The new-feature plan H1-H7 (`docs/FEATURES_PLAN.md`)
+may start now, one stage at a time after the owner's "yes"; H5 is already done.
+
+**Live monitoring note (2026-10-22).** The heartbeat (`data/live/heartbeat.json`) stood at 07:45 UTC while the log
+already showed ticks at 08:32 - not a bug. The Windows event log shows the lid closed at 07:44:53 UTC and the laptop
+asleep until 08:31 UTC; the loop writes the heartbeat after each poll, the poll in flight was frozen with the machine
+and finished on wake. Before that, 03:59-07:44 UTC, every Binance request failed with `getaddrinfo failed` (no network
+on the laptop); the loop marked the data stale (NO_TRADE) as designed and caught up by itself. Live signals on a laptop
+stop whenever it sleeps or is offline - the lasting fix is the server (`docs/DEPLOY_SERVER.md`) or a "do not sleep on
+mains power" setting.
 
 Owner request: add gold with every current strategy, working exactly like BTC, then the full analysis as for BTC
 (especially S7: stops, FVG, management, zones...). Owner's choices: history from Dukascopy + live from Binance
@@ -135,7 +150,8 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    16 weeks), gold ~0.3 trades a week (validation 24 in 18 months) - 30 closed signals take roughly half a year or more.
 
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
-data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - to be confirmed on the full history.
+data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - confirmed on the full history: S4-S6 trade
+normally there (docs/RESULTS_GOLD.md).
 
 ## S7 owner-label outcomes (2026-10-21, analysis only, nothing changed)
 

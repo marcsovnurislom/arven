@@ -46,4 +46,5 @@ before anything tries to find an edge.
 2026-10-19: the owner picked seven "wow" features for people who do not know trading (news countdown, session globe,
 "1000 universes", replay "time machine", Telegram signals as pictures, phone app (PWA), a no-code hypothesis lab).
 The plan, in Russian, is `docs/FEATURES_PLAN.md`. It starts only after the gold evaluation (G5) is finished, one stage
-at a time, each after the owner's approval.
+at a time, each after the owner's approval. **2026-10-22: G5 is finished** (gold build-out closed, results in
+`docs/RESULTS_GOLD.md`); H5 (Telegram pictures) was already done on the owner's request; the rest wait for approval.
