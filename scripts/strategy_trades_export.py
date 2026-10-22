@@ -44,7 +44,6 @@ from arven.engine.grading import Grade  # noqa: E402
 from arven.engine.signal import EngineSignal, SignalVersions, TPLevel  # noqa: E402
 from arven.runs import load_inputs, make_guard  # noqa: E402
 
-H = 3_600_000
 LABELS = {"development": "2020 - mid 2023", "validation": "mid 2023 - 2024", "devval": "2020 - 2024", "test": "2025 - mid 2026 (sealed test)",
           "forward": "Jul 2026 - now (fresh data)"}
 TITLES = {"s4_impulse_retest": "S4 Impulse-Retest", "s5_squeeze_breakout": "S5 Squeeze-Breakout", "s6_trend_pullback": "S6 Trend-Pullback",
@@ -100,12 +99,17 @@ def h1_bars(end_ms: int):
         con.close()
 
 
-def candles(bars, t0: int, t1: int, before_h: int = 48, after_h: int = 24, cap: int = 500) -> list[dict]:
+def candles(bars, t0: int, t1: int, before: int = 48, after: int = 24, cap: int = 500) -> list[dict]:
+    """The 1h bars around a trade, counted in bars, not hours: a market that closes (gold's weekends and holidays)
+    still gets 48 bars of context before the entry; on BTC's unbroken 1h grid this is the same as 48 h / 24 h.
+    A trade too long for ``cap`` bars keeps its whole span: every k consecutive bars are merged into one candle
+    (k = 1 for every shorter trade, i.e. plain 1h bars), so the entry is never cut off."""
     t = bars.open_time_ms
-    a = int(np.searchsorted(t, t0 - before_h * H)); b = int(np.searchsorted(t, t1 + after_h * H))
-    a = max(a, b - cap)
-    return [{"t": int(t[i]), "o": float(bars.open[i]), "h": float(bars.high[i]), "l": float(bars.low[i]), "c": float(bars.close[i]), "v": float(bars.volume[i]), "complete": True}
-            for i in range(a, min(b, len(t))) if np.isfinite(bars.close[i])]
+    a = max(0, int(np.searchsorted(t, t0)) - before); b = min(len(t), int(np.searchsorted(t, t1)) + after)
+    idx = [i for i in range(a, b) if np.isfinite(bars.close[i])]
+    k = -(-len(idx) // cap) if idx else 1
+    return [{"t": int(t[g[0]]), "o": float(bars.open[g[0]]), "h": float(max(bars.high[g])), "l": float(min(bars.low[g])), "c": float(bars.close[g[-1]]),
+             "v": float(sum(bars.volume[g])), "complete": True} for g in (idx[j:j + k] for j in range(0, len(idx), k))]
 
 
 def finish(sid: str, period: str, trades: list[dict], bars) -> dict:

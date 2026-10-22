@@ -56,7 +56,8 @@ export function CandleChart({ candles, lines = [], markers = [], height = 420, f
       layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: css("--muted") || "#9aa3b2", fontFamily: "JetBrains Mono, Consolas, monospace" },
       grid: { vertLines: { color: "rgba(128,128,128,0.08)" }, horzLines: { color: "rgba(128,128,128,0.08)" } },
       rightPriceScale: { borderColor: "rgba(128,128,128,0.25)" },
-      timeScale: { borderColor: "rgba(128,128,128,0.25)", timeVisible: true, secondsVisible: false, rightOffset: 4 },
+      // a fixed set of candles (a trade's window, no `onNeedOlder`) keeps its edges: zooming or panning out never shows empty space
+      timeScale: { borderColor: "rgba(128,128,128,0.25)", timeVisible: true, secondsVisible: false, rightOffset: 4, fixLeftEdge: !needOlder.current, fixRightEdge: !needOlder.current },
       crosshair: { mode: 1 },
     });
     const series = chart.addSeries(CandlestickSeries, {

@@ -148,6 +148,15 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    2026-10-22 (July-October forward was already looked at: 7 trades, -1.3 R) - judge it on signals from that date on,
    with the forward review rule (30 closed signals). Expected pace (from the history): BTC ~0.6 setups a week (9 in
    16 weeks), gold ~0.3 trades a week (validation 24 in 18 months) - 30 closed signals take roughly half a year or more.
+12. **Trade charts show the whole trade (2026-10-22, owner: "the chart does not load fully").** The Strategies page's
+   trade candles (`scripts/strategy_trades_export.py candles`) were cut by calendar hours (48 h before the entry): a gold
+   trade on a Monday got ~9 bars, the weekend being closed. Now 48 bars before / 24 after, counted in bars (identical on
+   BTC's unbroken grid: checked on all 1008 stored BTC trades). Trades longer than 500 bars (S6: 19 BTC, 9 gold) used
+   to lose their entry to the cap; now k consecutive 1h bars are merged into one candle so the whole trade fits. Both
+   exports re-run: totals, R, $ and every non-candle field unchanged (dev/val/test compared with the old files, kept in
+   `data/tmp/{btc,gold}_trades_before_window/`). `CandleChart` fixes both edges when it has no `onNeedOlder` (trade
+   charts), so zooming out no longer shows empty space; the Charts/Signals pages are unchanged. `web/dist` rebuilt.
+   e2e (signals/charts/strategies/S7 subset): 29 passed, 2 desktop tests failed once under load and passed on re-run.
 
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - confirmed on the full history: S4-S6 trade
