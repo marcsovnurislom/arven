@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, tradeSize, type S7Trade, type S7TradeLabel } from "../api";
+import { api, getMarket, tradeSize, type S7Trade, type S7TradeLabel } from "../api";
 import { useI18n } from "../i18n";
 import { useLoad } from "../hooks";
 import { EquityCurve, TradeChart, ZONE_STYLE, usd } from "../TradesViewer";
@@ -79,7 +79,7 @@ export function S7Trades() {
 
   return (
     <>
-      <PageTitle sub={t("s7tHelp")}>{t("nav_s7trades")}</PageTitle>
+      <PageTitle sub={t(getMarket() === "gold" ? "s7tHelpGold" : "s7tHelp")}>{t("nav_s7trades")}</PageTitle>
       <div className="mb-5 flex flex-wrap items-center gap-2">
         <div className="seg" role="group" aria-label={t("nav_s7trades")}>
           {[["development", t("s7tDev")], ["validation", t("s7tVal")]].map(([k, label]) => (

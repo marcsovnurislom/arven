@@ -176,8 +176,13 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
      `sessions` (home/overview/sessions subset: 16 passed).
    - Checked on the real data (a separate server on port 8766): London closes 16:00 UTC (BST), gold's halt 21:00 UTC,
      gold's Saturday cells empty, next holiday Thanksgiving 2026-11-26; desktop / phone / light screenshots, no console
-     errors, no horizontal scroll. **The "ARVEN Web" process (port 8000) must be restarted to serve the two new
-     endpoints** (`web/dist` is already rebuilt).
+     errors, no horizontal scroll. The "ARVEN Web" process (port 8000) was then restarted (only its two processes, the
+     live process untouched) and serves both endpoints.
+14. **S7 trades page for gold (2026-10-22, owner: "it does not work" - the page was empty on Gold).**
+   `scripts/s7_trades_export.py --instrument XAUUSD` writes `data/markets/XAUUSD/s7_study/trades_<period>.json`: gold
+   history, gold's CFD profile, the live S7 configuration (as the Strategies page and docs/RESULTS_GOLD.md), 1 oz lots
+   (`size` / `size_unit`). Totals equal the Strategies page exactly (development 144 trades, $1000 -> $929.88;
+   validation 64, $816.48). BTC output path and content unchanged. The page's subtitle names the gold rules on Gold.
 
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - confirmed on the full history: S4-S6 trade
