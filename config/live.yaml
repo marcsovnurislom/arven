@@ -17,6 +17,7 @@ telegram:
   commands: true              # answer /status /signals ... from allow-listed chats
   daily_summary_hour_utc: 0   # one summary per day at this UTC hour (null = off)
   weekly_report_weekday: 0    # weekly forward report (0 = Monday), sent with the daily summary (null = off)
+  event_reminder_minutes: 60  # FOMC / CPI / NFP reminder this many minutes before, with past moves (null = off)
 
 # Forward review rule (src/arven/live/review.py), fixed 2026-10-16: after min_closed closed signals, a 95 % confidence
 # interval of the mean net R per signal; "losing" if it is wholly below 0. It only flags - switching a strategy off

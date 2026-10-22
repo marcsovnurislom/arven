@@ -202,6 +202,24 @@ def chart_title(signal: EngineSignal, update: SignalUpdate | None = None) -> str
     return head if update is None else f"{update_label(update)}: {head}"
 
 
+EVENT_NAMES = {"FOMC": "решение ФРС по ставке (FOMC)", "CPI": "инфляция в США (CPI)", "NFP": "отчёт по рынку труда США (NFP)"}
+
+
+def event_reminder(event_type: str, event_ms: int, minutes: int, rows: list[tuple[str, int, float | None, float | None, float | None]]) -> str:
+    lines = []
+    for market, n, med, worst, usual in rows:
+        market = {"Gold": "Золото"}.get(market, market)
+        if not n or med is None:
+            lines.append(f"  {market}: истории пока нет")
+            continue
+        base = f", в обычный день в этот час {usual:.2f} %" if usual else ""
+        lines.append(f"  {market}: медиана {med:.2f} %, максимум {worst:.2f} %{base} ({n} публикаций)")
+    body = "\n".join(lines)
+    return (f"Через {minutes} мин: {EVENT_NAMES.get(event_type, event_type)}, {_utc(event_ms)}\n"
+            f"Размах цены за первый час после прошлых публикаций (сила движения, не направление):\n{body}\n"
+            "Это история прошлых публикаций, а не прогноз.")
+
+
 def system_alert(title: str, detail: str) -> str:
     name, _, rest = title.rpartition(": ")
     words = SYSTEM_TITLE.get(rest, rest)

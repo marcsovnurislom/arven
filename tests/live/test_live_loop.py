@@ -127,3 +127,19 @@ def test_stop_event_ends_the_loop(tmp_path, make_config):
 
     run(main())
     assert rec.ticks == []
+
+
+def test_event_reminder_once_per_release_inside_its_lead_time(tmp_path):
+    from arven.core.macro_config import MacroEvent
+
+    ev = MacroEvent(T + 2 * H, "FOMC", "")
+    got: list = []
+    rec, live, state = Recorder(), LiveConfig(), LoopState()
+    deps = rec.deps(queue_event_reminder=got.append, macro_events=(ev,))
+    run(poll_once(live, deps, state, from_ms(T + 59 * MIN), tmp_path / "l"))  # 61 min before: not yet
+    assert got == []
+    for t in (T + H, T + H + 30 * MIN, T + 2 * H - MIN):
+        run(poll_once(live, deps, state, from_ms(t), tmp_path / "l"))
+    assert got == [ev] and state.extra["event_reminders"] == [f"FOMC:{ev.scheduled_at_ms}"]
+    run(poll_once(LiveConfig(telegram={"event_reminder_minutes": None}), deps, LoopState(), from_ms(T + H + MIN), tmp_path / "l"))
+    assert got == [ev]  # switched off

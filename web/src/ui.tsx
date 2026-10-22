@@ -10,6 +10,16 @@ export const signClass = (x: number | null | undefined) => (x === null || x === 
 export const fmtTime = (ms: number) => new Date(ms).toISOString().replace("T", " ").slice(0, 16) + " UTC";
 export const shortId = (id: string) => id.slice(0, 8);
 
+/** A countdown in words: "2 d 3 h" / "7 h 12 min" / "4 min 05 s". */
+export function until(ms: number, lang: "en" | "ru"): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const [d, h, m, sec] = [Math.floor(s / 86400), Math.floor((s % 86400) / 3600), Math.floor((s % 3600) / 60), s % 60];
+  const u = lang === "ru" ? { d: "д", h: "ч", m: "мин", s: "с" } : { d: "d", h: "h", m: "min", s: "s" };
+  if (d > 0) return `${d} ${u.d} ${h} ${u.h}`;
+  if (h > 0) return `${h} ${u.h} ${m} ${u.m}`;
+  return `${m} ${u.m} ${String(sec).padStart(2, "0")} ${u.s}`;
+}
+
 export function Card({ title, children, right, className = "" }: { title?: ReactNode; children: ReactNode; right?: ReactNode; className?: string }) {
   return (
     <section className={`glass rise p-4 sm:p-5 ${className}`}>

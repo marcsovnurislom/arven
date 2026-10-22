@@ -127,6 +127,37 @@ def format_signal_update(signal: EngineSignal, update: SignalUpdate, lang: str =
     )
 
 
+@dataclass(frozen=True, slots=True)
+class EventReminderRow:
+    """How one market moved in the first hour after past releases of this type (arven.event_moves), in percent."""
+
+    market: str
+    n: int
+    median_range: float | None
+    max_range: float | None
+    median_baseline: float | None
+
+
+EVENT_NAMES_EN = {"FOMC": "Fed rate decision (FOMC)", "CPI": "US inflation, CPI", "NFP": "US jobs report, NFP"}
+
+
+def format_event_reminder(event_type: str, event_ms: int, minutes: int, rows: tuple[EventReminderRow, ...], lang: str = "en") -> str:
+    if lang == "ru":
+        return ru.event_reminder(event_type, event_ms, minutes,
+                                 [(r.market, r.n, r.median_range, r.max_range, r.median_baseline) for r in rows])
+    lines = []
+    for r in rows:
+        if not r.n or r.median_range is None:
+            lines.append(f"  {r.market}: no measured history")
+            continue
+        usual = f", an ordinary day at this hour {r.median_baseline:.2f} %" if r.median_baseline else ""
+        lines.append(f"  {r.market}: median {r.median_range:.2f} %, largest {r.max_range:.2f} %{usual} ({r.n} releases)")
+    body = "\n".join(lines)
+    return (f"In {minutes} min: {EVENT_NAMES_EN.get(event_type, event_type)}, {from_ms(event_ms).strftime('%Y-%m-%d %H:%M UTC')}\n"
+            f"Price range in the first hour after past releases (size, not direction):\n{body}\n"
+            "History of past releases, not a forecast.")
+
+
 def format_system_alert(title: str, detail: str, lang: str = "en") -> str:
     if lang == "ru":
         return ru.system_alert(title, detail)

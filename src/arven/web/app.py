@@ -19,7 +19,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from arven import event_moves as evm
 from arven.core.config import AppConfig, load_config
+from arven.core.macro_config import load_macro_events
 from arven.core.live_config import load_live_config
 from arven.core.telegram_config import allowed_chat_ids, load_telegram_config
 from arven.core.time import to_ms, utc_now
@@ -198,6 +200,31 @@ def create_app(cfg: AppConfig, config_dir: Path | str | None = None, dist_dir: P
                    "note": "mean (high - low) / open of completed 1h bars - how much the price moved, not which way; past, not a forecast"}
         activity_cache[(m.id, days)] = (now_ms, payload)
         return payload
+
+    events_cache: dict[str, tuple[int, dict[str, Any]]] = {}  # per market: the history barely moves within an hour
+
+    @app.get("/api/events")
+    def events(market: str = market_param) -> dict[str, Any]:
+        """The macro calendar's next releases and how this market moved after past ones (``arven.event_moves``)."""
+        m = resolve(market)
+        now_ms = to_ms(utc_now())
+        calendar = load_macro_events(config_dir)
+        cached = events_cache.get(m.id)
+        if cached is None or now_ms - cached[0] >= ACTIVITY_CACHE_MS:
+            con = open_db()
+            try:
+                bars = evm.load_bars(con, [s for s in (m.history_symbol, m.symbol) if s])
+            finally:
+                con.close()
+            rows = evm.event_rows(bars, calendar, now_ms, calendar=m.calendar)
+            cached = (now_ms, {"summary": evm.summarize(rows), "recent": rows[-40:], "measured": len(rows)})
+            events_cache[m.id] = cached
+        return {
+            "now_ms": now_ms, "market": m.id, "horizons_min": list(evm.HORIZONS_MIN), "baseline_days": evm.BASELINE_DAYS,
+            "upcoming": evm.upcoming(calendar, now_ms), "known_until": evm.calendar_known_until(calendar), **cached[1],
+            "note": "range = (high - low) / price at the release, move = |end - start| / start, in %: size, not direction; "
+                    "history of past releases, not a forecast",
+        }
 
     @app.get("/api/signals")
     def signals(strategy: str | None = None, limit: int = Query(100, ge=1, le=1000), market: str = market_param) -> dict[str, Any]:

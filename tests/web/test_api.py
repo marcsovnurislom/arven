@@ -299,3 +299,13 @@ def test_activity_grid_from_stored_hourly_bars(env):
     g = client.get("/api/activity", params={"market": "gold"}).json()
     assert g["bars"] == 0 and all(v is None for row in g["mean_range_pct"] for v in row)
     assert client.get("/api/activity", params={"days": 3}).status_code == 422
+
+
+def test_events_lists_the_next_releases_and_a_summary_per_type(env):
+    _, client, now = env
+    e = client.get("/api/events").json()
+    assert e["market"] == "btc" and e["horizons_min"] == [15, 60, 240]
+    assert all(x["time_ms"] > e["now_ms"] for x in e["upcoming"]) and set(e["known_until"]) == {"FOMC", "CPI", "NFP"}
+    assert set(e["summary"]) == {"FOMC", "CPI", "NFP"}  # the fixture has no 15m bars: every type measured 0 times
+    assert e["measured"] == 0 and all(v == {"n": 0} for per in e["summary"].values() for v in per.values())
+    assert client.get("/api/events", params={"market": "gold"}).json()["market"] == "gold"

@@ -1,8 +1,8 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { api, getMarket, type Activity, type CentreSession, type MarketSession } from "../api";
 import { useI18n, type Lang } from "../i18n";
-import { useLoad } from "../hooks";
-import { Card, Chip, ErrorBox, PageTitle, Skeleton, fmtTime } from "../ui";
+import { useLoad, useNow } from "../hooks";
+import { Card, Chip, ErrorBox, PageTitle, Skeleton, fmtTime, until } from "../ui";
 
 const Globe = lazy(() => import("../Globe").then((m) => ({ default: m.Globe })));
 
@@ -12,25 +12,6 @@ const RU_HOLIDAYS: Record<string, string> = {
   "Good Friday": "Страстная пятница", "Memorial Day": "День памяти", Juneteenth: "Джунтинс", "Independence Day": "День независимости США",
   "Labor Day": "День труда", Thanksgiving: "День благодарения", "Day after Thanksgiving": "День после Дня благодарения", Christmas: "Рождество",
 };
-
-function useNow(ms: number): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), ms);
-    return () => window.clearInterval(id);
-  }, [ms]);
-  return now;
-}
-
-/** "2 d 3 h" / "7 h 12 min" / "4 min 05 s". */
-function until(ms: number, lang: Lang): string {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  const [d, h, m, sec] = [Math.floor(s / 86400), Math.floor((s % 86400) / 3600), Math.floor((s % 3600) / 60), s % 60];
-  const u = lang === "ru" ? { d: "д", h: "ч", m: "мин", s: "с" } : { d: "d", h: "h", m: "min", s: "s" };
-  if (d > 0) return `${d} ${u.d} ${h} ${u.h}`;
-  if (h > 0) return `${h} ${u.h} ${m} ${u.m}`;
-  return `${m} ${u.m} ${String(sec).padStart(2, "0")} ${u.s}`;
-}
 
 function localClock(tz: string, now: number, lang: Lang): string {
   try {

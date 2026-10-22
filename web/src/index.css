@@ -370,3 +370,18 @@ kbd { font-family: "JetBrains Mono", Consolas, monospace; font-size: 11px; paddi
 .heat-cell.now { border-color: var(--text); }
 .heat-legend { display: inline-block; width: 90px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, color-mix(in srgb, var(--gold) 8%, transparent), var(--gold)); }
 @media (prefers-reduced-motion: reduce) { .session-row .dot.on { animation: none; } }
+
+/* News page (H1): countdown and event-vs-ordinary bars */
+.ev-clock { display: flex; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+.ev-clock-cell { display: grid; justify-items: center; min-width: 68px; padding: 10px 8px; border-radius: 14px; border: 1px solid var(--border); background: var(--card); }
+.ev-clock-num { font-size: 34px; font-weight: 700; line-height: 1; color: var(--gold); }
+.ev-clock-unit { margin-top: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--faint); }
+.ev-bar-row { display: grid; grid-template-columns: 110px minmax(0, 1fr) 64px; align-items: center; gap: 8px; margin-top: 6px; font-size: 12px; }
+.ev-bar-label { color: var(--muted); }
+.ev-bar { height: 10px; border-radius: 6px; background: var(--card); border: 1px solid var(--border); overflow: hidden; }
+.ev-bar-fill { display: block; height: 100%; border-radius: 6px; }
+.ev-bar-fill.event { background: var(--gold); }
+.ev-bar-fill.usual { background: var(--faint); }
+.ev-bar-val { text-align: right; }
+.gold { color: var(--gold); }
+@media (max-width: 640px) { .ev-clock-cell { min-width: 58px; } .ev-clock-num { font-size: 26px; } .ev-bar-row { grid-template-columns: 92px minmax(0, 1fr) 58px; } }

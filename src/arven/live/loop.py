@@ -10,6 +10,8 @@ Every ``poll_seconds``:
 - once a day at ``daily_summary_hour_utc``, queue a daily summary (and on ``weekly_report_weekday`` a weekly forward
   report); system alerts on start, on stale data and after repeated errors;
 - once a day at ``maintenance.hour_utc``, the housekeeping: a backup and the paper-run retention rule;
+- ``telegram.event_reminder_minutes`` before each FOMC / CPI / NFP release, one reminder with how BTC and gold moved
+  after past releases (``arven.event_moves``);
 - write the heartbeat (``<data_dir>/live/heartbeat.json``, the same format as the Phase 5 runtime's, so
   ``arven live heartbeat``, ``/status`` and the web app read it) and a JSONL log.
 
@@ -29,9 +31,11 @@ from pathlib import Path
 from typing import Any
 
 from arven.core.config import AppConfig
+from arven.core.macro_config import MacroEvent
 from arven.core.live_config import LiveConfig
 from arven.core.time import from_ms, to_ms, utc_now
 from arven.core.timeframes import Timeframe
+from arven.event_moves import due_reminders
 from arven.paper.runtime import log_event, write_heartbeat
 
 MIN15 = Timeframe.M15.ms
@@ -93,6 +97,8 @@ class LoopDeps:
     # Each keeps its own progress in ``state.extra["markets"][instrument]``, so one market never holds another back.
     market_ticks: dict[str, Callable[[datetime], Any]] = field(default_factory=dict)
     market_legacy_ticks: dict[str, Callable[[datetime], Any]] = field(default_factory=dict)
+    queue_event_reminder: Callable[[MacroEvent], None] | None = None  # one FOMC / CPI / NFP reminder
+    macro_events: tuple[MacroEvent, ...] = ()  # config/macro_events.csv
 
 
 async def _run(fn: Callable[..., Any], *args: Any) -> tuple[Any, str | None]:
@@ -179,6 +185,19 @@ async def poll_once(live: LiveConfig, deps: LoopDeps, state: LoopState, now: dat
             log_event(log_path, event="maintenance", status="error" if err else "ok", detail=err or json.dumps(res, sort_keys=True))
             if err and deps.queue_system is not None:
                 await _run(deps.queue_system, f"maintenance:{today}", "daily backup failed", err)
+
+    lead = live.telegram.event_reminder_minutes
+    if deps.queue_event_reminder is not None and lead is not None:
+        sent: list[str] = state.extra.setdefault("event_reminders", [])
+        for e in due_reminders(deps.macro_events, now_ms, lead):
+            key = f"{e.event_type}:{e.scheduled_at_ms}"
+            if key in sent:
+                continue
+            _, err = await _run(deps.queue_event_reminder, e)
+            log_event(log_path, event="event_reminder", status="error" if err else "queued", detail=err or key)
+            if err is None:
+                sent.append(key)
+                del sent[:-50]
 
     if deps.send_telegram is not None:
         res, err = await _run(deps.send_telegram)

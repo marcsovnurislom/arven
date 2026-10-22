@@ -37,6 +37,9 @@ One process, `arven live run` (`src/arven/live/loop.py`), wakes every 20 s (`pol
    - `arven backup` with the database into `data/backups`, keeping the newest 7;
    - the retention rule for the hourly paper-run directories: the newest 48 plus the last run of every day are kept,
      and `data/paper/runs.jsonl` keeps every run's id and `result_hash`.
+7. **Before each FOMC / CPI / NFP release** (`telegram.event_reminder_minutes`, default 60; `null` = off): one
+   reminder per release with how BTC and gold moved in the first hour after past releases of that type (median and
+   largest range, an ordinary day at the same hour) - `arven.event_moves`, history only, never a signal.
 
    A failure is logged, alerted once, and retried the next day, not on every poll.
 

@@ -146,3 +146,19 @@ def test_the_picture_falls_back_to_english_words_without_a_cyrillic_font(monkeyp
     assert chart_mod.chart_language("ru") == "en"
     en_png = chart_mod.render_signal_chart(s, _candles(s.event_time_ms), chart_title(s), lang="en")
     assert chart_mod.render_signal_chart(s, _candles(s.event_time_ms), chart_title(s), lang="ru") == en_png
+
+
+def test_event_reminder_text_in_both_languages():
+    from datetime import UTC, datetime
+
+    from arven.core.time import to_ms
+    from arven.telegram.messages import EventReminderRow, format_event_reminder
+
+    t = to_ms(datetime(2026, 10, 28, 18, 0, tzinfo=UTC))
+    rows = (EventReminderRow("BTC", 55, 2.0484, 14.8931, 0.7685), EventReminderRow("Gold", 0, None, None, None))
+    ru_text = format_event_reminder("FOMC", t, 60, rows, "ru")
+    assert ru_text.startswith("Через 60 мин: решение ФРС по ставке (FOMC), 28.10.2026 18:00 UTC")
+    assert "BTC: медиана 2.05 %, максимум 14.89 %, в обычный день в этот час 0.77 % (55 публикаций)" in ru_text
+    assert "Золото: истории пока нет" in ru_text and "не прогноз" in ru_text
+    en = format_event_reminder("CPI", t, 60, rows, "en")
+    assert en.startswith("In 60 min: US inflation, CPI, 2026-10-28 18:00 UTC") and "not a forecast" in en

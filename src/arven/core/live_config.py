@@ -36,6 +36,7 @@ class LiveTelegramConfig(_StrictModel):
     commands: bool = True  # answer bot commands from the allow-listed chats
     daily_summary_hour_utc: int | None = Field(default=0, ge=0, le=23)
     weekly_report_weekday: int | None = Field(default=0, ge=0, le=6)  # 0 = Monday, sent with the daily summary; None = off
+    event_reminder_minutes: int | None = Field(default=60, ge=1, le=1440)  # FOMC/CPI/NFP reminder this long before; None = off
 
 
 class ForwardReviewConfig(_StrictModel):

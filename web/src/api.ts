@@ -215,6 +215,33 @@ export type CentreSession = { id: string; name: string; tz: string; lat: number;
 
 export type Sessions = { now_ms: number; markets: MarketSession[]; centres: CentreSession[]; note: string };
 
+export type EventType = "FOMC" | "CPI" | "NFP";
+export type EventHorizonStats = {
+  n: number;
+  median_range?: number;
+  mean_range?: number;
+  max_range?: number;
+  max_time_ms?: number;
+  median_move?: number;
+  median_baseline?: number | null;
+  median_ratio?: number | null;
+  share_above_baseline?: number | null;
+  n_baseline?: number;
+};
+export type EventRow = { time_ms: number; type: EventType; note: string; horizons: Record<string, { range: number; move: number; baseline: number | null }> };
+export type Events = {
+  now_ms: number;
+  market: string;
+  horizons_min: number[];
+  baseline_days: number;
+  upcoming: { time_ms: number; type: EventType; note: string }[];
+  known_until: Record<EventType, number | null>;
+  summary: Record<EventType, Record<string, EventHorizonStats>>;
+  recent: EventRow[];
+  measured: number;
+  note: string;
+};
+
 export type Activity = {
   market: string;
   source: string;
@@ -294,6 +321,7 @@ export const api = {
   strategies: () => request<{ forward_summary: ForwardSummary | null; strategies: string[] }>(withMarket("/api/strategies")),
   sessions: () => request<Sessions>("/api/sessions"),
   activity: () => request<Activity>(withMarket("/api/activity")),
+  events: () => request<Events>(withMarket("/api/events")),
   screener: () => request<{ supported_symbols: string[]; rows: ScreenerRow[]; note: string }>("/api/screener"),
   research: () => request<{ runs: ResearchRun[] }>(withMarket("/api/research")),
   journal: () => request<{ entries: JournalEntry[]; stats: JournalStats }>("/api/journal"),

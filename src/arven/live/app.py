@@ -13,6 +13,7 @@ from typing import Any
 from arven.core.config import AppConfig
 from arven.core.features_config import FeaturesConfig
 from arven.core.live_config import LiveConfig, LiveMarketConfig
+from arven.core.macro_config import MacroEvent, load_macro_events
 from arven.core.telegram_config import TelegramConfig, _load_dotenv_once
 from arven.core.time import to_ms, utc_now
 from arven.data.storage.db import connect
@@ -185,6 +186,27 @@ def build_deps(
     def maintenance(now: datetime) -> dict[str, Any]:
         return run_maintenance(app, live, config_dir, now, tuple(a for _, a in markets.values()))
 
+    macro_events = load_macro_events(config_dir)
+
+    def queue_event_reminder(event: MacroEvent) -> None:
+        from arven import event_moves as evm
+        from arven.telegram.messages import EventReminderRow, format_event_reminder
+
+        now_ms = to_ms(utc_now())
+        feeds = [("BTC", (app.market.symbol,), app.session_calendar())] + [
+            (labels[n], tuple(s for s in (m.history_instrument, a.market.symbol) if s), a.session_calendar()) for n, (m, a) in markets.items()]
+        rows = []
+        with connect(db) as con:  # the loop's own single writer; nothing else runs during this step
+            for label, symbols, cal in feeds:
+                stats = evm.summarize(evm.event_rows(evm.load_bars(con, symbols), macro_events, now_ms, horizons=(60,), calendar=cal),
+                                      horizons=(60,))[event.event_type]["60"] if event.event_type in evm.EVENT_TYPES else {"n": 0}
+                rows.append(EventReminderRow(label, stats["n"], stats.get("median_range"), stats.get("max_range"), stats.get("median_baseline")))
+        minutes = max(1, round((event.scheduled_at_ms - now_ms) / 60_000))
+        text = format_event_reminder(event.event_type, event.scheduled_at_ms, minutes, tuple(rows), lang)
+        with connect(db) as con:
+            for chat in sorted(chat_ids):
+                enqueue(con, signal_id="event_reminder", event_type=f"{event.event_type}:{event.scheduled_at_ms}", chat_id=chat, text=text, now_ms=now_ms)
+
     return LoopDeps(
         live_tick=live_tick,
         legacy_tick=legacy_tick if live.run_legacy_paper else None,
@@ -196,6 +218,8 @@ def build_deps(
         maintenance=maintenance if live.maintenance.hour_utc is not None else None,
         market_ticks=market_ticks,
         market_legacy_ticks=dict(market_legacy_ticks or {}),
+        queue_event_reminder=queue_event_reminder if alerts_on else None,
+        macro_events=macro_events,
     )
 
 
