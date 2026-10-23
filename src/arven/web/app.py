@@ -359,6 +359,18 @@ def create_app(cfg: AppConfig, config_dir: Path | str | None = None, dist_dir: P
             raise HTTPException(status_code=404, detail="no universes computed for this strategy and period")
         return payload
 
+    @app.get("/api/time_machine/index")
+    def time_machine_index(market: str = market_param) -> dict[str, Any]:
+        """The replay scenarios of this market (``scripts/research/time_machine.py``), with each strategy's result."""
+        return {"scenarios": svc.read_json(resolve(market).research_root / "research" / "time_machine" / "index.json") or []}
+
+    @app.get("/api/time_machine")
+    def time_machine(id: str = Query(..., pattern=r"^[a-z0-9_]{1,60}$"), market: str = market_param) -> dict[str, Any]:  # noqa: A002
+        payload = svc.read_json(resolve(market).research_root / "research" / "time_machine" / f"{id}.json")
+        if payload is None:
+            raise HTTPException(status_code=404, detail="unknown scenario")
+        return payload
+
     trade_labels_path = data_dir / "s7_study" / "trade_labels.json"
 
     @app.get("/api/s7/trade_labels")

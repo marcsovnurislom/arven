@@ -215,7 +215,40 @@ export type CentreSession = { id: string; name: string; tz: string; lat: number;
 
 export type Sessions = { now_ms: number; markets: MarketSession[]; centres: CentreSession[]; note: string };
 
-export type UniverseVerdict = "luck" | "skill_candidate" | "too_few";
+export type TMItem = {
+  kind: "setup" | "fill" | "tp" | "stop_moved" | "close" | "result";
+  t: number;
+  strategy: string;
+  trade: number;
+  side: 1 | -1;
+  price?: number;
+  stop?: number;
+  targets?: number[];
+  level?: string;
+  fraction?: number;
+  weight?: number;
+  reason?: string;
+  net_r?: number;
+  pnl_usd?: number;
+  equity_after?: number;
+  line?: { timeMs: number; price: number }[];
+  level0?: { timeMs: number; price: number };
+  level1?: { timeMs: number; price: number };
+  zone?: { low: number; high: number };
+};
+export type TMStrategy = { title: string; trades: number; final_equity: number; total_r: number };
+export type TMScenarioEntry = { id: string; market: string; title: { en: string; ru: string }; about: { en: string; ru: string }; start_ms: number; end_ms: number; strategies: Record<string, TMStrategy> };
+export type TMScenario = TMScenarioEntry & {
+  tf_ms: number;
+  context_until_ms: number;
+  unit: string;
+  candles: [number, number, number, number, number][];
+  account_rules: { start_equity: number; risk_fraction: number };
+  timelines: Record<string, TMStrategy & { start_equity: number; items: TMItem[] }>;
+  note: string;
+};
+
+export type UniverseVerdict ="luck" | "skill_candidate" | "too_few";
 export type UniverseEntry = { strategy: string; title: string; period: string; period_label: string; trades: number; percentile: number; verdict: UniverseVerdict; draws: number; final_equity: number; final_p50: number };
 export type Universes = UniverseEntry & {
   market: string;
@@ -341,6 +374,8 @@ export const api = {
   sessions: () => request<Sessions>("/api/sessions"),
   activity: () => request<Activity>(withMarket("/api/activity")),
   events: () => request<Events>(withMarket("/api/events")),
+  timeMachineIndex: () => request<{ scenarios: TMScenarioEntry[] }>(withMarket("/api/time_machine/index")),
+  timeMachine: (id: string) => request<TMScenario>(withMarket(`/api/time_machine?id=${id}`)),
   universesIndex: () => request<{ entries: UniverseEntry[] }>(withMarket("/api/universes/index")),
   universes: (strategy: string, period: string) => request<Universes>(withMarket(`/api/universes?strategy=${strategy}&period=${period}`)),
   screener: () => request<{ supported_symbols: string[]; rows: ScreenerRow[]; note: string }>("/api/screener"),

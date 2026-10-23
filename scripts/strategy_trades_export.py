@@ -162,7 +162,8 @@ def replay_signals(signals: list[dict], market) -> list[dict]:
         closes = [u.time_ms for u in res.updates if u.kind.name in ("TP_HIT", "CLOSED")]
         out.append({"id": f"{t}-{'L' if side == 1 else 'S'}", "side": side, "entry_time_ms": t, "exit_time_ms": max(closes), "entry": fill, "stop": stop,
                     "targets": [float(p) for _, _, p in rec["ladder"]], "exit_reasons": [lg.exit_reason for lg in res.resolution.legs],
-                    "net_r": res.resolution.r_multiple - fill * fee / risk, "risk_per_unit": risk})
+                    "net_r": res.resolution.r_multiple - fill * fee / risk, "risk_per_unit": risk,
+                    "events": [{"t": u.time_ms, "kind": u.kind.value, "detail": u.detail} for u in res.updates]})
         free_at = max(closes) + 60_000
     return out
 
@@ -211,6 +212,12 @@ def export_s7() -> None:
                 "id": f"{tf}-{tm(s.arm_index)}-{'L' if s.side == 1 else 'S'}", "side": s.side, "entry_time_ms": o.entry_time_ms, "exit_time_ms": o.exit_time_ms,
                 "entry": leg.entry_price, "stop": leg.stop, "targets": [leg.entry_price + s.side * r * abs(leg.entry_price - leg.stop) for r in leg.ladder_r],
                 "exit_reasons": list(leg.reasons), "net_r": o.net_r, "risk_per_unit": risk,
+                "arm_time_ms": tm(s.arm_index), "tf_ms": int(st.TFS[tf].ms),
+                # every leg's fill and tracked events (the time machine replays them; nothing here changes a result)
+                "events": sorted(
+                    [{"t": f.time_ms, "kind": "FILLED", "detail": f"leg={k};weight={f.weight:.8f};price={f.price:.8f};stop={f.stop:.8f}"} for k, f in enumerate(o.fills)]
+                    + [{"t": u.time_ms, "kind": u.kind.value, "detail": f"leg={k};weight={f.weight:.8f};{u.detail}"} for k, f in enumerate(o.fills) for u in f.events],
+                    key=lambda e: (e["t"], e["kind"] != "FILLED")),
                 "line": {"points": [{"timeMs": tm(s.line.a_index), "price": s.line.a_price}, {"timeMs": tm(s.cross_index), "price": float(s.line.at(s.cross_index))}]},
                 "level0": {"timeMs": tm(s.level0_index), "price": s.level0}, "level1": {"timeMs": tm(s.level1_index), "price": s.level1},
                 "zone": {"low": s.zone_low, "high": s.zone_high},

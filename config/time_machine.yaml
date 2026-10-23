@@ -1,0 +1,64 @@
+# Time machine scenarios (docs/FEATURES_PLAN.md, H4): windows of a market replayed like a video on the web page.
+# Built by scripts/research/time_machine.py from the exported trades (the Strategies page) and stored 15m candles.
+# A window must not touch the sealed test period (config/splits): the builder refuses it. Dates are UTC.
+scenarios:
+  - id: btc_covid_2020
+    market: btc
+    start: 2020-03-01
+    end: 2020-03-31
+    title: {en: "Covid crash, March 2020", ru: "Ковидный обвал, март 2020"}
+    about: {en: "BTC lost half its price in two days, then started to recover.", ru: "BTC за два дня потерял половину цены, потом начал восстанавливаться."}
+  - id: btc_ath_2021
+    market: btc
+    start: 2021-10-25
+    end: 2021-11-25
+    title: {en: "BTC at $69,000, November 2021", ru: "BTC за $69 000, ноябрь 2021"}
+    about: {en: "The all-time high of that cycle and the turn down after it.", ru: "Исторический максимум того цикла и разворот вниз после него."}
+  - id: btc_luna_2022
+    market: btc
+    start: 2022-05-01
+    end: 2022-05-31
+    title: {en: "LUNA collapse, May 2022", ru: "Крах LUNA, май 2022"}
+    about: {en: "A large stablecoin broke and dragged the whole market down.", ru: "Крупный стейблкоин рухнул и потянул вниз весь рынок."}
+  - id: btc_ftx_2022
+    market: btc
+    start: 2022-11-01
+    end: 2022-11-30
+    title: {en: "FTX collapse, November 2022", ru: "Крах FTX, ноябрь 2022"}
+    about: {en: "One of the biggest exchanges went bankrupt within a week.", ru: "Одна из крупнейших бирж обанкротилась за неделю."}
+  - id: btc_etf_2024
+    market: btc
+    start: 2024-02-20
+    end: 2024-03-20
+    title: {en: "ETF rally, spring 2024", ru: "Ралли на ETF, весна 2024"}
+    about: {en: "Spot BTC funds in the US pulled the price to a new high.", ru: "Спотовые BTC-фонды в США вытянули цену к новому максимуму."}
+  - id: btc_fresh_2026
+    market: btc
+    start: 2026-08-15
+    end: 2026-10-20
+    title: {en: "Fresh data, autumn 2026", ru: "Свежие данные, осень 2026"}
+    about: {en: "The newest stretch: what the strategies did on data nobody has tuned them on.", ru: "Самый новый отрезок: что делали стратегии на данных, на которых их никто не настраивал."}
+  - id: gold_covid_2020
+    market: gold
+    start: 2020-03-01
+    end: 2020-04-15
+    title: {en: "Gold in the Covid panic, March 2020", ru: "Золото в ковидной панике, март 2020"}
+    about: {en: "Even gold was sold for cash first, then it became the safe haven again.", ru: "Даже золото сначала продавали ради наличных, потом оно снова стало «тихой гаванью»."}
+  - id: gold_2000_2020
+    market: gold
+    start: 2020-07-15
+    end: 2020-08-31
+    title: {en: "Gold above $2,000 for the first time, August 2020", ru: "Золото впервые выше $2000, август 2020"}
+    about: {en: "A record run and a sharp drop right after it.", ru: "Рекордный рост и резкое падение сразу после него."}
+  - id: gold_records_2024
+    market: gold
+    start: 2024-03-01
+    end: 2024-04-15
+    title: {en: "Gold records, spring 2024", ru: "Рекорды золота, весна 2024"}
+    about: {en: "Gold broke its old highs and kept climbing for weeks.", ru: "Золото пробило старые максимумы и несколько недель шло вверх."}
+  - id: gold_fresh_2026
+    market: gold
+    start: 2026-08-15
+    end: 2026-10-20
+    title: {en: "Fresh data, autumn 2026", ru: "Свежие данные, осень 2026"}
+    about: {en: "The newest stretch of gold history.", ru: "Самый новый отрезок истории золота."}

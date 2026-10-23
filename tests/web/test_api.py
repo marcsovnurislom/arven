@@ -323,3 +323,17 @@ def test_universes_serve_the_research_files_read_only(env):
     assert client.get("/api/universes/index").json()["entries"][0]["percentile"] == 12.0
     assert client.get("/api/universes", params={"strategy": "s7", "period": "validation"}).json()["curves"] == [[1000, 990]]
     assert client.get("/api/universes/index", params={"market": "gold"}).json()["entries"] == []  # gold has its own root
+
+
+def test_time_machine_serves_the_replay_files_read_only(env):
+    cfg, client, _ = env
+    assert client.get("/api/time_machine/index").json()["scenarios"] == []
+    assert client.get("/api/time_machine", params={"id": "btc_x"}).status_code == 404
+    assert client.get("/api/time_machine", params={"id": "../../x"}).status_code == 422
+    root = cfg.data.data_dir / "research" / "time_machine"
+    root.mkdir(parents=True)
+    (root / "index.json").write_text(json.dumps([{"id": "btc_x", "market": "btc"}]))
+    (root / "btc_x.json").write_text(json.dumps({"id": "btc_x", "candles": [[0, 1, 2, 0.5, 1.5]]}))
+    assert client.get("/api/time_machine/index").json()["scenarios"][0]["id"] == "btc_x"
+    assert client.get("/api/time_machine", params={"id": "btc_x"}).json()["candles"] == [[0, 1, 2, 0.5, 1.5]]
+    assert client.get("/api/time_machine", params={"id": "btc_x", "market": "gold"}).status_code == 404  # gold's own root

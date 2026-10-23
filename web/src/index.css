@@ -402,3 +402,18 @@ kbd { font-family: "JetBrains Mono", Consolas, monospace; font-size: 11px; paddi
 .universe-hist i.mark { background: var(--gold); box-shadow: 0 0 0 2px color-mix(in srgb, var(--gold) 25%, transparent); }
 .universe-hist i.start { background: repeating-linear-gradient(180deg, var(--faint) 0 4px, transparent 4px 7px); }
 .warn { color: var(--warn); }
+
+/* Time machine (H4): the replay chart, its controls and the event feed */
+.replay-chart { height: 460px; }
+@media (max-width: 640px) { .replay-chart { height: 320px; } }
+.replay-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.replay-play { min-width: 56px; font-size: 18px; }
+.replay-scrub { width: 100%; accent-color: var(--gold); }
+.replay-feed { display: grid; gap: 8px; max-height: 560px; overflow-y: auto; padding-right: 4px; }
+.replay-feed li { border-left: 2px solid var(--border); padding: 2px 0 2px 10px; }
+.replay-feed li.kind-setup { border-left-color: #f5d061; }
+.replay-feed li.kind-fill { border-left-color: var(--text); }
+.replay-feed li.kind-tp { border-left-color: var(--up); }
+.replay-feed li.kind-stop_moved { border-left-color: var(--warn); }
+.replay-feed li.kind-close { border-left-color: var(--down); }
+.replay-feed li.kind-result { border-left-color: var(--gold); background: var(--gold-soft); border-radius: 0 8px 8px 0; }
