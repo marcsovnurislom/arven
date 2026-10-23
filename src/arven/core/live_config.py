@@ -87,6 +87,9 @@ class LiveConfig(_StrictModel):
     cost_profile: str = "costs_cfd_justmarkets.yaml"  # file in config/ used to resolve signals in R
     include_open_interest: bool = True  # REST-tail open interest (needed by Crowded Shorts' oi_z)
     run_legacy_paper: bool = True  # also run the Stage 8 hourly `paper run` in this process (one DuckDB writer)
+    # a new signal opposite to another strategy's still-active signal on the same market (arven.live.conflicts):
+    # "block" = the alert says do not enter, "note" = it only mentions the conflict, "off" = nothing. Records are unchanged.
+    conflict_mode: Literal["block", "note", "off"] = "block"
     telegram: LiveTelegramConfig = Field(default_factory=LiveTelegramConfig)
     forward_review: ForwardReviewConfig = Field(default_factory=ForwardReviewConfig)
     maintenance: MaintenanceConfig = Field(default_factory=MaintenanceConfig)

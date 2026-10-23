@@ -217,6 +217,26 @@ def _num(x: float | None, spec: str) -> str:
     return "n/a" if x is None else format(x, spec)
 
 
+def format_conflict_note(opposite, same, mode: str, lang: str = "en") -> str | None:
+    """The line put above a new-signal alert when another strategy's signal is active on the same market
+    (``arven.live.conflicts``): opposite -> "do not enter" (``block``) or a warning (``note``); same side -> confirms."""
+    if mode == "off" or not (opposite or same):
+        return None
+    if lang == "ru":
+        return ru.conflict_note([(o.title, o.tf, o.side, o.start_ms) for o in opposite], [(o.title, o.tf, o.side, o.start_ms) for o in same], mode)
+    side = {1: "LONG", -1: "SHORT"}
+    item = lambda o: f"{o.title} ({o.tf}, {side[o.side]} since {from_ms(o.start_ms).strftime('%d.%m %H:%M UTC')})"  # noqa: E731
+    lines = []
+    if opposite:
+        head = "DO NOT ENTER - contradicts" if mode == "block" else "Contradicts"
+        lines.append(f"{head} an active signal: " + "; ".join(item(o) for o in opposite) + ".")
+        if mode == "block":
+            lines.append("This signal is recorded for the statistics only.")
+    if same:
+        lines.append("Confirms: " + "; ".join(item(o) for o in same) + ".")
+    return "\n".join(lines)
+
+
 def format_mistakes_summary(blocks: tuple[tuple[str, str | None, tuple[dict, ...]], ...], lang: str = "en") -> str:
     """Weekly "learning from mistakes" note: per market, when it was built and its clear differences (``proposals`` of
     ``scripts/research/mistakes.py``) - ideas to check, never changes."""

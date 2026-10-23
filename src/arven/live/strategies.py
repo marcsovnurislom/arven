@@ -53,6 +53,8 @@ def natural_key(s: EngineSignal) -> tuple[int, int, float, float]:
 class ProviderStrategy:
     """A ``SignalProvider`` (S4/S5/S6) evaluated at every 15m close; market entry, resolved on its own ladder."""
 
+    tf = "15m"  # its decision timeframe (arven.live.conflicts priority)
+
     def __init__(self, cfg: LiveStrategyConfig, factory: Callable[..., SignalProvider]) -> None:
         if cfg.params:
             raise ValueError(f"{cfg.id}: S4-S6 take no params in config/live.yaml (their rules are pre-registered constants)")
@@ -240,6 +242,8 @@ def s7_outcome(signal: EngineSignal, out: S7Outcome) -> LiveOutcome:
 
 class CrowdedShortsStrategy:
     """Market long at the first signal of a hold block; out at the stop or when the hold ends."""
+
+    tf = "1h"  # decided on hourly features (arven.live.conflicts priority)
 
     def __init__(self, cfg: LiveStrategyConfig) -> None:
         self.strategy_id = cfg.id

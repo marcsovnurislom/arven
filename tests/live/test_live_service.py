@@ -205,3 +205,57 @@ def test_alerts_are_queued_in_the_configured_language(env):
                   telegram_enqueue=lambda con, sid, et, chat, text, now_ms: texts.append(text))
     assert [t.split("\n")[0].split(" [")[0].split(":")[0] for t in texts] == ["НОВЫЙ СИГНАЛ", "НОВЫЙ СИГНАЛ", "Закрыто"]
     assert "Позиция закрыта по стопу" in texts[2]
+
+
+class OpenFake(Fake):
+    """A fake whose signals stay open, with a side and a timeframe (for the conflict check)."""
+
+    def __init__(self, sid: str, times: list[int], side: int, tf: str):
+        super().__init__(sid, times)
+        self.side, self.tf = side, tf
+
+    def scan(self, ctx, after, through, stored):
+        out = []
+        for s in super().scan(ctx, after, through, stored):
+            if self.side == -1:
+                s = EngineSignal(symbol="BTCUSDT", side=-1, strategy_id=s.strategy_id, strategy_version="v1", grade=Grade.EXPERIMENTAL,
+                                 event_time_ms=s.event_time_ms, entry_reference=100.0, stop=101.0, tp_ladder=(TPLevel(1.0, 1.0, 99.0),),
+                                 risk_fraction=0.01, confidence=0.5, regime="n/a", reasons=("fake",), risk_checks=(), versions=SignalVersions("v", "h", None))
+            out.append(s)
+        return out
+
+    def resolve(self, ctx, s):
+        return LiveOutcome(s, (), "open")
+
+
+def test_a_signal_against_another_strategys_open_signal_is_marked_do_not_enter(env):
+    app, fcfg, config_dir = env
+    now = from_ms(LAST_1M + MIN + 30_000)
+    through = (LAST_1M + MIN) // (15 * MIN) * (15 * MIN)
+    long_4h = OpenFake("long_4h", [through - 60 * MIN], 1, "4h")
+    long_1h = OpenFake("long_1h", [through - 30 * MIN], 1, "1h")
+    short_15m = OpenFake("short_15m", [through], -1, "15m")
+    texts: dict[str, str] = {}
+    run_live_tick(app, fcfg, LiveConfig(alert_recency_hours=2), config_dir, now=now, downloader=_downloader(app), chat_ids=frozenset({"1"}),
+                  strategies=[short_15m, long_1h, long_4h], telegram_enqueue=lambda con, sid, et, chat, text, now_ms: texts.__setitem__(sid, text))
+    root = app.data.data_dir / "signals"
+    short_id = read_signals(root, "short_15m")[0].signal_id
+    assert texts[short_id].startswith("DO NOT ENTER - contradicts an active signal: long_4h (4h, LONG since")
+    assert "long_1h (1h, LONG" in texts[short_id].split("\n\n")[0] and "recorded for the statistics only" in texts[short_id]
+    assert texts[read_signals(root, "long_1h")[0].signal_id].startswith("Confirms: long_4h (4h, LONG")
+    assert not texts[read_signals(root, "long_4h")[0].signal_id].startswith(("DO NOT", "Confirms"))  # the first one stands alone
+    assert [len(read_signals(root, s)) for s in ("short_15m", "long_1h", "long_4h")] == [1, 1, 1]  # records unchanged
+    log = [json.loads(x) for x in (app.data.data_dir / "paper" / "conflicts.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert {x["strategy"] for x in log} == {"short_15m", "long_1h"} and next(x for x in log if x["strategy"] == "short_15m")["mode"] == "block"
+
+
+def test_conflict_mode_off_leaves_the_alerts_as_they_were(env):
+    app, fcfg, config_dir = env
+    now = from_ms(LAST_1M + MIN + 30_000)
+    through = (LAST_1M + MIN) // (15 * MIN) * (15 * MIN)
+    texts: list[str] = []
+    run_live_tick(app, fcfg, LiveConfig(alert_recency_hours=2, conflict_mode="off"), config_dir, now=now, downloader=_downloader(app),
+                  chat_ids=frozenset({"1"}), strategies=[OpenFake("a", [through], -1, "15m"), OpenFake("b", [through - 60 * MIN], 1, "4h")],
+                  telegram_enqueue=lambda con, sid, et, chat, text, now_ms: texts.append(text))
+    assert len(texts) == 2 and not any(t.startswith(("DO NOT", "Confirms", "Contradicts")) for t in texts)
+    assert not (app.data.data_dir / "paper" / "conflicts.jsonl").exists()

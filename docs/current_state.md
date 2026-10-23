@@ -300,6 +300,21 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    (signals, S7 trades, universes S7 validation and Crowded Shorts, time machine FTX, mistakes, news, sessions). The
    light-theme fan of random curves made a little darker for print. `docs/RESULTS_FOR_THESIS.md` points to it. No Word
    export: neither python-docx nor pandoc is installed (not added without the owner's go).
+25. **Day 4: S7 on 1h / 4h and signals that do not contradict each other (2026-10-24).** Pre-registered check
+   `scripts/research/s7_timeframes.py` (rule committed in `ec45862` before the run, logged in `evaluations.log`): the live
+   S7 with only `tf` changed - BTC 1h dev 31 / +3.0 R, val 20 / +5.7 R (mean +0.29 vs random p95 +0.43); BTC 4h 8 / +2.1,
+   4 / -0.8; gold 1h 35 / +7.3, 13 / -0.4; gold 4h 7 / -2.8, 6 / +1.3 -> all **not supported** (too few trades; about 9 a
+   year on 1h, 2 on 4h). Added anyway as the owner asked: `s7_1h`, `s7_4h` on BTC and gold, paper, EXPERIMENTAL; their
+   first tick back-filled the forward (BTC 1h 8 signals, -1.1 R so far; gold 1h 6, +0.3 R; gold 4h 1, -1 R).
+   `arven.live.conflicts` + `LiveConfig.conflict_mode` (`block` / `note` / `off`, default and set: block): after every
+   strategy of a market is resolved, a fresh signal opposite to another strategy's still-active (pending / open) signal
+   gets "DO NOT ENTER - contradicts ..." / "НЕ ВХОДИТЬ: противоречит ..." above its alert; a same-side one "Confirms";
+   simultaneous signals: the higher timeframe counts first, then config order. Records, tracking and every forward
+   statistic are unchanged (only the alert text); each conflict appended to `paper/conflicts.jsonl`. Strategy timeframes:
+   S4-S6 15m, Crowded Shorts 1h, S7 from its params. Tests: `tests/live/test_conflicts.py` (4), two end-to-end ticks
+   (block marks the 15m short against an open 4h long and the 1h long as confirming, records unchanged; off changes
+   nothing), the Russian note; the repo-config strategy list and the guide's example (now an E4 split-entry S7 variant,
+   since `s7_1h` exists) updated. Full suite 2530 passed. Live restarted with the control panel ("ВСЁ РАБОТАЕТ").
 
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - confirmed on the full history: S4-S6 trade

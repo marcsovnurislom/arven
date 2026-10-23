@@ -17,7 +17,7 @@ from arven.live.strategies import natural_key, s7_outcome, s7_params
 def test_repo_live_config_is_valid_and_every_kind_is_registered():
     live = load_live_config()
     assert [s.id for s in live.strategies] == ["s4_impulse_retest", "s5_squeeze_breakout", "s6_trend_pullback", "s7_trend_break_fib", "s7_smc",
-                                               "crowded_shorts"]
+                                               "s7_1h", "s7_4h", "crowded_shorts"]
     assert all(s.kind in KINDS for s in live.strategies)
     strategies = build_strategies(live)
     assert [s.strategy_id for s in strategies] == [s.id for s in live.enabled()]

@@ -176,3 +176,16 @@ def test_mistakes_summary_in_both_languages():
     assert "Золото (ещё не посчитано): явно плохих или хороших обстановок пока нет" in ru_text and "а не изменения" in ru_text
     en = format_mistakes_summary(blocks, "en")
     assert "Gold (not built yet): no circumstance is clearly worse or better yet" in en and "not changes" in en
+
+
+def test_conflict_note_in_russian():
+    from arven.live.conflicts import ActiveSignal, priority
+    from arven.telegram.messages import format_conflict_note
+
+    t = 1_792_000_800_000
+    o = ActiveSignal("x", "s7_4h", "S7 4h", "4h", 1, t, None, priority("4h", 0))
+    note = format_conflict_note([o], [], "block", "ru")
+    assert note.startswith("НЕ ВХОДИТЬ: противоречит активному сигналу: S7 4h (4h, ЛОНГ с ") and "только для статистики" in note
+    assert format_conflict_note([o], [], "note", "ru").startswith("Противоречит активному сигналу")
+    assert format_conflict_note([], [o], "block", "ru").startswith("Подтверждает: S7 4h (4h, ЛОНГ")
+    assert format_conflict_note([o], [], "off", "ru") is None and format_conflict_note([], [], "block", "ru") is None

@@ -40,4 +40,4 @@ def test_the_guides_example_of_a_new_s7_variant_is_accepted(tmp_path, capsys):
     anchor = "  - id: s7_smc\n"
     live.write_text(text.replace(anchor, block + anchor, 1), encoding="utf-8")
     assert check.main(str(cfg)) == 0
-    assert "s7_1h (s7, 1h)" in capsys.readouterr().out
+    assert "s7_e4_split (s7, 15m)" in capsys.readouterr().out

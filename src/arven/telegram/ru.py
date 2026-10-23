@@ -240,6 +240,20 @@ def weekly_block(sid: str, grade: str, week_closed: int, week_r: float, since: s
             f"  оценка: {VERDICT.get(verdict, verdict)}")
 
 
+def conflict_note(opposite, same, mode: str) -> str:
+    side = {1: "ЛОНГ", -1: "ШОРТ"}
+    item = lambda t: f"{t[0]} ({t[1]}, {side[t[2]]} с {from_ms(t[3]).strftime('%d.%m %H:%M UTC')})"  # noqa: E731
+    lines = []
+    if opposite:
+        head = "НЕ ВХОДИТЬ: противоречит" if mode == "block" else "Противоречит"
+        lines.append(f"{head} активному сигналу: " + "; ".join(item(o) for o in opposite) + ".")
+        if mode == "block":
+            lines.append("Этот сигнал записан только для статистики.")
+    if same:
+        lines.append("Подтверждает: " + "; ".join(item(o) for o in same) + ".")
+    return "\n".join(lines)
+
+
 MISTAKE_FEATURES = {"trend_4h": "тренд 4h", "trend_1h": "тренд 1h", "volatility": "волатильность", "session": "сессия",
                     "weekday": "день недели", "news": "новости", "stop_atr": "ширина стопа", "move_24h": "движение за сутки"}
 

@@ -42,6 +42,7 @@ from arven.data.storage.db import connect, git_commit
 from arven.engine.signal import EngineSignal
 from arven.engine.signal_store import append_signal, append_update, read_signals, read_updates
 from arven.live.base import LiveContext, LiveOutcome, LiveStrategy
+from arven.live.conflicts import ActiveSignal, check, end_of, priority
 from arven.live.registry import build_strategies, needs_features
 from arven.live.review import forward_review
 from arven.live.strategies import natural_key
@@ -134,7 +135,7 @@ def run_live_tick(
     """One tick (see the module docstring). ``telegram_enqueue(con, signal_id, event_type, chat_id, text, now_ms)``
     is injectable for tests; by default the real outbox."""
     from arven.telegram.chart import candles_until, chart_language, render_signal_chart
-    from arven.telegram.messages import chart_title, format_new_signal, format_signal_update, update_label
+    from arven.telegram.messages import chart_title, format_conflict_note, format_new_signal, format_signal_update, update_label
     from arven.telegram.outbox import charts_dir, enqueue, save_chart
 
     now = now or utc_now()
@@ -212,6 +213,7 @@ def run_live_tick(
         except Exception as exc:  # noqa: BLE001 - the picture is optional; the alert still goes out as text
             outcome.chart_errors.append(f"{s.signal_id} {event_type}: {type(exc).__name__}: {exc}")
     recency_ms = int(live.alert_recency_hours * HOUR_MS)
+    later: list[tuple[LiveStrategy, StrategyTick, list[EngineSignal], list[tuple[str, str, str]]]] = []  # alerts, in strategy order
     for strat in strategies:
         sid = strat.strategy_id
         st = outcome.strategies[sid] = StrategyTick()
@@ -244,13 +246,34 @@ def run_live_tick(
                     if live.telegram.send_updates and now_ms - u.time_ms <= recency_ms:
                         picture(strat, s, _update_event_type(u), u)
                         update_alerts.append((s.signal_id, _update_event_type(u), format_signal_update(s, u, lang)))
-            for s in fresh:  # same order as before: the strategy's new signals, then its updates
-                picture(strat, s, "new_signal")
-                alerts.append((s.signal_id, "new_signal", format_new_signal(s, track_record(st.outcomes, window.start_ms, s.signal_id), lang)))
-            alerts.extend(update_alerts)
+            later.append((strat, st, fresh, update_alerts))
         except Exception as exc:  # noqa: BLE001 - one strategy's failure must not stop the others
             st.error = f"{type(exc).__name__}: {exc}"
     cursor_path.write_text(json.dumps(cursors, sort_keys=True), encoding="utf-8")
+
+    # every strategy is resolved now: a new signal can be checked against the others' active signals (arven.live.conflicts)
+    order = {s.strategy_id: k for k, s in enumerate(strategies)}
+    active = [ActiveSignal(o.signal.signal_id, sid, getattr(s, "title", sid), getattr(s, "tf", "15m"), o.signal.side, o.signal.event_time_ms,
+                           end_of(o.updates), priority(getattr(s, "tf", "15m"), order[sid]))
+              for s in strategies for sid in [s.strategy_id] for o in outcome.strategies[sid].outcomes] if live.conflict_mode != "off" else []
+    for strat, st, fresh, update_alerts in later:
+        for s in fresh:  # same order as before: the strategy's new signals, then its updates
+            picture(strat, s, "new_signal")
+            text = format_new_signal(s, track_record(st.outcomes, window.start_ms, s.signal_id), lang)
+            if live.conflict_mode != "off":
+                me = ActiveSignal(s.signal_id, strat.strategy_id, getattr(strat, "title", strat.strategy_id), getattr(strat, "tf", "15m"), s.side,
+                                  s.event_time_ms, None, priority(getattr(strat, "tf", "15m"), order[strat.strategy_id]))
+                opposite, same = check(me, active)
+                note = format_conflict_note(opposite, same, live.conflict_mode, lang)
+                if note:
+                    text = f"{note}\n\n{text}"
+                if opposite or same:
+                    with (root / "conflicts.jsonl").open("a", encoding="utf-8") as fh:
+                        fh.write(json.dumps({"signal_id": s.signal_id, "strategy": strat.strategy_id, "side": s.side, "time_ms": s.event_time_ms,
+                                             "mode": live.conflict_mode, "against": [o.signal_id for o in opposite], "confirms": [o.signal_id for o in same]},
+                                            sort_keys=True) + "\n")
+            alerts.append((s.signal_id, "new_signal", text))
+        alerts.extend(update_alerts)
 
     if live.telegram.enabled and chat_ids and alerts:
         put = telegram_enqueue or (lambda c, signal_id, event_type, chat_id, text, now_ms: enqueue(
