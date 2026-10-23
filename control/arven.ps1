@@ -1,6 +1,6 @@
 ﻿# ARVEN control panel: status / start / stop / restart / check / backup / site / logs.
 # Double-click the .bat buttons next to this file (they call this script). Nothing here changes a strategy or a result.
-param([Parameter(Mandatory = $true)][ValidateSet("status", "start", "stop", "restart", "check", "backup", "site", "logs", "mistakes")][string]$Action)
+param([Parameter(Mandatory = $true)][ValidateSet("status", "start", "stop", "restart", "check", "backup", "site", "logs", "mistakes", "thesis")][string]$Action)
 
 $ErrorActionPreference = "Continue"
 $Repo = Split-Path -Parent $PSScriptRoot
@@ -113,6 +113,12 @@ switch ($Action) {
     }
     "site" { Start-Process "http://127.0.0.1:8000"; if (-not (SiteOk)) { Say "Сайт не отвечает - нажмите 'Запустить всё' или 'Перезапустить'." "Yellow" } }
     "logs" { Start-Process explorer.exe (Join-Path $Repo "data\live") }
+    "thesis" {
+        Head "Диплом: собрать Word из docs\thesis\ARVEN_DIPLOM.md"
+        & $Py scripts\thesis_docx.py | Out-Host
+        if ($LASTEXITCODE -eq 0) { Start-Process explorer.exe (Join-Path $Repo "docs\thesis") ; Say "Готово: ARVEN_DIPLOM.docx в папке docs\thesis (если файл открыт в Word - закройте его и нажмите снова)." "Green" }
+        else { Say "Не получилось - если файл открыт в Word, закройте его и нажмите снова." "Red" }
+    }
     "mistakes" {
         Head "Работа над ошибками: обновить сделки стратегий и пересчитать (5-15 минут)"
         Say "Если появится 'Cannot open file ... arven.duckdb' - базу на секунду держит live-процесс, скрипт подождёт и повторит." "Gray"

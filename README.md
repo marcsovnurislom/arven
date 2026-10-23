@@ -59,6 +59,10 @@ running, changing settings and fixing problems without Claude.
 | [`CLAUDE.md`](CLAUDE.md) | Permanent project rules and development principles |
 | [`docs/current_state.md`](docs/current_state.md) | Where the project stands, every result, the decisions log |
 | [`docs/LIVE_SIGNALS.md`](docs/LIVE_SIGNALS.md) | The live signal loop: running it, Telegram, changing / adding strategies |
+| [`docs/ITOG_PROEKTA.md`](docs/ITOG_PROEKTA.md) | Hand-over: what exists, results, what to do next (in Russian) |
+| [`docs/ARVEN_BEZ_CLAUDE.md`](docs/ARVEN_BEZ_CLAUDE.md) | Owner's guide: control panel, settings, troubleshooting (in Russian) |
+| [`docs/thesis/ARVEN_DIPLOM.md`](docs/thesis/ARVEN_DIPLOM.md) | Thesis skeleton with every result table and figures; `scripts/thesis_docx.py` builds the .docx |
+| [`docs/S7_REVIEW.md`](docs/S7_REVIEW.md) | Every S7 rule for the owner's corrections, the 0.5 / 0.618 study, multi-timeframe notes |
 | [`docs/DEFENCE_DEMO.md`](docs/DEFENCE_DEMO.md) | 10-minute defence walkthrough (in Russian) |
 | [`docs/RESULTS_FOR_THESIS.md`](docs/RESULTS_FOR_THESIS.md) | Every evaluation in one place, with sources (in Russian) |
 | [`docs/DEPLOY_SERVER.md`](docs/DEPLOY_SERVER.md) | Running ARVEN 24/7 on a Linux VPS with systemd (in Russian) |
