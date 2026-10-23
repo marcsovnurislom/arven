@@ -314,7 +314,8 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    S4-S6 15m, Crowded Shorts 1h, S7 from its params. Tests: `tests/live/test_conflicts.py` (4), two end-to-end ticks
    (block marks the 15m short against an open 4h long and the 1h long as confirming, records unchanged; off changes
    nothing), the Russian note; the repo-config strategy list and the guide's example (now an E4 split-entry S7 variant,
-   since `s7_1h` exists) updated. Full suite 2530 passed. Live restarted with the control panel ("ВСЁ РАБОТАЕТ").
+   since `s7_1h` exists) updated. Full suite: 2528 passed and 2 failed (those two expected the old strategy list and the
+   old guide example); both fixed and their files re-run (14 passed). Live restarted with the control panel ("ВСЁ РАБОТАЕТ").
 
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - confirmed on the full history: S4-S6 trade
