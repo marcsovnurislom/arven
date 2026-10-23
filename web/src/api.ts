@@ -215,6 +215,25 @@ export type CentreSession = { id: string; name: string; tz: string; lat: number;
 
 export type Sessions = { now_ms: number; markets: MarketSession[]; centres: CentreSession[]; note: string };
 
+export type UniverseVerdict = "luck" | "skill_candidate" | "too_few";
+export type UniverseEntry = { strategy: string; title: string; period: string; period_label: string; trades: number; percentile: number; verdict: UniverseVerdict; draws: number; final_equity: number; final_p50: number };
+export type Universes = UniverseEntry & {
+  market: string;
+  seed: number[];
+  git_commit: string | null;
+  created_at: string;
+  templates: number;
+  random_trades_mean: number;
+  strategy_result: { final_equity: number; total_r: number; mean_r: number; curve: number[] };
+  universes: { final_p05: number; final_p50: number; final_p95: number; share_above_start: number; total_r_p50: number; mean_r_p50: number; mean_r_p95: number };
+  percentile_total_r: number;
+  skill_percentile: number;
+  min_trades: number;
+  account_rules: { start_equity: number; risk_fraction: number };
+  finals: number[];
+  curves: number[][];
+};
+
 export type EventType = "FOMC" | "CPI" | "NFP";
 export type EventHorizonStats = {
   n: number;
@@ -322,6 +341,8 @@ export const api = {
   sessions: () => request<Sessions>("/api/sessions"),
   activity: () => request<Activity>(withMarket("/api/activity")),
   events: () => request<Events>(withMarket("/api/events")),
+  universesIndex: () => request<{ entries: UniverseEntry[] }>(withMarket("/api/universes/index")),
+  universes: (strategy: string, period: string) => request<Universes>(withMarket(`/api/universes?strategy=${strategy}&period=${period}`)),
   screener: () => request<{ supported_symbols: string[]; rows: ScreenerRow[]; note: string }>("/api/screener"),
   research: () => request<{ runs: ResearchRun[] }>(withMarket("/api/research")),
   journal: () => request<{ entries: JournalEntry[]; stats: JournalStats }>("/api/journal"),

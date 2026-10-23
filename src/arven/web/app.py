@@ -342,6 +342,23 @@ def create_app(cfg: AppConfig, config_dir: Path | str | None = None, dist_dir: P
         payload = svc.read_json(resolve(market).research_root / "strategy_trades" / strategy / f"{period}.json")
         return payload if payload is not None else {"strategy": strategy, "period": period, "trades": [], "summary": None}
 
+    universe_periods = ("development", "validation", "forward")
+
+    @app.get("/api/universes/index")
+    def universes_index(market: str = market_param) -> dict[str, Any]:
+        """Which strategies and periods have "1000 universes" (``scripts/research/universes.py``), with their verdicts."""
+        return {"entries": svc.read_json(resolve(market).research_root / "research" / "universes" / "index.json") or []}
+
+    @app.get("/api/universes")
+    def universes(strategy: str = Query(..., pattern=r"^[a-z0-9_]{1,40}$"), period: str = Query("development"),
+                  market: str = market_param) -> dict[str, Any]:
+        if period not in universe_periods:
+            raise HTTPException(status_code=422, detail=f"period must be one of {universe_periods}")
+        payload = svc.read_json(resolve(market).research_root / "research" / "universes" / f"{strategy}_{period}.json")
+        if payload is None:
+            raise HTTPException(status_code=404, detail="no universes computed for this strategy and period")
+        return payload
+
     trade_labels_path = data_dir / "s7_study" / "trade_labels.json"
 
     @app.get("/api/s7/trade_labels")

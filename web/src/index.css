@@ -385,3 +385,19 @@ kbd { font-family: "JetBrains Mono", Consolas, monospace; font-size: 11px; paddi
 .ev-bar-val { text-align: right; }
 .gold { color: var(--gold); }
 @media (max-width: 640px) { .ev-clock-cell { min-width: 58px; } .ev-clock-num { font-size: 26px; } .ev-bar-row { grid-template-columns: 92px minmax(0, 1fr) 58px; } }
+
+/* 1000 universes (H3): the fan, the verdict and the histogram of final balances */
+.universe-fan { display: block; width: 100%; height: 380px; }
+@media (max-width: 640px) { .universe-fan { height: 280px; } }
+.universe-verdict.luck { border-left: 3px solid var(--faint); padding-left: 14px; }
+.universe-verdict.skill_candidate { border-left: 3px solid var(--up); padding-left: 14px; }
+.universe-verdict.too_few { border-left: 3px solid var(--warn); padding-left: 14px; }
+.uv-key { display: inline-block; width: 16px; height: 3px; margin-right: 6px; vertical-align: middle; border-radius: 2px; }
+.uv-key.gold-bg { background: var(--gold); }
+.uv-key.faint-bg { background: var(--faint); opacity: 0.6; }
+.uv-key.dash { background: repeating-linear-gradient(90deg, var(--faint) 0 4px, transparent 4px 7px); }
+.universe-hist { position: relative; display: flex; align-items: flex-end; gap: 1px; height: 90px; }
+.universe-hist span { flex: 1; min-height: 1px; background: color-mix(in srgb, var(--faint) 55%, transparent); border-radius: 2px 2px 0 0; }
+.universe-hist i { position: absolute; top: -4px; bottom: 0; width: 2px; transform: translateX(-1px); }
+.universe-hist i.mark { background: var(--gold); box-shadow: 0 0 0 2px color-mix(in srgb, var(--gold) 25%, transparent); }
+.universe-hist i.start { background: repeating-linear-gradient(180deg, var(--faint) 0 4px, transparent 4px 7px); }

@@ -14,12 +14,13 @@ const Journal = lazy(() => import("./pages/Journal").then((m) => ({ default: m.J
 const Lab = lazy(() => import("./pages/Lab").then((m) => ({ default: m.Lab })));
 const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
 const S7Review = lazy(() => import("./pages/S7Review").then((m) => ({ default: m.S7Review })));
+const Universes = lazy(() => import("./pages/Universes").then((m) => ({ default: m.Universes })));
 const Events = lazy(() => import("./pages/Events").then((m) => ({ default: m.Events })));
 const Sessions = lazy(() => import("./pages/Sessions").then((m) => ({ default: m.Sessions })));
 const S7Trades = lazy(() => import("./pages/S7Trades").then((m) => ({ default: m.S7Trades })));
 const Tour = lazy(() => import("./Tour").then((m) => ({ default: m.Tour })));
 
-const PAGES = ["home", "overview", "signals", "screener", "charts", "strategies", "journal", "lab", "s7review", "s7trades", "settings", "sessions", "events"] as const;
+const PAGES = ["home", "overview", "signals", "screener", "charts", "strategies", "journal", "lab", "s7review", "s7trades", "settings", "sessions", "events", "universes"] as const;
 type Page = (typeof PAGES)[number];
 
 function pageFromHash(): Page {
@@ -107,7 +108,7 @@ function Shell() {
 
   const view = {
     home: <Home go={go} startTour={() => setTour(true)} />, overview: <Overview />, signals: <Signals />, screener: <Screener />, charts: <Charts />,
-    strategies: <Strategies />, journal: <Journal />, lab: <Lab />, s7review: <S7Review />, s7trades: <S7Trades />, sessions: <Sessions />, events: <Events />, settings: <Settings theme={theme} setTheme={setTheme} />,
+    strategies: <Strategies />, journal: <Journal />, lab: <Lab />, s7review: <S7Review />, s7trades: <S7Trades />, sessions: <Sessions />, events: <Events />, universes: <Universes />, settings: <Settings theme={theme} setTheme={setTheme} />,
   }[page];
 
   const label = (p: Page) => t(`nav_${p}` as Key);
@@ -196,7 +197,7 @@ const GROUPS: { key: string; pages: Page[] }[] = [
   { key: "main", pages: ["home"] },
   { key: "grp_market", pages: ["overview", "sessions", "events", "charts", "screener", "signals"] },
   { key: "grp_s7", pages: ["s7trades", "s7review"] },
-  { key: "grp_research", pages: ["strategies", "lab"] },
+  { key: "grp_research", pages: ["strategies", "universes", "lab"] },
   { key: "grp_me", pages: ["journal", "settings"] },
 ];
 const QUICK: Page[] = ["home", "charts", "signals", "s7trades"];
@@ -214,6 +215,7 @@ const ICONS: Record<Page, string> = {
   s7trades: "M4 18 9 12l4 3 7-9M15 6h5v5",
   sessions: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3.6 9h16.8M3.6 15h16.8M12 3c2.5 2.5 3.8 5.5 3.8 9s-1.3 6.5-3.8 9c-2.5-2.5-3.8-5.5-3.8-9s1.3-6.5 3.8-9z",
   events: "M12 8v5l3 2M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9 1h6",
+  universes: "M3 20c3-1 5-6 9-8s6-6 9-9M3 20c4-3 6-4 9-4s5-3 9-5M3 20c3 0 6-2 9-2s6 1 9 0",
   settings: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm0-6v3m0 14v3M2 12h3m14 0h3M4.9 4.9 7 7m10 10 2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1",
 };
 

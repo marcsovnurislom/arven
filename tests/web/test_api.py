@@ -309,3 +309,17 @@ def test_events_lists_the_next_releases_and_a_summary_per_type(env):
     assert set(e["summary"]) == {"FOMC", "CPI", "NFP"}  # the fixture has no 15m bars: every type measured 0 times
     assert e["measured"] == 0 and all(v == {"n": 0} for per in e["summary"].values() for v in per.values())
     assert client.get("/api/events", params={"market": "gold"}).json()["market"] == "gold"
+
+
+def test_universes_serve_the_research_files_read_only(env):
+    cfg, client, _ = env
+    assert client.get("/api/universes/index").json()["entries"] == []
+    assert client.get("/api/universes", params={"strategy": "s7"}).status_code == 404
+    assert client.get("/api/universes", params={"strategy": "s7", "period": "test"}).status_code == 422  # the sealed test is not offered
+    root = cfg.data.data_dir / "research" / "universes"
+    root.mkdir(parents=True)
+    (root / "index.json").write_text(json.dumps([{"strategy": "s7", "period": "validation", "percentile": 12.0}]))
+    (root / "s7_validation.json").write_text(json.dumps({"strategy": "s7", "period": "validation", "curves": [[1000, 990]]}))
+    assert client.get("/api/universes/index").json()["entries"][0]["percentile"] == 12.0
+    assert client.get("/api/universes", params={"strategy": "s7", "period": "validation"}).json()["curves"] == [[1000, 990]]
+    assert client.get("/api/universes/index", params={"market": "gold"}).json()["entries"] == []  # gold has its own root
