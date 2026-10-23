@@ -32,8 +32,8 @@ TF_MS = 15 * 60_000
 CONTEXT_MS = 3 * 86_400_000  # candles before the start, shown at once so the first frame is not empty
 TAIL_MS = 6 * 3_600_000  # candles after the last event
 MAX_HOLD_AFTER_MS = 30 * 86_400_000  # a trade must close within 30 days after the window, or it is left out
-PERIOD_FILES = ("development", "validation", "forward")  # never the sealed test, never Crowded Shorts' devval
-SKIP = ("crowded_shorts",)
+PERIOD_FILES = ("development", "validation", "devval", "forward")  # never the sealed test (devval: Crowded Shorts)
+SKIP: tuple[str, ...] = ()
 MARKETS = {
     "btc": {"instrument": None, "symbols": ("BTCUSDT",), "rules": AccountRules(), "unit": "BTC"},
     "gold": {"instrument": "XAUUSD", "symbols": ("XAUUSD", "XAUUSDT"), "rules": AccountRules(min_lot=1.0, lot_step=1.0), "unit": "oz"},

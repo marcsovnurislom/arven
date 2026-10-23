@@ -2,7 +2,9 @@
 each trade's side, stop distance and R ladder but enter at random 1m bars of the same period (``arven.backtest.universes``).
 
 Inputs are the exported trades (``scripts/strategy_trades_export.py``); the same CFD costs, the same $1000 account rules.
-Crowded Shorts is left out (a time exit, no stop / target ladder to copy). Writes
+Crowded Shorts (a long with a 3 % stop and a 24 h time exit, no target ladder) is resolved by its own simulator
+(``cs_sealed_test.simulate``) at random entry minutes, on development+validation and forward - never the sealed test,
+whose export is display-only. Writes
 ``<research root>/research/universes/<strategy>_<period>.json`` and ``index.json`` - BTC under ``data/``, gold under
 ``data/markets/XAUUSD/`` - each with the seed, draws, git commit, rules and costs (CLAUDE.md rule 10). The web page only
 draws these files. The strategy's own curve is recomputed from its trades with the same account code and must equal the
@@ -25,14 +27,16 @@ import duckdb
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import strategy_trades_export as ex  # noqa: E402
 
 from arven.backtest.universes import (  # noqa: E402
     MIN_TRADES, SKILL_PERCENTILE, RandomTrade, TradeTemplate, equity_curve, percentile_of, thin, universe, verdict,
 )
 
-PERIODS = ("development", "validation", "forward")
-SKIP = ("crowded_shorts",)
+PERIODS = ("development", "validation", "devval", "forward")  # devval: Crowded Shorts' development+validation; never "test"
+SKIP: tuple[str, ...] = ()
+CS = "crowded_shorts"
 SEED = 7
 POINTS = 120  # points kept per curve
 
@@ -47,7 +51,10 @@ def run(sid: str, period: str, market, draws: int) -> dict | None:
         return None
     payload = json.loads(src.read_text(encoding="utf-8"))
     trades = payload["trades"]
-    templates = [t for t in (TradeTemplate.from_trade(x["side"], x["entry"], x["stop"], x["targets"]) for x in trades) if t is not None]
+    if sid == CS:
+        templates = trades  # copied by count: every random trade is the same long / 3 % stop / 24 h rule
+    else:
+        templates = [t for t in (TradeTemplate.from_trade(x["side"], x["entry"], x["stop"], x["targets"]) for x in trades) if t is not None]
     if not templates:
         return None
     own = equity_curve([RandomTrade(0, x["risk_per_unit"], x["net_r"]) for x in trades], ex.RULES)
@@ -59,7 +66,7 @@ def run(sid: str, period: str, market, draws: int) -> dict | None:
     finals, total_rs, mean_rs, counts, curves = [], [], [], [], []
     t0 = time.time()
     for _ in range(draws):
-        u = universe(templates, market, rng, ex.CFD, symbol)
+        u = cs_universe(len(templates), market, rng) if sid == CS else universe(templates, market, rng, ex.CFD, symbol)
         c = equity_curve(u, ex.RULES)
         finals.append(c[-1])
         total_rs.append(sum(x.net_r for x in u))
@@ -92,14 +99,39 @@ def run(sid: str, period: str, market, draws: int) -> dict | None:
     return out
 
 
+def cs_universe(n: int, market, rng: np.random.Generator) -> list[RandomTrade]:
+    """``n`` Crowded Shorts trades at random 1m bars (24 h left after each), through the strategy's own simulator."""
+    import cs_sealed_test as cs
+
+    t = market.time_ms
+    hold = cs.HOLD_H * 3_600_000
+    hi = int(np.searchsorted(t, int(t[-1]) - hold))
+    starts = np.sort(t[rng.integers(0, hi, size=n)])
+    m = {"time_ms": t, "open": market.open, "high": market.high, "low": market.low}
+    res = cs.simulate([(int(s), int(s) + hold) for s in starts], m, market.funding_time_ms, market.funding_rate, ex.CFD, False, False)
+    return [RandomTrade(x["entry_ms"], x["risk"], x["r"]) for x in res]
+
+
 def load_market(period: str):
     """The period's 1m market; waits while the live process holds the database (a long run must not die of that)."""
     for _ in range(120):
         try:
-            return ex.market_for(period)[0].market
+            return joined(ex.market_for(period))
         except duckdb.IOException:
             time.sleep(10)
-    return ex.market_for(period)[0].market
+    return joined(ex.market_for(period))
+
+
+def joined(inputs):
+    """One market over every window of the period (development+validation is two adjacent windows)."""
+    if len(inputs) == 1:
+        return inputs[0].market
+    from arven.backtest.marketdata import MarketData
+
+    ms = [x.market for x in inputs]
+    cat = lambda k: np.concatenate([getattr(m, k) for m in ms])  # noqa: E731
+    return MarketData(cat("time_ms"), cat("open"), cat("high"), cat("low"), cat("close"), ms[0].window_start_ms, ms[-1].window_end_ms,
+                      cat("funding_time_ms"), cat("funding_rate"), ms[0].funding_interval_ms, ms[0].calendar)
 
 
 def main() -> None:

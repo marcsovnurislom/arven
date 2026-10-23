@@ -342,7 +342,7 @@ def create_app(cfg: AppConfig, config_dir: Path | str | None = None, dist_dir: P
         payload = svc.read_json(resolve(market).research_root / "strategy_trades" / strategy / f"{period}.json")
         return payload if payload is not None else {"strategy": strategy, "period": period, "trades": [], "summary": None}
 
-    universe_periods = ("development", "validation", "forward")
+    universe_periods = ("development", "validation", "devval", "forward")
 
     @app.get("/api/universes/index")
     def universes_index(market: str = market_param) -> dict[str, Any]:

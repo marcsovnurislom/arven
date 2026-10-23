@@ -257,6 +257,15 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    already off in live S7 and S7-SMC (`min_touches: 3`). Ideas (split entry, 0.618 with lower-TF confirmation, per-TF
    S7 with a higher-TF priority and one position per market, a per-market conflict layer -> NO_TRADE) wait for the
    owner's corrections and a pre-registered S7 v2.
+21. **Crowded Shorts added to "1000 universes" and the time machine (2026-10-24, owner: "why did you forget Crowded
+   Shorts").** It had been left out of both (no target ladder for the universes' template; the time machine only
+   followed that). Universes: its random traders go through its own simulator (`cs_sealed_test.simulate`: long, 3 %
+   stop, 24 h time exit, CFD costs) at random entry minutes; periods development+validation (`devval`) and forward,
+   never the sealed test. Result: devval $1488 vs random median $1012 (p95 $1162) -> percentile 100, **but devval is
+   where the rule was found** (in-sample; the page's warning now covers it); the sealed test (run once earlier) was a
+   weak +1.68 R / 25 trades; forward 3 trades. Time machine: devval/forward trades included in every scenario, plus
+   `btc_crowded_2022` (2022-03-26 -> 05-10, 7 Crowded Shorts trades). Gold has no Crowded Shorts (XAUUSDT funding is
+   always 0).
 
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - confirmed on the full history: S4-S6 trade

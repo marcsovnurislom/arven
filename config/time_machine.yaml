@@ -20,6 +20,12 @@ scenarios:
     end: 2022-05-31
     title: {en: "LUNA collapse, May 2022", ru: "Крах LUNA, май 2022"}
     about: {en: "A large stablecoin broke and dragged the whole market down.", ru: "Крупный стейблкоин рухнул и потянул вниз весь рынок."}
+  - id: btc_crowded_2022
+    market: btc
+    start: 2022-03-26
+    end: 2022-05-10
+    title: {en: "Crowded shorts, spring 2022", ru: "Толпа в шортах, весна 2022"}
+    about: {en: "The busiest stretch of Crowded Shorts: shorts piled up, funding turned negative, the strategy bought.", ru: "Самый активный отрезок Crowded Shorts: шорты копились, funding ушёл в минус, стратегия покупала."}
   - id: btc_ftx_2022
     market: btc
     start: 2022-11-01

@@ -4,7 +4,7 @@ import { useI18n, type Key } from "../i18n";
 import { useLoad } from "../hooks";
 import { Card, Chip, Empty, ErrorBox, PageTitle, Skeleton, Stat } from "../ui";
 
-const PERIODS = ["development", "validation", "forward"];
+const PERIODS = ["development", "validation", "devval", "forward"];
 const usd = (x: number) => `$${Math.round(x).toLocaleString("en-US")}`;
 
 function colors() {
@@ -162,7 +162,7 @@ export function Universes() {
                   : t("uvBetterThan").replace("{s}", title(d.strategy)).replace("{p}", String(pct))}
               </p>
               <p className="mt-1 text-sm muted">{v === "luck" ? t("uvLuck") : v === "skill_candidate" ? t("uvSkill") : t("uvTooFewHelp")}</p>
-              {d.period === "development" && <p className="mt-2 text-sm warn">{t("uvInSample")}</p>}
+              {(d.period === "development" || d.period === "devval") && <p className="mt-2 text-sm warn">{t("uvInSample")}</p>}
             </div>
           </Card>
           <div className="mb-4 grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
