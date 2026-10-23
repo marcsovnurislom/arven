@@ -290,6 +290,16 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    supported yet. Page `#/mistakes` (Research), API `/api/mistakes`, a weekly Telegram note queued with the weekly
    report (`mistakes_report`, ru / en), control button `9` (re-export both markets with database retries, then
    recompute). Live and web restarted with the restart button; e2e 12 passed; the button run end to end.
+24. **Day 3: the thesis skeleton (2026-10-24).** `docs/thesis/ARVEN_DIPLOM.md` (Russian): title-page placeholders,
+   abstract, introduction (relevance, aim, tasks, object / subject, novelty, methods), chapters 1-4 with drafts and
+   every result table (S1-S3 and ML, S4-S7 on BTC and gold from the Strategies-page exports, Crowded Shorts and the sealed
+   test, 1000 universes, live forward on 2026-10-23, the 0.5 / 0.618 study, learning from mistakes, news moves,
+   limitations), conclusion, a checked reference list (López de Prado, Bailey et al., Harvey & Liu, White, Aronson,
+   Efron & Tibshirani, Fama, Lo, Wilder, LightGBM) and a pre-submission checklist. Figures in `docs/thesis/figures/`:
+   an architecture diagram (`architecture.html` -> `fig01`) and eight light-theme screenshots of the live site
+   (signals, S7 trades, universes S7 validation and Crowded Shorts, time machine FTX, mistakes, news, sessions). The
+   light-theme fan of random curves made a little darker for print. `docs/RESULTS_FOR_THESIS.md` points to it. No Word
+   export: neither python-docx nor pandoc is installed (not added without the owner's go).
 
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - confirmed on the full history: S4-S6 trade

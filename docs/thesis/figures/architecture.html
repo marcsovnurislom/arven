@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>ARVEN architecture</title>
+<style>
+  :root { --ink: #1d232c; --muted: #5a6372; --line: #b9c0cc; --gold: #a07a1c; --soft: #f6f2e8; --blue: #eef3fb; --green: #eef7f1; --red: #fbefef; }
+  body { margin: 0; background: #fff; font-family: "Segoe UI", Arial, sans-serif; color: var(--ink); }
+  .page { width: 1400px; padding: 28px 32px; box-sizing: border-box; }
+  h1 { font-size: 22px; margin: 0 0 18px; }
+  .row { display: grid; gap: 14px; margin-bottom: 14px; }
+  .box { border: 1.5px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13.5px; line-height: 1.35; background: #fff; }
+  .box b { display: block; font-size: 14.5px; margin-bottom: 3px; }
+  .box small { color: var(--muted); }
+  .data { background: var(--blue); } .core { background: var(--soft); } .out { background: var(--green); } .guard { background: var(--red); }
+  .arrow { text-align: center; color: var(--muted); font-size: 20px; line-height: 14px; margin: -4px 0 6px; }
+  .label { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 4px 0 6px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>ARVEN: архитектура системы поддержки торговых решений (только бумажные сигналы)</h1>
+
+  <div class="label">1. Данные</div>
+  <div class="row" style="grid-template-columns: repeat(4, 1fr)">
+    <div class="box data"><b>Binance Futures (bulk + REST)</b>BTCUSDT, XAUUSDT: свечи 1m, funding, open interest<br><small>публичные данные, без ключей</small></div>
+    <div class="box data"><b>Dukascopy</b>История XAUUSD 1m (bid/ask) 2020-2026<br><small>сессии CME, праздники</small></div>
+    <div class="box data"><b>Календарь событий</b>FOMC, CPI, NFP (federalreserve.gov, bls.gov)</div>
+    <div class="box data"><b>DuckDB</b>Идемпотентная загрузка, проверки качества, ресемплинг 1m → 5m / 15m / 1h / 4h</div>
+  </div>
+  <div class="arrow">▼</div>
+
+  <div class="label">2. Признаки и стратегии (один код для бэктеста и реального времени)</div>
+  <div class="row" style="grid-template-columns: 1.2fr 1.6fr 1fr">
+    <div class="box core"><b>Признаки</b>Только по закрытым свечам (available_at ≤ t); тест утечки для каждого признака: значение на усечённых данных = значению на полных</div>
+    <div class="box core"><b>Стратегии</b>S1–S3 (голосование, режим рынка), S4 Impulse-Retest, S5 Squeeze-Breakout, S6 Trend-Pullback, S7 Trend-Break Fib (метод владельца), S7-SMC, Crowded Shorts (funding + OI)</div>
+    <div class="box core"><b>Решение и риск</b>NO_TRADE по умолчанию; стоп всегда; 1 % риска; одна сделка за раз; блокировка у новостей (S1–S3)</div>
+  </div>
+  <div class="arrow">▼</div>
+
+  <div class="row" style="grid-template-columns: 1fr 1fr">
+    <div class="box guard"><b>Исследование и честная оценка</b>
+      Разбиение по времени: development 2020–2023.07 → validation 2023.07–2025 → запечатанный тест 2025–2026.07 (каждое обращение в журнале) → forward<br>
+      Издержки: комиссии, проскальзывание, funding; стресс ×4 · walk-forward с эмбарго · случайный контроль · «1000 вселенных» · работа над ошибками (поправка Бонферрони)</div>
+    <div class="box core"><b>Live-процесс (каждые 15 минут)</b>REST-обновление → все включённые стратегии → журнал сигналов → бумажный трекер до стопа / цели (издержки CFD) → правило форвард-проверки (30 сделок, 95 % интервал)<br><small>задача Windows, автоперезапуск, heartbeat, ежедневный бэкап</small></div>
+  </div>
+  <div class="arrow">▼</div>
+
+  <div class="label">3. Выход для пользователя</div>
+  <div class="row" style="grid-template-columns: repeat(3, 1fr)">
+    <div class="box out"><b>Telegram</b>Сигналы картинкой, сопровождение, итоги дня и недели, напоминания о новостях, команды бота (ru / en)</div>
+    <div class="box out"><b>Веб-приложение (FastAPI + React)</b>Сигналы, графики, стратегии, 1000 вселенных, машина времени, сессии, новости, работа над ошибками; только чтение</div>
+    <div class="box out"><b>LLM (Claude)</b>Только объяснения и ответы на вопросы по уже посчитанным данным; никогда не считает цены, размеры и решения</div>
+  </div>
+</div>
+</body>
+</html>

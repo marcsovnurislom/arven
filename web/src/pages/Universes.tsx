@@ -52,7 +52,7 @@ function Fan({ d, label }: { d: UniversesData; label: string }) {
       const t = reduced ? 10 : (now - start) / 1000;
       const shown = Math.min(d.curves.length, Math.ceil(d.curves.length * Math.min(1, t / 1.0)));
       ctx.lineWidth = 1;
-      ctx.strokeStyle = c.light ? "rgba(40,48,62,0.07)" : "rgba(160,175,200,0.07)";
+      ctx.strokeStyle = c.light ? "rgba(40,48,62,0.11)" : "rgba(160,175,200,0.07)";
       ctx.beginPath();
       for (let i = 0; i < shown; i++) {
         const cv = d.curves[i];
