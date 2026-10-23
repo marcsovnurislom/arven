@@ -63,12 +63,14 @@ def trade_items(strategy: str, n: int, trade: dict[str, Any]) -> list[dict[str, 
 
 
 def scenario_timeline(trades_by_strategy: dict[str, Sequence[dict[str, Any]]], start_ms: int, end_ms: int, rules: AccountRules,
-                      ) -> dict[str, dict[str, Any]]:
-    """Per strategy: its trades entered in ``[start_ms, end_ms)``, as items sorted by ``t``, and the $1000 account
+                      max_exit_ms: int | None = None) -> dict[str, dict[str, Any]]:
+    """Per strategy: its trades entered in ``[start_ms, end_ms)`` (and, with ``max_exit_ms``, closed by then - a trade
+    held for months would stretch a short scenario into a long one), as items sorted by ``t``, and the $1000 account
     replayed over exactly those trades (a fresh start at the scenario's start, in entry order)."""
     out: dict[str, dict[str, Any]] = {}
     for sid, trades in trades_by_strategy.items():
-        chosen = sorted((x for x in trades if start_ms <= int(x["entry_time_ms"]) < end_ms), key=lambda x: int(x["entry_time_ms"]))
+        chosen = sorted((x for x in trades if start_ms <= int(x["entry_time_ms"]) < end_ms
+                         and (max_exit_ms is None or int(x["exit_time_ms"]) <= max_exit_ms)), key=lambda x: int(x["entry_time_ms"]))
         if not chosen:
             continue
         steps = replay_account([TradeForAccount(float(x["risk_per_unit"]), float(x["net_r"])) for x in chosen], rules)

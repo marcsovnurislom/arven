@@ -38,7 +38,8 @@ S5_PROVIDER = SRC / "backtest" / "strategy_s5_provider.py"
 S6_PROVIDER = SRC / "backtest" / "strategy_s6_provider.py"
 S7_SIM = SRC / "backtest" / "strategy_s7_sim.py"
 CS_SIM = SRC / "backtest" / "crowded_shorts_sim.py"  # signal-product execution, like the S4-S7 adapters
-NEW_MODULES = (LOOP, TRACKER, S4_PROVIDER, S5_PROVIDER, S6_PROVIDER, S7_SIM, CS_SIM)
+UNIVERSES = SRC / "backtest" / "universes.py"  # the random-entry control: signal-product trades on the paper tracker
+NEW_MODULES = (LOOP, TRACKER, S4_PROVIDER, S5_PROVIDER, S6_PROVIDER, S7_SIM, CS_SIM, UNIVERSES)
 
 
 def _import_nodes(path: Path):

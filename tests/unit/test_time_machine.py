@@ -93,3 +93,11 @@ def test_no_configured_scenario_touches_the_sealed_test_period():
         b = int(datetime(sc["end"].year, sc["end"].month, sc["end"].day, tzinfo=UTC).timestamp() * 1000)
         assert sc["market"] in ("btc", "gold") and a < b
         assert not overlaps(a - 3 * day, b + 30 * day, lo, hi), sc["id"]  # with the context and room for the last trade's exit
+
+
+def test_a_trade_held_far_beyond_the_window_is_left_out():
+    t = 3_000_000 * M
+    long_hold = s4_trade(t + 10 * M) | {"exit_time_ms": t + 100_000 * M}
+    tl = scenario_timeline({"s6": [s4_trade(t), long_hold]}, t, t + 1_000 * M, AccountRules(), max_exit_ms=t + 2_000 * M)
+    assert tl["s6"]["trades"] == 1 and tl["s6"]["last_t"] <= t + 2_000 * M
+    assert scenario_timeline({"s6": [s4_trade(t), long_hold]}, t, t + 1_000 * M, AccountRules())["s6"]["trades"] == 2

@@ -31,6 +31,7 @@ from arven.time_machine import check_no_lookahead, overlaps, scenario_timeline
 TF_MS = 15 * 60_000
 CONTEXT_MS = 3 * 86_400_000  # candles before the start, shown at once so the first frame is not empty
 TAIL_MS = 6 * 3_600_000  # candles after the last event
+MAX_HOLD_AFTER_MS = 30 * 86_400_000  # a trade must close within 30 days after the window, or it is left out
 PERIOD_FILES = ("development", "validation", "forward")  # never the sealed test, never Crowded Shorts' devval
 SKIP = ("crowded_shorts",)
 MARKETS = {
@@ -91,7 +92,7 @@ def main() -> None:
         market = sc["market"]
         start, end = ms(sc["start"]), ms(sc["end"])
         trades, titles = loaded[market]
-        tl = scenario_timeline(trades, start, end, MARKETS[market]["rules"])
+        tl = scenario_timeline(trades, start, end, MARKETS[market]["rules"], max_exit_ms=end + MAX_HOLD_AFTER_MS)
         last = max([end] + [v["last_t"] for v in tl.values()])
         if overlaps(start - CONTEXT_MS, last + TAIL_MS, test_lo, test_hi):
             raise SystemExit(f"{sc['id']}: the window touches the sealed test period - refused")
