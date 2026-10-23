@@ -417,3 +417,10 @@ kbd { font-family: "JetBrains Mono", Consolas, monospace; font-size: 11px; paddi
 .replay-feed li.kind-stop_moved { border-left-color: var(--warn); }
 .replay-feed li.kind-close { border-left-color: var(--down); }
 .replay-feed li.kind-result { border-left-color: var(--gold); background: var(--gold-soft); border-radius: 0 8px 8px 0; }
+
+/* Learning from mistakes */
+.ms-table td, .ms-table th { white-space: nowrap; }
+.ms-bar { display: inline-block; position: relative; width: 60px; height: 8px; margin-right: 6px; vertical-align: middle; background: var(--card); border-radius: 4px; }
+.ms-bar span { position: absolute; top: 0; bottom: 0; border-radius: 4px; }
+.ms-bar .pos { left: 50%; background: var(--up); }
+.ms-bar .neg { right: 50%; background: var(--down); }

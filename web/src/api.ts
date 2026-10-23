@@ -215,6 +215,16 @@ export type CentreSession = { id: string; name: string; tz: string; lat: number;
 
 export type Sessions = { now_ms: number; markets: MarketSession[]; centres: CentreSession[]; note: string };
 
+export type MistakeCell = { trades: number; win_rate: number; mean_r: number; total_r: number; diff_low: number | null; diff_high: number | null; flag: "worse" | "better" | null };
+export type MistakeReport = { trades: number; mean_r: number | null; total_r: number; tested: number; level: number; min_trades: number; features: Record<string, Record<string, MistakeCell>> };
+export type Mistakes = {
+  market?: string;
+  created_at?: string;
+  features?: string[];
+  strategies: Record<string, { title: string; history: MistakeReport | null; forward: MistakeReport | null }>;
+  proposals: { strategy: string; part: string; feature: string; value: string; flag: "worse" | "better"; trades: number; mean_r: number; rest_mean_r: number }[];
+};
+
 export type TMItem = {
   kind: "setup" | "fill" | "tp" | "stop_moved" | "close" | "result";
   t: number;
@@ -374,6 +384,7 @@ export const api = {
   sessions: () => request<Sessions>("/api/sessions"),
   activity: () => request<Activity>(withMarket("/api/activity")),
   events: () => request<Events>(withMarket("/api/events")),
+  mistakes: () => request<Mistakes>(withMarket("/api/mistakes")),
   timeMachineIndex: () => request<{ scenarios: TMScenarioEntry[] }>(withMarket("/api/time_machine/index")),
   timeMachine: (id: string) => request<TMScenario>(withMarket(`/api/time_machine?id=${id}`)),
   universesIndex: () => request<{ entries: UniverseEntry[] }>(withMarket("/api/universes/index")),

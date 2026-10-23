@@ -278,6 +278,18 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    one, Telegram settings, the news calendar), what needs a programmer, power settings, backups, troubleshooting table,
    where things are, how to brief a future Claude session, the non-negotiable rules. Status and restart were run for
    real: both processes came back, "ВСЁ РАБОТАЕТ".
+23. **Day 2: learning from mistakes (2026-10-24).** `arven.trade_context`: for every trade the circumstances known at its
+   entry (4h / 1h trend vs SMA50, 1h ATR vs its 30-day median, session, weekday, FOMC / CPI / NFP within 2 h, stop width
+   in 1h ATR, the 24 h move in ATR in the trade's direction) - only bars closed by the entry (tested by truncation);
+   `report` compares each circumstance with the strategy's other trades and flags it only with >= 30 trades and a seeded
+   bootstrap interval of the mean-R difference that excludes zero at a Bonferroni-corrected level (tests: a clear loser
+   flagged, a small group and pure noise not). `scripts/research/mistakes.py` over every exported trade (never the
+   sealed test), history and forward separately, each strategy and all together -> `research/mistakes.json` per market.
+   First result (1663 trades): **one** flag - BTC S4 on Thursdays better (37 trades, +1.66 R vs +0.05 R; a weak one
+   among many comparisons); no circumstance is reliably worse for any strategy, so no "do not enter when..." rule is
+   supported yet. Page `#/mistakes` (Research), API `/api/mistakes`, a weekly Telegram note queued with the weekly
+   report (`mistakes_report`, ru / en), control button `9` (re-export both markets with database retries, then
+   recompute). Live and web restarted with the restart button; e2e 12 passed; the button run end to end.
 
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - confirmed on the full history: S4-S6 trade

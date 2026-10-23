@@ -359,6 +359,11 @@ def create_app(cfg: AppConfig, config_dir: Path | str | None = None, dist_dir: P
             raise HTTPException(status_code=404, detail="no universes computed for this strategy and period")
         return payload
 
+    @app.get("/api/mistakes")
+    def mistakes(market: str = market_param) -> dict[str, Any]:
+        """Learning from mistakes (``scripts/research/mistakes.py``): circumstances per strategy, flags and ideas."""
+        return svc.read_json(resolve(market).research_root / "research" / "mistakes.json") or {"strategies": {}, "proposals": []}
+
     @app.get("/api/time_machine/index")
     def time_machine_index(market: str = market_param) -> dict[str, Any]:
         """The replay scenarios of this market (``scripts/research/time_machine.py``), with each strategy's result."""

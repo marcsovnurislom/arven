@@ -162,3 +162,17 @@ def test_event_reminder_text_in_both_languages():
     assert "Золото: истории пока нет" in ru_text and "не прогноз" in ru_text
     en = format_event_reminder("CPI", t, 60, rows, "en")
     assert en.startswith("In 60 min: US inflation, CPI, 2026-10-28 18:00 UTC") and "not a forecast" in en
+
+
+def test_mistakes_summary_in_both_languages():
+    from arven.telegram.messages import format_mistakes_summary
+
+    p = {"strategy": "s4_impulse_retest", "part": "history", "feature": "weekday", "value": "Thu", "flag": "better", "trades": 37,
+         "mean_r": 1.66, "rest_mean_r": 0.05}
+    blocks = (("BTC", "2026-10-24T01:00:00+00:00", (p,)), ("Gold", None, ()))
+    ru_text = format_mistakes_summary(blocks, "ru")
+    assert ru_text.startswith("Работа над ошибками") and "BTC (посчитано 2026-10-24):" in ru_text
+    assert "s4_impulse_retest (история): день недели = Thu - лучше обычного, 37 сделок, +1.66R против +0.05R" in ru_text
+    assert "Золото (ещё не посчитано): явно плохих или хороших обстановок пока нет" in ru_text and "а не изменения" in ru_text
+    en = format_mistakes_summary(blocks, "en")
+    assert "Gold (not built yet): no circumstance is clearly worse or better yet" in en and "not changes" in en

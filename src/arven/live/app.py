@@ -182,6 +182,19 @@ def build_deps(
         with connect(db) as con:
             for chat in sorted(chat_ids):
                 enqueue(con, signal_id="weekly_report", event_type=today, chat_id=chat, text=text, now_ms=now_ms)
+        # learning from mistakes: read what scripts/research/mistakes.py last built (nothing is computed here)
+        from arven.telegram.messages import format_mistakes_summary
+
+        sources = [("BTC", app.data.data_dir / "research" / "mistakes.json")] + [
+            (labels[n], app.data.data_dir / "markets" / (m.history_instrument or n) / "research" / "mistakes.json") for n, (m, _) in markets.items()]
+        blocks = []
+        for name, path in sources:
+            data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+            blocks.append((name, data.get("created_at"), tuple(data.get("proposals", []))))
+        note = format_mistakes_summary(tuple(blocks), lang)
+        with connect(db) as con:
+            for chat in sorted(chat_ids):
+                enqueue(con, signal_id="mistakes_report", event_type=today, chat_id=chat, text=note, now_ms=now_ms)
 
     def maintenance(now: datetime) -> dict[str, Any]:
         return run_maintenance(app, live, config_dir, now, tuple(a for _, a in markets.values()))

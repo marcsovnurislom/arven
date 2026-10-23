@@ -337,3 +337,13 @@ def test_time_machine_serves_the_replay_files_read_only(env):
     assert client.get("/api/time_machine/index").json()["scenarios"][0]["id"] == "btc_x"
     assert client.get("/api/time_machine", params={"id": "btc_x"}).json()["candles"] == [[0, 1, 2, 0.5, 1.5]]
     assert client.get("/api/time_machine", params={"id": "btc_x", "market": "gold"}).status_code == 404  # gold's own root
+
+
+def test_mistakes_serves_the_report_read_only(env):
+    cfg, client, _ = env
+    assert client.get("/api/mistakes").json() == {"strategies": {}, "proposals": []}
+    root = cfg.data.data_dir / "research"
+    root.mkdir(parents=True)
+    (root / "mistakes.json").write_text(json.dumps({"market": "btc", "strategies": {"s7": {"history": {"trades": 3}}}, "proposals": []}))
+    assert client.get("/api/mistakes").json()["strategies"]["s7"]["history"]["trades"] == 3
+    assert client.get("/api/mistakes", params={"market": "gold"}).json()["strategies"] == {}  # gold's own root

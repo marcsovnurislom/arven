@@ -240,6 +240,28 @@ def weekly_block(sid: str, grade: str, week_closed: int, week_r: float, since: s
             f"  оценка: {VERDICT.get(verdict, verdict)}")
 
 
+MISTAKE_FEATURES = {"trend_4h": "тренд 4h", "trend_1h": "тренд 1h", "volatility": "волатильность", "session": "сессия",
+                    "weekday": "день недели", "news": "новости", "stop_atr": "ширина стопа", "move_24h": "движение за сутки"}
+
+
+def mistakes_summary(blocks) -> str:
+    lines = ["Работа над ошибками"]
+    for market, built, proposals in blocks:
+        market = {"Gold": "Золото"}.get(market, market)
+        when = f" (посчитано {built[:10]})" if built else " (ещё не посчитано)"
+        if not proposals:
+            lines.append(f"{market}{when}: явно плохих или хороших обстановок пока нет - для вывода мало сделок.")
+            continue
+        lines.append(f"{market}{when}:")
+        for p in proposals[:5]:
+            word = "хуже обычного" if p["flag"] == "worse" else "лучше обычного"
+            part = "форвард" if p["part"] == "forward" else "история"
+            lines.append(f"  {p['strategy']} ({part}): {MISTAKE_FEATURES.get(p['feature'], p['feature'])} = {p['value']} - {word}, "
+                         f"{p['trades']} сделок, {p['mean_r']:+.2f}R против {p['rest_mean_r']:+.2f}R")
+    lines.append("Это идеи для проверки на свежих данных, а не изменения. Подробно: Исследования -> Работа над ошибками.")
+    return "\n".join(lines)
+
+
 def weekly_report(week_label: str, blocks: list[str]) -> str:
     body = "\n".join(blocks) if blocks else "Стратегий нет."
     return (f"Недельный отчёт forward — {week_label}\n{body}\n\n"

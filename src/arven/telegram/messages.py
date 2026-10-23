@@ -217,6 +217,26 @@ def _num(x: float | None, spec: str) -> str:
     return "n/a" if x is None else format(x, spec)
 
 
+def format_mistakes_summary(blocks: tuple[tuple[str, str | None, tuple[dict, ...]], ...], lang: str = "en") -> str:
+    """Weekly "learning from mistakes" note: per market, when it was built and its clear differences (``proposals`` of
+    ``scripts/research/mistakes.py``) - ideas to check, never changes."""
+    if lang == "ru":
+        return ru.mistakes_summary(blocks)
+    lines = ["Learning from mistakes"]
+    for market, built, proposals in blocks:
+        when = f" (built {built[:10]})" if built else " (not built yet)"
+        if not proposals:
+            lines.append(f"{market}{when}: no circumstance is clearly worse or better yet - too few trades for a conclusion.")
+            continue
+        lines.append(f"{market}{when}:")
+        for p in proposals[:5]:
+            word = "worse" if p["flag"] == "worse" else "better"
+            lines.append(f"  {p['strategy']} ({p['part']}): {p['feature']} = {p['value']} - {word} than usual, "
+                         f"{p['trades']} trades, {p['mean_r']:+.2f}R vs {p['rest_mean_r']:+.2f}R")
+    lines.append("Ideas to check on fresh data, not changes. Details: Research -> Learning from mistakes.")
+    return "\n".join(lines)
+
+
 def format_weekly_report(week_label: str, since_label: str, rows: tuple[WeeklyReportRow, ...], lang: str = "en") -> str:
     blocks = []
     for r in rows:

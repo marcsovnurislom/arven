@@ -1,3 +1,3 @@
-@echo off
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0arven.ps1" restart
-pause
+@echo off
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0arven.ps1" restart
+pause

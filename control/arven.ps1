@@ -1,6 +1,6 @@
 ﻿# ARVEN control panel: status / start / stop / restart / check / backup / site / logs.
 # Double-click the .bat buttons next to this file (they call this script). Nothing here changes a strategy or a result.
-param([Parameter(Mandatory = $true)][ValidateSet("status", "start", "stop", "restart", "check", "backup", "site", "logs")][string]$Action)
+param([Parameter(Mandatory = $true)][ValidateSet("status", "start", "stop", "restart", "check", "backup", "site", "logs", "mistakes")][string]$Action)
 
 $ErrorActionPreference = "Continue"
 $Repo = Split-Path -Parent $PSScriptRoot
@@ -113,4 +113,18 @@ switch ($Action) {
     }
     "site" { Start-Process "http://127.0.0.1:8000"; if (-not (SiteOk)) { Say "Сайт не отвечает - нажмите 'Запустить всё' или 'Перезапустить'." "Yellow" } }
     "logs" { Start-Process explorer.exe (Join-Path $Repo "data\live") }
+    "mistakes" {
+        Head "Работа над ошибками: обновить сделки стратегий и пересчитать (5-15 минут)"
+        Say "Если появится 'Cannot open file ... arven.duckdb' - базу на секунду держит live-процесс, скрипт подождёт и повторит." "Gray"
+        foreach ($inst in @(@(), @("--instrument", "XAUUSD"))) {
+            for ($i = 1; $i -le 30; $i++) {
+                $out = & $Py scripts\strategy_trades_export.py @inst 2>&1 | Out-String
+                if ($LASTEXITCODE -eq 0) { break }
+                if ($out -notmatch "Cannot open file") { Say $out "Red"; break }
+                Start-Sleep -Seconds 10
+            }
+        }
+        & $Py scripts\research\mistakes.py | Out-Host
+        Say "Готово: сайт -> Исследования -> Работа над ошибками (обновите страницу)." "Green"
+    }
 }
