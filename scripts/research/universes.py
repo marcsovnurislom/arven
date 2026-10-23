@@ -21,6 +21,7 @@ import zlib
 from datetime import UTC, datetime
 from pathlib import Path
 
+import duckdb
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -91,6 +92,16 @@ def run(sid: str, period: str, market, draws: int) -> dict | None:
     return out
 
 
+def load_market(period: str):
+    """The period's 1m market; waits while the live process holds the database (a long run must not die of that)."""
+    for _ in range(120):
+        try:
+            return ex.market_for(period)[0].market
+        except duckdb.IOException:
+            time.sleep(10)
+    return ex.market_for(period)[0].market
+
+
 def main() -> None:
     args = sys.argv[1:]
     if args[:1] == ["--instrument"]:
@@ -105,12 +116,19 @@ def main() -> None:
     wanted = [s for s in dict.fromkeys(e["strategy"] for e in index) if s not in SKIP and (not args or s in args)]
     entries = []
     for period in PERIODS:
-        market = ex.market_for(period)[0].market
+        market = None
         for sid in wanted:
-            res = run(sid, period, market, draws)
-            if res is None:
-                continue
-            (root / f"{sid}_{period}.json").write_text(json.dumps(res), encoding="utf-8")
+            path = root / f"{sid}_{period}.json"
+            done = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+            if done is not None and done.get("draws") == draws and not args:
+                res = done  # resumed: the same seed gives the same file, no need to spend the time again
+                print(f"{sid:20s} {period:11s} already computed ({draws} draws)", flush=True)
+            else:
+                market = market if market is not None else load_market(period)
+                res = run(sid, period, market, draws)
+                if res is None:
+                    continue
+                path.write_text(json.dumps(res), encoding="utf-8")
             entries.append({k: res[k] for k in ("strategy", "title", "period", "period_label", "trades", "percentile", "verdict", "draws")}
                            | {"final_equity": res["strategy_result"]["final_equity"], "final_p50": res["universes"]["final_p50"]})
     old = json.loads((root / "index.json").read_text(encoding="utf-8")) if (root / "index.json").exists() and args else []

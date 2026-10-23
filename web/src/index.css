@@ -401,3 +401,4 @@ kbd { font-family: "JetBrains Mono", Consolas, monospace; font-size: 11px; paddi
 .universe-hist i { position: absolute; top: -4px; bottom: 0; width: 2px; transform: translateX(-1px); }
 .universe-hist i.mark { background: var(--gold); box-shadow: 0 0 0 2px color-mix(in srgb, var(--gold) 25%, transparent); }
 .universe-hist i.start { background: repeating-linear-gradient(180deg, var(--faint) 0 4px, transparent 4px 7px); }
+.warn { color: var(--warn); }

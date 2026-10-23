@@ -103,7 +103,8 @@ function Histogram({ d }: { d: UniversesData }) {
         {startPos >= 0 && startPos <= 100 && <i className="start" style={{ left: `${startPos}%` }} />}
         <i className="mark" style={{ left: `${Math.min(99.5, Math.max(0.5, pos))}%` }} />
       </div>
-      <div className="mt-1 flex justify-between text-xs faint num"><span>{usd(lo)}</span><span>{t("uvFinals")}</span><span>{usd(hi)}</span></div>
+      <div className="mt-1 flex justify-between text-xs faint num"><span>{usd(lo)}</span><span>{usd(hi)}</span></div>
+      <p className="mt-1 text-xs faint">{t("uvFinals")}</p>
     </div>
   );
 }
@@ -161,6 +162,7 @@ export function Universes() {
                   : t("uvBetterThan").replace("{s}", title(d.strategy)).replace("{p}", String(pct))}
               </p>
               <p className="mt-1 text-sm muted">{v === "luck" ? t("uvLuck") : v === "skill_candidate" ? t("uvSkill") : t("uvTooFewHelp")}</p>
+              {d.period === "development" && <p className="mt-2 text-sm warn">{t("uvInSample")}</p>}
             </div>
           </Card>
           <div className="mb-4 grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
