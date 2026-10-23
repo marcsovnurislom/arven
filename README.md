@@ -24,6 +24,12 @@ reasons. It sends them in real time to Telegram and shows them in a local web ap
   - a live signal loop with Telegram alerts
   - a React web app (signals, charts, strategies with their full trade history, journal, lab)
 
+## For the owner: the control panel
+
+Double-click the buttons in **`control\`** (status, open the site, restart after a settings change, stop / start,
+check settings, backup, logs). The Russian guide **[`docs/ARVEN_BEZ_CLAUDE.md`](docs/ARVEN_BEZ_CLAUDE.md)** explains
+running, changing settings and fixing problems without Claude.
+
 ## Quick start (Windows, existing `.venv`)
 
 ```

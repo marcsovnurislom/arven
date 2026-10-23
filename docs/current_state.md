@@ -266,6 +266,18 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    weak +1.68 R / 25 trades; forward 3 trades. Time machine: devval/forward trades included in every scenario, plus
    `btc_crowded_2022` (2022-03-26 -> 05-10, 7 Crowded Shorts trades). Gold has no Crowded Shorts (XAUUSDT funding is
    always 0).
+22. **Day 1 of the hand-over plan: the "survival kit" (2026-10-24).** The owner's Claude Code subscription ends in about 5
+   days; ARVEN must run and be adjusted without it. `control\`: `arven.ps1` (status / start / stop / restart / check /
+   backup / site / logs; Russian output) and eight double-click buttons (`1 Статус.bat` ... `8 Открыть журналы.bat`),
+   plus `ЧИТАЙ_МЕНЯ.txt`. "Restart" runs the settings check first and refuses on an error (the running process keeps
+   its old settings); stop uses the live stop file, stop-all also disables the web task until "start all".
+   `scripts/check_config.py` (every enabled strategy of every market builds; Russian messages; tests: real config
+   passes, unknown timeframe and broken YAML refused, the guide's example block accepted). `docs/ARVEN_BEZ_CLAUDE.md`
+   (Russian): what runs by itself, the buttons, daily / weekly routine, bot commands, the site map, editing
+   `config/live.yaml` (switch a strategy off, add an S7 variant such as 1h under a new id instead of changing a running
+   one, Telegram settings, the news calendar), what needs a programmer, power settings, backups, troubleshooting table,
+   where things are, how to brief a future Claude session, the non-negotiable rules. Status and restart were run for
+   real: both processes came back, "ВСЁ РАБОТАЕТ".
 
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - confirmed on the full history: S4-S6 trade
