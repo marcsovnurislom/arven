@@ -246,6 +246,17 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    - Full suite 2513 passed; full e2e 88 passed, 4 skipped (screenshots) - including the phone tests that once timed
      out.
    - `feat/gold-xauusd` fast-forwarded into `main`.
+20. **S7 review for the owner (2026-10-24, analysis only, nothing changed).** `docs/S7_REVIEW.md` (Russian): every live S7
+   rule A-Z with its origin (owner / analyst / data), the 0.5 vs 0.618 entry question, multi-timeframe signals and how to
+   keep them from contradicting each other. `scripts/research/s7_entry_depth.py` (development only, each setup on its
+   own): about 1 in 5 setups turns from 0.618 without reaching 0.5 and those trades are good (BTC +29.2 R, gold +32.0 R
+   with a 0.618 entry), but when price does reach 0.5 the 0.618 entry is much worse (BTC +8.4 vs +56.1 R); totals BTC
+   0.618 +37.6 / 0.5 +56.1 / split +45.8 R, gold -6.9 / -12.6 / -9.8 R. No feature known at arming (SMC zone position,
+   leg size, pullback speed, 4h trend, session, side, range, level-1 moves) predicts the early turn consistently on both
+   markets; the owner's "0.618 when the SMC zone is only there" rule gave +54.8 R vs +56.1 R. Two-touch entries are
+   already off in live S7 and S7-SMC (`min_touches: 3`). Ideas (split entry, 0.618 with lower-TF confirmation, per-TF
+   S7 with a higher-TF priority and one position per market, a per-market conflict layer -> NO_TRADE) wait for the
+   owner's corrections and a pre-registered S7 v2.
 
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - confirmed on the full history: S4-S6 trade
