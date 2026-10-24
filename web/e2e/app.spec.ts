@@ -98,13 +98,33 @@ test("keyboard shortcuts: page switch, theme and language", async ({ page, isMob
   await open(page, "home");
   await expect(page.locator("main h1")).toBeVisible();
   await page.waitForLoadState("networkidle");
-  await page.keyboard.press("3");
+  await page.keyboard.press("g");
+  await page.keyboard.press("s");
   await expect(page).toHaveURL(/#\/signals/);
   const before = await page.locator("html").getAttribute("data-theme");
   await page.keyboard.press("t");
   await expect(page.locator("html")).not.toHaveAttribute("data-theme", before ?? "");
   await page.keyboard.press("l");
   await expect(page.locator("main h1")).toHaveText("Сигналы");
+});
+
+test("every page has a G-letter key, the help lists them, Escape closes it", async ({ page, isMobile }) => {
+  test.skip(!!isMobile, "keyboard shortcuts are a desktop feature");
+  await open(page, "home");
+  await page.waitForLoadState("networkidle");
+  for (const [key, hash] of [["u", "universes"], ["p", "replay"], ["e", "mistakes"], ["h", "home"]]) {
+    await page.keyboard.press("g");
+    await page.keyboard.press(key);
+    await expect(page).toHaveURL(new RegExp(`#/${hash}`));
+  }
+  await page.keyboard.press("Shift+Slash");
+  const help = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+  await expect(help).toBeVisible();
+  await expect(help).toContainText("G U");
+  await page.keyboard.press("Escape");
+  await expect(help).toBeHidden();
+  await page.keyboard.press("BracketRight");
+  await expect(page).toHaveURL(/#\/overview/);  // the next page in the menu
 });
 
 test("language and theme choices persist across a reload", async ({ page }) => {

@@ -3,6 +3,7 @@ import {
   type IChartApi, type IPriceLine, type ISeriesApi, type ISeriesMarkersPluginApi, type Time, type UTCTimestamp,
 } from "lightweight-charts";
 import { useEffect, useRef, useState } from "react";
+import { useThemeName } from "./hooks";
 import type { Candle } from "./api";
 
 export type ChartLine = { price: number; color: string; title: string; dashed?: boolean };
@@ -49,6 +50,7 @@ export function CandleChart({ candles, lines = [], markers = [], height = 420, f
   needOlder.current = onNeedOlder;
   const [hover, setHover] = useState<Hover | null>(null);
   const lastFit = useRef(fitKey);
+  const theme = useThemeName();  // colours are read when the chart is created: a theme switch re-creates it
 
   useEffect(() => {
     if (!host.current) return;
@@ -83,7 +85,7 @@ export function CandleChart({ candles, lines = [], markers = [], height = 420, f
       overlaySeries.current = [];
       firstT.current = null;
     };
-  }, [height, fixEdges]);
+  }, [height, fixEdges, theme]);
 
   useEffect(() => {
     const chart = chartRef.current, series = seriesRef.current;
@@ -110,7 +112,7 @@ export function CandleChart({ candles, lines = [], markers = [], height = 420, f
       if (added > 0) scale.setVisibleLogicalRange({ from: prevRange.from + added, to: prevRange.to + added });
     }
     firstT.current = candles[0].t;
-  }, [candles, focusTimeMs, range, fitKey, height]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [candles, focusTimeMs, range, fitKey, height, theme]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const series = seriesRef.current;
@@ -119,7 +121,7 @@ export function CandleChart({ candles, lines = [], markers = [], height = 420, f
     priceLines.current = lines.map((l) =>
       series.createPriceLine({ price: l.price, color: l.color, lineWidth: 1, lineStyle: l.dashed ? LineStyle.Dashed : LineStyle.Solid, axisLabelVisible: true, title: l.title }),
     );
-  }, [lines, height]);
+  }, [lines, height, theme]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -131,7 +133,7 @@ export function CandleChart({ candles, lines = [], markers = [], height = 420, f
       ls.setData(pts.map((p) => ({ time: Math.floor(p.timeMs / 1000) as UTCTimestamp, value: p.price })));
       return ls;
     });
-  }, [overlays, height]);
+  }, [overlays, height, theme]);
 
   useEffect(() => {
     const plugin = markersRef.current;
@@ -147,7 +149,7 @@ export function CandleChart({ candles, lines = [], markers = [], height = 420, f
           text: m.text,
         })),
     );
-  }, [markers, candles, height]);
+  }, [markers, candles, height, theme]);
 
   return (
     <div className="relative" style={{ height: fill ? "100%" : height }}>

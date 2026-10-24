@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, getMarket, type Universes as UniversesData } from "../api";
 import { useI18n, type Key } from "../i18n";
-import { useLoad } from "../hooks";
+import { useLoad, useThemeName } from "../hooks";
 import { Card, Chip, Empty, ErrorBox, PageTitle, Skeleton, Stat } from "../ui";
 
 const PERIODS = ["development", "validation", "devval", "forward"];
@@ -17,6 +17,7 @@ function colors() {
 /** The fan: every random trader's balance (faint), the strategy's (gold), the $1000 start (dashed). x = share of the trades done. */
 function Fan({ d, label }: { d: UniversesData; label: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const theme = useThemeName();
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -81,7 +82,7 @@ function Fan({ d, label }: { d: UniversesData; label: string }) {
     });
     ro.observe(el);
     return () => { cancelAnimationFrame(raf); ro.disconnect(); };
-  }, [d]);
+  }, [d, theme]);
   return <canvas ref={ref} className="universe-fan" role="img" aria-label={label} />;
 }
 

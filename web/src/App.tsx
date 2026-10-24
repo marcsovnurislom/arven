@@ -1,6 +1,6 @@
-import { Suspense, lazy, useCallback, useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { api, getMarket, setMarketId, type Market } from "./api";
-import { Aurora } from "./fx";
+import { Aurora, useSpotlight } from "./fx";
 import { useLoad } from "./hooks";
 import { I18nProvider, useI18n, type Key } from "./i18n";
 
@@ -24,6 +24,15 @@ const Tour = lazy(() => import("./Tour").then((m) => ({ default: m.Tour })));
 
 const PAGES = ["home", "overview", "signals", "screener", "charts", "strategies", "journal", "lab", "s7review", "s7trades", "settings", "sessions", "events", "universes", "replay", "mistakes"] as const;
 type Page = (typeof PAGES)[number];
+
+/** Every page's key after G (physical keys, e.code, so they work on any keyboard layout - Russian included). */
+const SHORTCUTS: Record<Page, string> = {
+  home: "KeyH", overview: "KeyO", sessions: "KeyW", events: "KeyN", charts: "KeyC", screener: "KeyF", signals: "KeyS",
+  s7trades: "KeyT", s7review: "KeyR", strategies: "KeyA", universes: "KeyU", replay: "KeyP", mistakes: "KeyE", lab: "KeyL",
+  journal: "KeyJ", settings: "Comma",
+};
+const CHORD_MS = 1500;
+export const keyLabel = (code: string) => (code === "Comma" ? "," : code.replace(/^Key/, ""));
 
 function pageFromHash(): Page {
   const h = window.location.hash.replace(/^#\/?/, "");
@@ -85,24 +94,58 @@ function Shell() {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
+  // the active menu item stays in view when the page changes (the menu scrolls on short screens)
+  useEffect(() => {
+    document.querySelector(".sidebar .side-link.on")?.scrollIntoView({ block: "nearest" });
+  }, [page]);
+
+  useSpotlight();
+  const [help, setHelp] = useState(false);
+  const [chord, setChord] = useState(false);
+  const chordAt = useRef(0);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+      if ((e.ctrlKey || e.metaKey) && e.code === "KeyK") {
         e.preventDefault();
         setPalette((v) => !v);
         return;
       }
-      if (palette || drawer) return;
-      if (tour || e.metaKey || e.ctrlKey || e.altKey || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName)) return;
-      const n = Number(e.key);
-      if (n >= 1 && n <= PAGES.length) go(PAGES[n - 1]);
-      else if (e.key.toLowerCase() === "t") setTheme(theme === "dark" ? "light" : "dark");
-      else if (e.key.toLowerCase() === "m" && markets.length > 1) {
+      if (e.key === "Escape") { setHelp(false); setChord(false); chordAt.current = 0; }
+      if (palette || drawer || tour) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) || el.isContentEditable) return;
+      if (chordAt.current && Date.now() - chordAt.current < CHORD_MS) {  // the second key of "G then a letter"
+        chordAt.current = 0;
+        setChord(false);
+        const target = PAGES.find((p) => SHORTCUTS[p] === e.code);
+        if (target) {
+          e.preventDefault();
+          setHelp(false);
+          go(target);
+        }
+        return;
+      }
+      if (e.code === "KeyG") {
+        chordAt.current = Date.now();
+        setChord(true);
+        window.setTimeout(() => { if (Date.now() - chordAt.current >= CHORD_MS) setChord(false); }, CHORD_MS + 50);
+        return;
+      }
+      if (e.key === "?" || (e.code === "Slash" && e.shiftKey)) {
+        e.preventDefault();
+        setHelp((v) => !v);
+        return;
+      }
+      if (help) return;
+      if (e.code === "BracketLeft" || e.code === "BracketRight") {
+        const order = GROUPS.flatMap((g) => g.pages);
+        const i = order.indexOf(page);
+        go(order[(i + (e.code === "BracketRight" ? 1 : -1) + order.length) % order.length]);
+      } else if (e.code === "KeyT") setTheme(theme === "dark" ? "light" : "dark");
+      else if (e.code === "KeyM" && markets.length > 1) {
         const i = markets.findIndex((m) => m.id === market);
         setMarket(markets[(i + 1) % markets.length].id);
-      }
-      else if (e.key.toLowerCase() === "l") setLang(lang === "en" ? "ru" : "en");
+      } else if (e.code === "KeyL") setLang(lang === "en" ? "ru" : "en");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -118,7 +161,7 @@ function Shell() {
     <a key={p} href={`#/${p}`} aria-current={p === page ? "page" : undefined} className={`side-link ${p === page ? "on" : ""}`} onClick={onClick}>
       <Icon name={p} />
       <span className="truncate">{label(p)}</span>
-      <kbd className="ml-auto hidden xl:inline">{PAGES.indexOf(p) + 1 <= 9 ? PAGES.indexOf(p) + 1 : ""}</kbd>
+      <kbd className="side-kbd ml-auto hidden lg:inline" title={t("kbChord")}>G {keyLabel(SHORTCUTS[p])}</kbd>
     </a>
   );
   const groups = (onClick?: () => void) =>
@@ -157,12 +200,14 @@ function Shell() {
               <button className="btn search-btn" onClick={() => setPalette(true)} aria-label={t("search")}>
                 <span aria-hidden="true">⌕</span><span className="hidden md:inline">{t("search")}</span><kbd className="hidden md:inline">Ctrl K</kbd>
               </button>
+              <button className="btn hidden lg:inline-flex" onClick={() => setHelp(true)} aria-label={t("kbTitle")} title={`${t("kbTitle")} (?)`}>⌨</button>
               <button className="btn" onClick={() => setTour(true)} aria-label={t("tourTitle")}><span aria-hidden="true">✦</span><span className="hidden md:inline"> {t("tourTitle")}</span></button>
               <button className="btn" onClick={() => setLang(lang === "en" ? "ru" : "en")} aria-label={t("language")}>{lang.toUpperCase()}</button>
               <button className="btn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label={t("theme")}>{theme === "dark" ? "☾" : "☀"}</button>
             </div>
           </div>
           <div className="honesty">{t("honesty")}</div>
+          <div key={page} className="route-bar" aria-hidden="true" />
         </header>
         <main id="main" className="mx-auto max-w-7xl px-4 pb-28 pt-6 lg:pb-12">
           <div key={`${page}:${market}`} className="page-in">
@@ -189,8 +234,10 @@ function Shell() {
           </div>
         </div>
       )}
-      {palette && <Palette pages={PAGES} label={label} onGo={(p) => { go(p); setPalette(false); }} onClose={() => setPalette(false)} placeholder={t("searchPh")} empty={t("searchNone")} title={t("search")} />}
+      {palette && <Palette pages={GROUPS.flatMap((g) => g.pages)} label={label} onGo={(p) => { go(p); setPalette(false); }} onClose={() => setPalette(false)} placeholder={t("searchPh")} empty={t("searchNone")} title={t("search")} />}
       {tour && <Suspense fallback={null}><Tour onClose={() => setTour(false)} /></Suspense>}
+      {help && <ShortcutHelp label={label} onClose={() => setHelp(false)} />}
+      {chord && <div className="chord-hint" role="status"><kbd>G</kbd> → {t("kbChordWait")}</div>}
     </>
   );
 }
@@ -278,8 +325,48 @@ function Palette({ pages, label, onGo, onClose, placeholder, empty, title }: { p
           {hits.length === 0 && <div className="faint px-3 py-4 text-sm">{empty}</div>}
           {hits.map((p, k) => (
             <button key={p} role="option" aria-selected={k === sel} className={`palette-item ${k === sel ? "on" : ""}`} onMouseEnter={() => setSel(k)} onClick={() => onGo(p)}>
-              <Icon name={p} /><span>{label(p)}</span><kbd className="ml-auto">{pages.indexOf(p) + 1}</kbd>
+              <Icon name={p} /><span>{label(p)}</span><kbd className="ml-auto">G {keyLabel(SHORTCUTS[p])}</kbd>
             </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** "?" - every keyboard shortcut in one place: pages (G then a letter), global keys, and the keys of single pages. */
+function ShortcutHelp({ label, onClose }: { label: (p: Page) => string; onClose: () => void }) {
+  const { t } = useI18n();
+  const global: [string, Key][] = [["Ctrl K", "kbSearch"], ["?", "kbHelp"], ["[  ]", "kbPrevNext"], ["T", "kbTheme"], ["L", "kbLang"], ["M", "kbMarket"], ["Esc", "kbClose"]];
+  const perPage: [Key, [string, Key][]][] = [
+    ["nav_s7review", [["Y / N / U", "kbVerdict"], ["← →", "kbPrevNextItem"]]],
+    ["nav_s7trades", [["Y / N / U", "kbVerdict"], ["← →", "kbPrevNextItem"]]],
+    ["nav_replay", [["Space", "kbPlay"], ["→", "kbNextEvent"], ["Home", "kbRestart"], ["1-4", "kbSpeed"]]],
+  ];
+  return (
+    <div className="palette-backdrop" onClick={onClose}>
+      <div className="palette glass kb-help" role="dialog" aria-label={t("kbTitle")} onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-lg font-semibold">{t("kbTitle")}</h2>
+          <button className="btn icon" onClick={onClose} aria-label={t("chartExit")}>✕</button>
+        </div>
+        <p className="mb-3 text-sm muted">{t("kbChord")}</p>
+        <div className="kb-grid">
+          {GROUPS.map((g) => (
+            <div key={g.key}>
+              <div className="side-group-label">{g.key === "main" ? t("nav_home") : t(g.key as Key)}</div>
+              {g.pages.map((p) => <div key={p} className="kb-row"><span>{label(p)}</span><kbd>G {keyLabel(SHORTCUTS[p])}</kbd></div>)}
+            </div>
+          ))}
+          <div>
+            <div className="side-group-label">{t("kbGlobal")}</div>
+            {global.map(([k, d]) => <div key={k} className="kb-row"><span>{t(d)}</span><kbd>{k}</kbd></div>)}
+          </div>
+          {perPage.map(([pg, rows]) => (
+            <div key={pg}>
+              <div className="side-group-label">{t(pg)}</div>
+              {rows.map(([k, d]) => <div key={k} className="kb-row"><span>{t(d)}</span><kbd>{k}</kbd></div>)}
+            </div>
           ))}
         </div>
       </div>

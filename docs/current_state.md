@@ -325,6 +325,28 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    (416 MB). `docs/ITOG_PROEKTA.md` (Russian): what runs, the results in one table, where things are, the plan for the
    coming weeks and months, ready-made requests for a future Claude session, the rule on real money. README lists the
    new documents. `feat/gold-xauusd` = `main`.
+27. **Web UI pass (2026-10-25, owner: "make the site better - menu scroll, keyboard keys scattered or missing, cool
+   animations, the light theme is bad").** Audit first (`web/e2e/ui-audit.mjs`: 16 pages x desktop / phone x dark /
+   light - console errors, page overflow, text cut by its box, menu fit): the menu needed 789 px in 655; hidden label
+   untranslated; a busy database (503) showed an error instead of retrying. Fixes:
+   - menu compact (fits 1366x768: 667 / 667 px), scrolls inside itself (`overscroll-behavior: contain`, thin scrollbar,
+     faded edges), the active item scrolled into view on every page change;
+   - keyboard: one scheme - **G then a letter** for every page (shown in the menu and Ctrl+K), `[` / `]` previous / next
+     page, T / L / M, `?` (and a ⌨ button) opens a list of every shortcut incl. the S7 pages and the time machine (new:
+     Space, ->, Home, 1-4); all on `event.code`, so they work on the Russian layout (the old letter keys - T, L, M and
+     Y / N / U on the S7 pages - did nothing there); the old digit keys (out of menu order, only 9 of 16 pages) removed;
+   - light theme redesigned: cool neutral background, white cards with layered shadows, slate text, a bright gold fill
+     (`--accent`) separate from a deep gold text colour, AA-contrast up / down / warn, light aurora without grain, a
+     visible shimmer and logo; Tailwind 4's plain `border` (currentColor) now takes the theme's border colour; chart entry
+     / fib-1 lines and every canvas (candles, replay, universes fan, home particles) redraw on a theme switch
+     (`useThemeName`, `cssVar`) - they kept the dark theme's near-white lines before;
+   - motion (pure CSS / React, nothing installed; patterns like Magic UI / Aceternity): a pointer-following spotlight on
+     cards and buttons, staggered card entrance, a rotating gold beam around the chosen strategy card, a sheen on primary
+     buttons, a progress line on every page change, count-up numbers in stat cards, a title fade - all off with reduced
+     motion;
+   - `withRetry`: a 503 is retried up to 5 times (1.5 s apart), a lost network once, then the honest error.
+   Re-audit: 64 combinations clean. e2e: 91 passed + the 2 offline tests fixed (the first retry rule waited too long for
+   them) and re-run; a new test for G-letter keys, `?`, Escape and `]`.
 
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - confirmed on the full history: S4-S6 trade

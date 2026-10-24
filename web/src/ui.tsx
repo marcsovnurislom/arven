@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { ApiError } from "./api";
+import { CountUp } from "./fx";
 import { useI18n } from "./i18n";
 
 export const fmt = (x: number | null | undefined, digits = 2) =>
@@ -9,6 +10,8 @@ export const fmtR = (x: number | null | undefined) => (x === null || x === undef
 export const signClass = (x: number | null | undefined) => (x === null || x === undefined ? "" : x > 0 ? "up" : x < 0 ? "down" : "");
 export const fmtTime = (ms: number) => new Date(ms).toISOString().replace("T", " ").slice(0, 16) + " UTC";
 export const shortId = (id: string) => id.slice(0, 8);
+/** A theme colour for canvas / chart drawing (read when drawn - pair it with useThemeName() so a theme switch redraws). */
+export const cssVar = (name: string, fallback: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 
 /** A countdown in words: "2 d 3 h" / "7 h 12 min" / "4 min 05 s". */
 export function until(ms: number, lang: "en" | "ru"): string {
@@ -38,7 +41,7 @@ export function Stat({ label, value, tone, sub }: { label: string; value: ReactN
   return (
     <div>
       <div className="text-xs uppercase tracking-wider faint">{label}</div>
-      <div className={`num mt-1 text-2xl font-semibold ${tone ?? ""}`}>{value}</div>
+      <div className={`num mt-1 text-2xl font-semibold ${tone ?? ""}`}>{typeof value === "number" && Number.isFinite(value) ? <CountUp value={value} /> : value}</div>
       {sub && <div className="mt-1 text-xs muted">{sub}</div>}
     </div>
   );

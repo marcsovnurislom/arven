@@ -3,7 +3,34 @@ import { ApiError, api, withMarket, type Candle } from "./api";
 
 export type Loadable<T> = { data: T | null; error: ApiError | null; loading: boolean; reload: () => void };
 
-/** Fetch now and then every `intervalMs` (0 = once). Keeps the last good data while a refresh fails. */
+/** The current theme ("dark" / "light"); components that paint with theme colours once (canvas, charts) redraw on a change. */
+export function useThemeName(): string {
+  const read = () => document.documentElement.dataset.theme ?? "dark";
+  const [theme, setTheme] = useState(read);
+  useEffect(() => {
+    const o = new MutationObserver(() => setTheme(read()));
+    o.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => o.disconnect();
+  }, []);
+  return theme;
+}
+
+/** ``fn`` again (up to ``tries`` times, ``delayMs`` apart) while the server says the database is busy (503 - the live
+ * process writes for a few seconds every 15 minutes) or the network blinked; any other error is returned at once. */
+export async function withRetry<T>(fn: () => Promise<T>, tries = 5, delayMs = 1500): Promise<T> {
+  for (let k = 1; ; k++) {
+    try {
+      return await fn();
+    } catch (e) {
+      const busy = e instanceof ApiError && e.status === 503;
+      const blink = e instanceof ApiError && e.status === 0;  // no answer at all: one quick retry, then say so
+      if (!(busy || (blink && k < 2)) || k >= tries) throw e;
+      await new Promise((r) => window.setTimeout(r, delayMs));
+    }
+  }
+}
+
+/** Fetch now and then every `intervalMs` (0 = once). Keeps the last good data while a refresh fails; a busy database is retried. */
 export function useLoad<T>(fn: () => Promise<T>, deps: unknown[] = [], intervalMs = 0): Loadable<T> {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
@@ -13,7 +40,7 @@ export function useLoad<T>(fn: () => Promise<T>, deps: unknown[] = [], intervalM
 
   const run = useCallback(async () => {
     try {
-      setData(await fnRef.current());
+      setData(await withRetry(() => fnRef.current()));
       setError(null);
     } catch (e) {
       setError(e instanceof ApiError ? e : new ApiError(0, String(e)));
@@ -74,7 +101,7 @@ export function useCandleFeed(tf: string, coverFromMs?: number, pageSize = 500) 
     setCandles([]);
     setExhausted(false);
     setLoading(true);
-    api.candles(tf, pageSize)
+    withRetry(() => api.candles(tf, pageSize))
       .then((r) => { if (!cancelled) { setCandles(r.candles); setError(null); } })
       .catch((e) => { if (!cancelled) setError(e instanceof ApiError ? e : new ApiError(0, String(e))); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -85,7 +112,7 @@ export function useCandleFeed(tf: string, coverFromMs?: number, pageSize = 500) 
     if (busy.current || exhausted || ref.current.length === 0) return;
     busy.current = true;
     try {
-      const r = await api.candles(tf, pageSize, ref.current[0].t);
+      const r = await withRetry(() => api.candles(tf, pageSize, ref.current[0].t));
       if (r.candles.length === 0) setExhausted(true);
       else setCandles((cur) => [...r.candles, ...cur]);
       if (r.candles.length < pageSize) setExhausted(true);

@@ -2,17 +2,18 @@ import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useSt
 import { api, type S7Label, type S7Setup } from "../api";
 import type { ChartLine, ChartMarker, ChartOverlay } from "../CandleChart";
 import { useI18n } from "../i18n";
-import { useLoad } from "../hooks";
-import { Card, Chip, Empty, ErrorBox, PageTitle, SidePill, Skeleton, fmt, fmtTime } from "../ui";
+import { useLoad, useThemeName } from "../hooks";
+import { Card, Chip, Empty, ErrorBox, PageTitle, SidePill, Skeleton, cssVar, fmt, fmtTime } from "../ui";
 
 const CandleChart = lazy(() => import("../CandleChart").then((m) => ({ default: m.CandleChart })));
-const FIB_COLORS: Record<string, string> = { "0.0": "#9aa3b2", "0.5": "#d9b256", "0.618": "#d9b256", "1.0": "#eceff4", "1.272": "#34d399", "1.618": "#34d399", "2.0": "#34d399" };
+const FIB_COLORS: Record<string, string> = { "0.0": "#9aa3b2", "0.5": "#d9b256", "0.618": "#d9b256", "1.0": "TEXT", "1.272": "#34d399", "1.618": "#34d399", "2.0": "#34d399" };
 const KIND_LABEL: Record<string, string> = { order_block: "Order block", fvg: "FVG", ifvg: "iFVG", level: "Level (SnR)" };
 
 function Chart({ s }: { s: S7Setup }) {
+  const theme = useThemeName();
   const lines = useMemo<ChartLine[]>(
-    () => Object.entries(s.fib).map(([r, price]) => ({ price, color: FIB_COLORS[r] ?? "#9aa3b2", title: `fib ${r}`, dashed: r !== "0.5" && r !== "0.618" })),
-    [s],
+    () => Object.entries(s.fib).map(([r, price]) => ({ price, color: FIB_COLORS[r] === "TEXT" ? cssVar("--text", "#eceff4") : FIB_COLORS[r] ?? "#9aa3b2", title: `fib ${r}`, dashed: r !== "0.5" && r !== "0.618" })),
+    [s, theme],
   );
   const overlays = useMemo<ChartOverlay[]>(() => {
     const o: ChartOverlay[] = [{ points: s.line.points, color: "#f5d061", width: 2 }];
@@ -27,9 +28,9 @@ function Chart({ s }: { s: S7Setup }) {
       ...s.touches.map((p) => ({ timeMs: p.timeMs, side: s.side, text: "touch", shape: "circle" as const, color: "#ff9f43", position: s.side === 1 ? ("aboveBar" as const) : ("belowBar" as const) })),
       { timeMs: s.break_time_ms, side: s.side, text: "break" },
       { timeMs: s.level0.timeMs, side: s.side, text: "0", shape: "square" as const, color: "#9aa3b2", position: s.side === 1 ? ("belowBar" as const) : ("aboveBar" as const) },
-      { timeMs: s.level1.timeMs, side: s.side, text: "1", shape: "square" as const, color: "#eceff4", position: s.side === 1 ? ("aboveBar" as const) : ("belowBar" as const) },
+      { timeMs: s.level1.timeMs, side: s.side, text: "1", shape: "square" as const, color: cssVar("--text", "#eceff4"), position: s.side === 1 ? ("aboveBar" as const) : ("belowBar" as const) },
     ],
-    [s],
+    [s, theme],
   );
   return (
     <Suspense fallback={<Skeleton h={460} />}>
@@ -68,11 +69,11 @@ export function S7Review() {
   // never reaches the previous render's handler (its `saving` and setup are stale)
   useLayoutEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).tagName === "TEXTAREA") return;
-      const k = e.key.toLowerCase();
-      if (k === "y") void save("yes");
-      else if (k === "n") void save("no");
-      else if (k === "u") void save("unsure");
+      if (["TEXTAREA", "INPUT", "SELECT"].includes((e.target as HTMLElement).tagName) || e.metaKey || e.ctrlKey || e.altKey) return;
+      const k = e.code;  // physical keys: the same on a Russian layout
+      if (k === "KeyY") void save("yes");
+      else if (k === "KeyN") void save("no");
+      else if (k === "KeyU") void save("unsure");
       else if (e.key === "ArrowRight") setI((x) => Math.min(setups.length - 1, x + 1));
       else if (e.key === "ArrowLeft") setI((x) => Math.max(0, x - 1));
     };

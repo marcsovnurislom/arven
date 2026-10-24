@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useThemeName } from "./hooks";
 
 export function useReducedMotion(): boolean {
   const [reduced, setReduced] = useState(() => (typeof window !== "undefined" ? window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false : false));
@@ -41,6 +42,33 @@ export function Reveal({ children, delay = 0, className = "", as: Tag = "div" }:
       {children}
     </Tag>
   );
+}
+
+/** A soft light that follows the pointer over cards and buttons: one passive listener sets --mx / --my on the element
+ * under the pointer (the CSS draws the glow). Off with reduced motion. */
+export function useSpotlight(): void {
+  const reduced = useReducedMotion();
+  useEffect(() => {
+    if (reduced) return;
+    let raf = 0;
+    let last: PointerEvent | null = null;
+    const paint = () => {
+      raf = 0;
+      const e = last;
+      if (!e) return;
+      const el = (e.target as Element | null)?.closest?.(".glass, .strategy-card, .btn, .session-row") as HTMLElement | null;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      el.style.setProperty("--mx", `${e.clientX - r.left}px`);
+      el.style.setProperty("--my", `${e.clientY - r.top}px`);
+    };
+    const onMove = (e: PointerEvent) => {
+      last = e;
+      if (!raf) raf = requestAnimationFrame(paint);
+    };
+    document.addEventListener("pointermove", onMove, { passive: true });
+    return () => { document.removeEventListener("pointermove", onMove); cancelAnimationFrame(raf); };
+  }, [reduced]);
 }
 
 /** Counts from the previous value to `value` with an ease-out curve. */
@@ -119,6 +147,7 @@ export function Aurora() {
 export function ParticleField({ className = "" }: { className?: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const reduced = useReducedMotion();
+  const theme = useThemeName();  // the points take the theme's gold: redraw on a switch
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas || reduced) return;
@@ -177,7 +206,7 @@ export function ParticleField({ className = "" }: { className?: string }) {
       cancelAnimationFrame(raf);
       ro.disconnect();
     };
-  }, [reduced]);
+  }, [reduced, theme]);
   return <canvas ref={ref} className={className} aria-hidden="true" />;
 }
 

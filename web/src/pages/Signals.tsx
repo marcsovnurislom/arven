@@ -92,7 +92,7 @@ export function Signals() {
     <>
       <PageTitle sub={t("honesty")}>{t("nav_signals")}</PageTitle>
       <div className="mb-3 max-w-xs">
-        <label className="sr-only" htmlFor="strategy-filter">Strategy</label>
+        <label className="sr-only" htmlFor="strategy-filter">{t("tmStrategy")}</label>
         <select id="strategy-filter" value={strategy} onChange={(e) => { setStrategy(e.target.value); setSelected(null); }}>
           <option value="">All strategies</option>
           {(strategies.data?.strategies ?? []).map((sid) => <option key={sid} value={sid}>{sid}</option>)}

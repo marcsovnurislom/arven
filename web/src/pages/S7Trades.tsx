@@ -58,10 +58,10 @@ export function S7Trades() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (["TEXTAREA", "INPUT", "SELECT"].includes((e.target as HTMLElement).tagName) || e.metaKey || e.ctrlKey || e.altKey) return;
-      const k = e.key.toLowerCase();
-      if (k === "y") void save("ok");
-      else if (k === "n") void save("wrong");
-      else if (k === "u") void save("unsure");
+      const k = e.code;  // physical keys: the same on a Russian layout
+      if (k === "KeyY") void save("ok");
+      else if (k === "KeyN") void save("wrong");
+      else if (k === "KeyU") void save("unsure");
       else if (e.key === "ArrowRight") step(1);
       else if (e.key === "ArrowLeft") step(-1);
     };

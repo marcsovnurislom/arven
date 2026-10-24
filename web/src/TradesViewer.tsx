@@ -2,8 +2,8 @@ import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { api, tradeSize, type TradeRec } from "./api";
 import type { ChartLine, ChartMarker, ChartOverlay } from "./CandleChart";
 import { useI18n, type Key } from "./i18n";
-import { useLoad } from "./hooks";
-import { Card, ChartFrame, Empty, ErrorBox, SidePill, Skeleton, Stat, fmt, fmtPct, fmtR, fmtTime, signClass } from "./ui";
+import { useLoad, useThemeName } from "./hooks";
+import { Card, ChartFrame, Empty, ErrorBox, SidePill, Skeleton, Stat, cssVar, fmt, fmtPct, fmtR, fmtTime, signClass } from "./ui";
 
 const CandleChart = lazy(() => import("./CandleChart").then((m) => ({ default: m.CandleChart })));
 export const usd = (x: number) => `${x < 0 ? "-" : ""}$${Math.abs(x).toFixed(2)}`;
@@ -44,14 +44,15 @@ export function EquityCurve({ values, start, label, marked }: { values: number[]
 
 export function TradeChart({ tr }: { tr: TradeRec }) {
   const { t } = useI18n();
+  const theme = useThemeName();
   const lines = useMemo<ChartLine[]>(
     () => [
-      { price: tr.entry, color: "#eceff4", title: t("s7tEntry") },
+      { price: tr.entry, color: cssVar("--text", "#eceff4"), title: t("s7tEntry") },
       { price: tr.stop, color: "#f87171", title: t("s7tStop") },
       ...tr.targets.map((p, k) => ({ price: p, color: "#34d399", title: `TP${k + 1}`, dashed: true })),
       ...(tr.zone ? [{ price: tr.zone.low, color: "#d9b256", title: "", dashed: true }, { price: tr.zone.high, color: "#d9b256", title: "", dashed: true }] : []),
     ],
-    [tr, t],
+    [tr, t, theme],
   );
   const overlays = useMemo<ChartOverlay[]>(() => {
     const c = tr.candles;

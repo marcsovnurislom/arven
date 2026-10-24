@@ -5,8 +5,8 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type TMItem, type TMScenario } from "../api";
 import { useI18n, type Key } from "../i18n";
-import { useLoad } from "../hooks";
-import { Card, Chip, Empty, ErrorBox, PageTitle, Skeleton, fmtTime } from "../ui";
+import { useLoad, useThemeName } from "../hooks";
+import { Card, Chip, Empty, ErrorBox, PageTitle, Skeleton, cssVar, fmtTime } from "../ui";
 
 const SPEEDS = [1, 4, 16, 64]; // x1 = 4 candles of 15 minutes per second (an hour a second)
 const BASE_CPS = 4;
@@ -50,6 +50,7 @@ function ReplayChart({ sc, items, shown, follow }: { sc: TMScenario; items: TMIt
   const lines = useRef<IPriceLine[]>([]);
   const overlay = useRef<ISeriesApi<"Line"> | null>(null);
   const drawn = useRef(0);
+  const theme = useThemeName();
 
   useEffect(() => {
     if (!host.current) return;
@@ -67,7 +68,7 @@ function ReplayChart({ sc, items, shown, follow }: { sc: TMScenario; items: TMIt
     markers.current = createSeriesMarkers(s, []);
     drawn.current = 0;
     return () => { c.remove(); chart.current = series.current = markers.current = overlay.current = null; lines.current = []; };
-  }, [sc.id]);
+  }, [sc.id, theme]);
 
   // candles: append when moving forward a little, redraw when jumping
   useEffect(() => {
@@ -82,7 +83,7 @@ function ReplayChart({ sc, items, shown, follow }: { sc: TMScenario; items: TMIt
     }
     drawn.current = shown;
     if (follow) c.timeScale().scrollToRealTime();
-  }, [shown, sc, follow]);
+  }, [shown, sc, follow, theme]);
 
   // levels, setup line and markers from the items known so far
   useEffect(() => {
@@ -106,13 +107,13 @@ function ReplayChart({ sc, items, shown, follow }: { sc: TMScenario; items: TMIt
         add(setup.zone?.low, "#d9b256", "", true);
         add(setup.zone?.high, "#d9b256", "", true);
         add(setup.level0?.price, "#9aa3b2", "fib 0", true);
-        add(setup.level1?.price, "#eceff4", "fib 1", true);
+        add(setup.level1?.price, cssVar("--text", "#eceff4"), "fib 1", true);
         const ls = c.addSeries(LineSeries, { color: "#f5d061", lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
         ls.setData((setup.line ?? []).map((p) => ({ time: Math.floor(p.timeMs / 1000) as UTCTimestamp, value: p.price })));
         overlay.current = ls;
       }
       if (fill) {
-        add(fill.price, "#eceff4", "entry");
+        add(fill.price, cssVar("--text", "#eceff4"), "entry");
         add(moved?.stop ?? fill.stop, "#f87171", "stop");
         (fill.targets ?? []).forEach((p, k) => { if (!hit.has(`TP${k + 1}`)) add(p, "#34d399", `TP${k + 1}`, true); });
       }
@@ -123,7 +124,7 @@ function ReplayChart({ sc, items, shown, follow }: { sc: TMScenario; items: TMIt
       if (i.kind === "tp") return { time: snap(i.t), position: "aboveBar" as const, color: "#34d399", shape: "circle" as const, text: i.level ?? "TP" };
       return { time: snap(i.t), position: "aboveBar" as const, color: (i.net_r ?? 0) >= 0 ? "#34d399" : "#f87171", shape: "square" as const, text: `${(i.net_r ?? 0) >= 0 ? "+" : ""}${(i.net_r ?? 0).toFixed(1)}R` };
     }));
-  }, [items, sc]);
+  }, [items, sc, theme]);
 
   return <div ref={host} className="replay-chart" role="img" aria-label="Replay chart" />;
 }
@@ -185,6 +186,17 @@ function Player({ sc }: { sc: TMScenario }) {
   }, [items, time, shown, n, sc]);
 
   const restart = () => { setPlaying(false); setShown(first); acc.current = 0; };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (["TEXTAREA", "INPUT", "SELECT"].includes((e.target as HTMLElement).tagName) || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.code === "Space") { e.preventDefault(); if (shown >= n) restart(); setPlaying((p) => !p); }
+      else if (e.code === "ArrowRight") { e.preventDefault(); setPlaying(false); nextEvent(); }
+      else if (e.code === "Home") { e.preventDefault(); restart(); }
+      else if (/^Digit[1-4]$/.test(e.code)) setSpeed(SPEEDS[Number(e.code.slice(5)) - 1]);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
   const feed = [...visible].reverse().slice(0, 40);
   const finished = shown >= n;
 
