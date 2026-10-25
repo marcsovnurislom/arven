@@ -19,7 +19,7 @@ for (const [dev, opts] of [["desktop", { viewport: { width: 1366, height: 768 } 
         const out = { hscroll: document.documentElement.scrollWidth - document.documentElement.clientWidth, cut: [] };
         for (const el of document.querySelectorAll("main *")) {
           const cs = getComputedStyle(el);
-          if (el.children.length === 0 && el.textContent.trim() && el.scrollWidth > el.clientWidth + 2 && cs.overflow !== "visible" && cs.textOverflow !== "ellipsis" && el.clientWidth > 0)
+          if (el.children.length === 0 && !el.closest(".sr-only") && el.textContent.trim() && el.scrollWidth > el.clientWidth + 2 && cs.overflow !== "visible" && cs.textOverflow !== "ellipsis" && el.clientWidth > 0)
             out.cut.push(el.textContent.trim().slice(0, 40));
         }
         const nav = document.querySelector(".side-nav");

@@ -347,6 +347,17 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    - `withRetry`: a 503 is retried up to 5 times (1.5 s apart), a lost network once, then the honest error.
    Re-audit: 64 combinations clean. e2e: 91 passed + the 2 offline tests fixed (the first retry rule waited too long for
    them) and re-run; a new test for G-letter keys, `?`, Escape and `]`.
+28. **Design v3 (2026-10-25, owner: "nothing changed in the design, I need a wow design").** Item 27 was too subtle. A new
+   visual layer `web/src/design-v3.css` (imported after `index.css`, look only - no markup, data or logic changed):
+   midnight canvas with a gold / violet / cyan light mesh, a fine grid fading from the top, three-colour drifting blobs;
+   floating rounded glass sidebar and top bar (floating bottom bar on phones); active menu item = gradient pill with a
+   glowing gradient icon; cards with a 1 px luminous gradient edge (mask trick) that brightens on hover, a lit top rim, a
+   lift; card headings with a glowing dot; big (34-56 px) flowing gradient page titles with a soft light behind; gradient
+   primary buttons and active tabs with glow; glowing chips and big numbers; light theme = pastel peach / lilac / sky
+   mesh with white glass and an indigo -> amber title gradient. Reduced motion stops the flowing gradients and lifts.
+   Checks: build clean; `ui-audit` 64 combinations - the first run found an 84 px phone overflow from the title glow
+   (fixed); its "text cut" rule now skips screen-reader-only labels (a false alarm on Signals); only remaining messages
+   are 503s while the live writer held the database (retried by the site). e2e: 93 passed, 5 skipped (screenshot tests).
 
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - confirmed on the full history: S4-S6 trade
