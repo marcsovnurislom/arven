@@ -212,6 +212,26 @@ test("settings never shows a bot token", async ({ page }) => {
   await expect(page.locator("main")).not.toContainText(/\d{6,}:[A-Za-z0-9_-]{20,}/);
 });
 
+test("market picker: twelve markets grouped by crypto / metals / forex, the choice reloads the page for that market", async ({ page }) => {
+  const errors = collectErrors(page);
+  await open(page, "charts");
+  const btn = page.locator(".mk-btn");
+  await expect(btn).toBeVisible();
+  await btn.click();
+  const panel = page.getByRole("dialog", { name: "Choose a market" });
+  await expect(panel.getByRole("radiogroup")).toHaveCount(3);
+  await expect(panel.getByRole("radio")).toHaveCount(12);
+  await panel.getByRole("radio", { name: /EUR\/USD/ }).click();
+  await expect(panel).toHaveCount(0);
+  await expect(btn).toContainText("EUR/USD");
+  await expect(page.getByText(/live: Kraken, history: Dukascopy/)).toBeVisible();
+  for (const tf of ["1m", "30m", "1d"]) await expect(page.getByRole("button", { name: tf, exact: true })).toBeVisible();
+  await btn.click();
+  await page.getByRole("radio", { name: /BTC/ }).click();
+  await expect(btn).toContainText("BTC");
+  expect(errors).toEqual([]);
+});
+
 test("screenshots (SHOTS=1)", async ({ page }, info) => {
   test.skip(!process.env.SHOTS, "set SHOTS=1 to refresh docs/screenshots");
   for (const name of PAGES) {

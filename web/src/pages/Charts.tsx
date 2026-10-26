@@ -7,7 +7,7 @@ import { useCandleFeed, useLoad } from "../hooks";
 import { Card, ErrorBox, PageTitle, Skeleton } from "../ui";
 
 const CandleChart = lazy(() => import("../CandleChart").then((m) => ({ default: m.CandleChart })));
-const TFS = ["5m", "15m", "1h", "4h"] as const;
+const TFS = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"] as const;
 
 export function Charts() {
   const { t } = useI18n();
@@ -24,7 +24,7 @@ export function Charts() {
       <Card
         title={t("chartTf")}
         right={
-          <div className="flex gap-1" role="group" aria-label={t("chartTf")}>
+          <div className="flex flex-wrap gap-1" role="group" aria-label={t("chartTf")}>
             {TFS.map((x) => (
               <button key={x} className={`btn ${x === tf ? "primary" : ""}`} aria-pressed={x === tf} onClick={() => setTf(x)}>{x}</button>
             ))}

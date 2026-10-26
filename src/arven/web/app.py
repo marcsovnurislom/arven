@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -64,7 +65,7 @@ def web_markets(cfg: AppConfig, config_dir: Path | str | None) -> dict[str, WebM
     for m in markets:
         live_app = load_config(config_dir, instrument=m.instrument)
         hist = m.history_instrument
-        mid = (m.title or m.instrument).lower().replace(" ", "_")
+        mid = re.sub(r"[^a-z0-9_]", "", (m.title or m.instrument).lower().replace(" ", "_"))  # "EUR/USD" -> "eurusd"
         holidays = tuple((to_ms(c.start), to_ms(c.end), c.reason) for c in live_app.market.session_closures)
         out[mid] = WebMarket(mid, f"{m.title} ({hist or m.instrument})" if m.title else m.instrument, live_app.market.symbol, hist,
                              root / m.instrument, root / (hist or m.instrument), live_app.session_calendar(), m.enabled, holidays)

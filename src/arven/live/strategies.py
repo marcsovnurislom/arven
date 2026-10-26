@@ -26,6 +26,7 @@ from arven.backtest.crowded_shorts_sim import resolve_block
 from arven.backtest.provider import SignalProvider
 from arven.backtest.strategy_s7_sim import S7Bars, S7Outcome, make_context, planned_targets, simulate_setup
 from arven.core.live_config import LiveStrategyConfig
+from arven.core.prices import fmt_price
 from arven.core.sessions import SessionCalendar
 from arven.core.timeframes import Timeframe
 from arven.engine.grading import Grade
@@ -78,9 +79,10 @@ class ProviderStrategy:
 
 # --- S7 ------------------------------------------------------------------------------------------------------------
 
-S7_TFS = {"15m": Timeframe.M15, "1h": Timeframe.H1, "4h": Timeframe.H4}
-S7_LOWER = {"15m": Timeframe.M5, "1h": Timeframe.M15, "4h": Timeframe.H1}
-S7_HIGHER = {"15m": Timeframe.H1, "1h": Timeframe.H4, "4h": None}
+# 30m and 1d added 2026-10-27 (owner: more timeframes); their lower / higher frames follow the same ~4x spacing
+S7_TFS = {"15m": Timeframe.M15, "30m": Timeframe.M30, "1h": Timeframe.H1, "4h": Timeframe.H4, "1d": Timeframe.D1}
+S7_LOWER = {"15m": Timeframe.M5, "30m": Timeframe.M5, "1h": Timeframe.M15, "4h": Timeframe.H1, "1d": Timeframe.H4}
+S7_HIGHER = {"15m": Timeframe.H1, "30m": Timeframe.H4, "1h": Timeframe.H4, "4h": None, "1d": None}
 S7_DETECTOR_KEYS = {"min_touches", "freeze_pullback", "count_every_touch", "level0_range_bottom", "skip_beyond_line_start",
                     "break_on_cross", "line_from_major_high", "shallow_zone"}
 S7_TRADE_KEYS = {"entry", "stop", "breakeven_after_tp1", "min_tp1_r", "management"}
@@ -158,9 +160,9 @@ class S7Strategy:
             return None
         expiry_close = bar_close_after(ctx.app.session_calendar(), S7_TFS[self.tf], int(sim.tf.time_ms[s.arm_index]),
                                        self.p.cancel_after_mult * (s.arm_index - s.break_index))
-        order_text = (f"limit {entry:.2f} (fib 0.5)" if self.tp.entry == "E3" else
-                      f"limits {', '.join(f'{px:.2f} x{f:g}' for px, f in orders)}" if orders else
-                      f"market once a {S7_LOWER[self.tf].value} bar closes back above fib 0.5 ({entry:.2f})")
+        order_text = (f"limit {fmt_price(entry)} (fib 0.5)" if self.tp.entry == "E3" else
+                      f"limits {', '.join(f'{fmt_price(px, entry)} x{f:g}' for px, f in orders)}" if orders else
+                      f"market once a {S7_LOWER[self.tf].value} bar closes back above fib 0.5 ({fmt_price(entry)})")
         zones = ", ".join(sorted({z.kind for z in s.confluence})) or "none"
         try:
             ladder = tuple(TPLevel(r, f, px) for r, f, px in zip(rs, fracs, prices, strict=True))
@@ -168,7 +170,7 @@ class S7Strategy:
                 symbol=ctx.app.market.symbol, side=s.side, strategy_id=self.strategy_id, strategy_version=self.version, grade=Grade.EXPERIMENTAL,
                 event_time_ms=arm_close, entry_reference=entry, stop=stop, tp_ladder=ladder, risk_fraction=SYMBOL_RISK_FRACTION, confidence=0.5,
                 regime="n/a",
-                reasons=(f"{self.tf} trend line broken, fib retest setup armed (level 0 {s.level0:.2f}, level 1 {s.level1:.2f})",
+                reasons=(f"{self.tf} trend line broken, fib retest setup armed (level 0 {fmt_price(s.level0, entry)}, level 1 {fmt_price(s.level1, entry)})",
                          f"entry: {order_text}; cancelled if a {self.tf} bar closes beyond level 0 or above level 1, expires if unfilled",
                          f"confluence zones: {zones}"),
                 risk_checks=(), versions=SignalVersions(ctx.feature_version, self.params_hash, ctx.git_commit),

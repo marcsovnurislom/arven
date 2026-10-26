@@ -10,6 +10,9 @@ saving is handled exactly:
 - holidays and early closes: explicit UTC windows from ``config/sessions/cme_metals_closures.csv``
   (``AppConfig.market.session_closures``).
 
+Spot forex (EUR/USD, GBP/USD; added 2026-10-27) follows ``"fx"``: open from Sunday 17:00 to Friday 17:00 New York time
+with no daily halt (the interbank week), holidays from ``config/sessions/fx_closures.csv``.
+
 Verified against Dukascopy XAUUSD 1m candles (zero-volume runs): Friday close 22:00 UTC in winter, Sunday open
 22:00 UTC after the 2024-03-10 DST switch, daily halt 21:00-22:00 UTC in summer, Good Friday closed all day, early
 closes on US holidays (see ``docs/current_state.md``, "Gold (XAUUSD)").
@@ -33,8 +36,8 @@ import numpy as np
 from arven.core.time import UTC, to_ms
 from arven.core.timeframes import Timeframe
 
-SessionKind = Literal["24x7", "cme_metals"]
-SESSION_KINDS: tuple[str, ...] = ("24x7", "cme_metals")
+SessionKind = Literal["24x7", "cme_metals", "fx"]
+SESSION_KINDS: tuple[str, ...] = ("24x7", "cme_metals", "fx")
 
 NEW_YORK = ZoneInfo("America/New_York")
 MINUTE_MS = Timeframe.M1.ms
@@ -58,6 +61,19 @@ def cme_metals_regular_closures(lo_ms: int, hi_ms: int) -> list[tuple[int, int]]
             out.append((_ny_to_ms(d, _HALT_START), _ny_to_ms(d + timedelta(days=2), _HALT_END)))
         elif wd <= 3:  # Monday-Thursday halt
             out.append((_ny_to_ms(d, _HALT_START), _ny_to_ms(d, _HALT_END)))
+        d += timedelta(days=1)
+    return [(s, e) for s, e in out if e > lo_ms and s < hi_ms]
+
+
+def fx_regular_closures(lo_ms: int, hi_ms: int) -> list[tuple[int, int]]:
+    """Weekly spot-forex closures (Friday 17:00 -> Sunday 17:00 New York time) overlapping ``[lo_ms, hi_ms)``, UTC ms."""
+    first = datetime.fromtimestamp(lo_ms / 1000, UTC).astimezone(NEW_YORK).date() - timedelta(days=8)
+    last = datetime.fromtimestamp(hi_ms / 1000, UTC).astimezone(NEW_YORK).date() + timedelta(days=8)
+    out: list[tuple[int, int]] = []
+    d = first
+    while d <= last:
+        if d.weekday() == 4:
+            out.append((_ny_to_ms(d, _HALT_START), _ny_to_ms(d + timedelta(days=2), _HALT_START)))
         d += timedelta(days=1)
     return [(s, e) for s, e in out if e > lo_ms and s < hi_ms]
 
@@ -100,7 +116,7 @@ class SessionCalendar:
         """Merged closed windows overlapping ``[lo_ms, hi_ms)`` (not clipped), sorted."""
         if self.always_open:
             return []
-        regular = cme_metals_regular_closures(lo_ms, hi_ms)
+        regular = fx_regular_closures(lo_ms, hi_ms) if self.kind == "fx" else cme_metals_regular_closures(lo_ms, hi_ms)
         extra = [(s, e) for s, e in self.extra_closures if e > lo_ms and s < hi_ms]
         return [(s, e) for s, e in _merge(regular + extra) if e > lo_ms and s < hi_ms]
 

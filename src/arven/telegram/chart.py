@@ -16,6 +16,7 @@ from functools import lru_cache
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+from arven.core.prices import fmt_price
 from arven.core.time import from_ms
 from arven.engine.signal import EngineSignal
 from arven.engine.signal_events import SignalUpdate
@@ -81,9 +82,9 @@ def level_labels(signal: EngineSignal, lang: str = "en") -> list[tuple[str, floa
     """(label, price, colour key) of every level drawn - entry, stop, each take-profit - with the alert text's ``.2f``."""
     w = WORDS[lang]
     entry = w["limit"] if signal.entry_type == "limit" else w["entry"]
-    out = [(f"{entry} {signal.entry_reference:.2f}", signal.entry_reference, "entry"),
-           (f"{w['stop']} {signal.stop:.2f}", signal.stop, "stop")]
-    out += [(f"TP{i + 1} {lvl.price:.2f}", lvl.price, "tp") for i, lvl in enumerate(signal.tp_ladder)]
+    out = [(f"{entry} {fmt_price(signal.entry_reference)}", signal.entry_reference, "entry"),
+           (f"{w['stop']} {fmt_price(signal.stop, signal.entry_reference)}", signal.stop, "stop")]
+    out += [(f"TP{i + 1} {fmt_price(lvl.price, signal.entry_reference)}", lvl.price, "tp") for i, lvl in enumerate(signal.tp_ladder)]
     return out
 
 
@@ -227,7 +228,7 @@ def render_signal_chart(signal: EngineSignal, candles: Candles, title: str, *, u
         p = lo_p + (hi_p - lo_p) * k / 5
         yy = y(p)
         draw.line([(x0, yy), (x1, yy)], fill=COLORS["grid"], width=1)
-        draw.text((6, yy - 7), f"{p:.2f}", font=small, fill=COLORS["faint"])
+        draw.text((6, yy - 7), fmt_price(p, hi_p), font=small, fill=COLORS["faint"])
     # time ticks (bottom)
     for i in np.linspace(0, n - 1, 4).round().astype(int):
         xx = x(int(i))

@@ -1,0 +1,4 @@
+# Spot forex holiday closures on top of the weekly rule in arven.core.sessions ("fx"). UTC, half-open [start_utc, end_utc).
+# Empty for now (2026-10-27): Dukascopy quotes EUR/USD and GBP/USD on Christmas and New Year with thin liquidity; such
+# hours are kept, and a quiet market simply gives no signal.
+start_utc,end_utc,reason,source

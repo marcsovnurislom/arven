@@ -5,6 +5,11 @@ import { useI18n } from "./i18n";
 
 export const fmt = (x: number | null | undefined, digits = 2) =>
   x === null || x === undefined || !Number.isFinite(x) ? "n/a" : x.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+/** A price with decimals for its size (same rule as arven.core.prices): >= 100 two, >= 10 three, below that five;
+ * ``ref`` (a signal's entry) sets the precision so every level of one signal is written alike. */
+export const priceDigits = (x: number) => (Math.abs(x) >= 100 ? 2 : Math.abs(x) >= 10 ? 3 : 5);
+export const fmtPrice = (x: number | null | undefined, ref?: number | null) =>
+  x === null || x === undefined || !Number.isFinite(x) ? "n/a" : fmt(x, priceDigits(ref ?? x));
 export const fmtPct = (x: number | null | undefined, digits = 1) => (x === null || x === undefined || !Number.isFinite(x) ? "n/a" : `${(x * 100).toFixed(digits)}%`);
 export const fmtR = (x: number | null | undefined) => (x === null || x === undefined || !Number.isFinite(x) ? "n/a" : `${x >= 0 ? "+" : ""}${x.toFixed(2)}R`);
 export const signClass = (x: number | null | undefined) => (x === null || x === undefined ? "" : x > 0 ? "up" : x < 0 ? "down" : "");

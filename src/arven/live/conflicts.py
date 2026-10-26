@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from arven.engine.signal_events import SignalUpdateKind
 
-TF_MINUTES = {"5m": 5, "15m": 15, "1h": 60, "4h": 240}
+TF_MINUTES = {"1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "4h": 240, "1d": 1440}
 
 
 @dataclass(frozen=True, slots=True)

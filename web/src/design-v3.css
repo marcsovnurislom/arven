@@ -166,3 +166,27 @@ th { letter-spacing: 0.1em; }
   .page-title h1, .hero-title.shine, .brand-name.shine { animation: none; }
   .glass:hover, .btn.primary:hover { transform: none; }
 }
+
+/* market picker (2026-10-27: eleven markets) - a button with the current market, a panel grouped by asset class */
+.mk-pick { position: relative; }
+.mk-btn { display: inline-flex; align-items: center; gap: 8px; min-width: 92px; }
+.mk-btn b { font-weight: 700; letter-spacing: 0.02em; }
+.mk-chev { opacity: 0.6; font-size: 11px; }
+.mk-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: #f2b14e; box-shadow: 0 0 10px #f2b14e; }
+.mk-dot.s-cme_metals { background: #d4d4d8; box-shadow: 0 0 10px #e5e7eb; }
+.mk-dot.s-fx { background: #22d3ee; box-shadow: 0 0 10px #22d3ee; }
+.mk-panel { position: absolute; right: 0; top: calc(100% + 10px); z-index: 70; width: min(440px, calc(100vw - 24px)); padding: 14px;
+  background: color-mix(in srgb, var(--card-solid) 92%, transparent); box-shadow: var(--shadow-lg), var(--rim); animation: rise 0.18s ease-out both; }
+.mk-panel:hover { transform: none; }
+.mk-group + .mk-group { margin-top: 12px; }
+.mk-group-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.16em; color: var(--faint); margin: 0 4px 6px; font-weight: 600; }
+.mk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 6px; }
+.mk-opt { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 8px; text-align: left; padding: 8px 10px; border-radius: 12px;
+  border: 1px solid var(--border); background: color-mix(in srgb, var(--card-solid) 50%, transparent); color: var(--text); cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, transform 0.2s; }
+.mk-opt b { font-size: 14px; }
+.mk-opt small { grid-column: 2; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mk-opt:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); transform: translateY(-1px); }
+.mk-opt.on { border-color: transparent; background: linear-gradient(135deg, color-mix(in srgb, #f2b14e 26%, transparent), color-mix(in srgb, #8b5cf6 14%, transparent)); box-shadow: var(--glow); }
+.mk-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 640px) { .mk-panel { position: fixed; left: 12px; right: 12px; top: 70px; width: auto; } }

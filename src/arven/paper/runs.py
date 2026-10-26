@@ -76,7 +76,12 @@ def update_market_data(
     ``end_ms`` (never read independently here), so one tick never mixes two different ideas of "now"."""
     last_before_tail = _last_stored_1m_ms(con, app.market.symbol)
     m1_end_ms = to_ms(now or utc_now()) // Timeframe.M1.ms * Timeframe.M1.ms  # last fully-closed 1m bar
-    summary = RestIngestor(app, con, downloader).tail(max(m1_end_ms, end_ms), include_open_interest=include_open_interest)
+    if app.market.exchange == "dukascopy":  # spot forex: Dukascopy history, live minutes from Kraken (arven.data.kraken_live)
+        from arven.data.kraken_live import kraken_tail
+
+        summary = kraken_tail(app, con, to_ms(now or utc_now()), downloader)
+    else:
+        summary = RestIngestor(app, con, downloader).tail(max(m1_end_ms, end_ms), include_open_interest=include_open_interest)
     if summary.klines_written:
         anchor = last_before_tail if last_before_tail is not None else m1_end_ms
         lo = max(to_ms(app.data.history_start), anchor - RESAMPLE_BOUNDARY_BUFFER_MS)

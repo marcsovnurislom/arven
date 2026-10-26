@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 
+from arven.core.prices import fmt_price
 from arven.core.time import from_ms
 from arven.engine.signal import EngineSignal
 from arven.engine.signal_events import SignalUpdate, SignalUpdateKind
@@ -27,7 +28,8 @@ UPDATE_VERB = {
 SIDE = {1: "ПОКУПКА (LONG)", -1: "ПРОДАЖА (SHORT)"}
 SIDE_SHORT = {1: "LONG", -1: "SHORT"}
 GRADE = {"EXPERIMENTAL": "ЭКСПЕРИМЕНТ", "VALIDATED": "ПРОВЕРЕНА"}
-SYMBOL = {"XAUUSDT": "ЗОЛОТО XAUUSD (цены: Binance XAUUSDT)", "BTCUSDT": "BTCUSDT"}
+SYMBOL = {"XAUUSDT": "ЗОЛОТО XAUUSD (цены: Binance XAUUSDT)", "BTCUSDT": "BTCUSDT", "XAGUSDT": "СЕРЕБРО XAGUSD (цены: Binance XAGUSDT)",
+          "EURUSD": "EUR/USD (цены: Dukascopy + Kraken)", "GBPUSD": "GBP/USD (цены: Dukascopy + Kraken)"}
 EXIT_REASON = {
     "STOP": "по стопу", "STOP_TRAIL": "по подтянутому стопу", "STOP_BREAKEVEN": "в безубыток",
     "TIME_STOP": "по времени", "TIME": "по времени",
@@ -97,7 +99,7 @@ def _fields(detail: str) -> dict[str, str]:
 
 def _price(x: str) -> str:
     try:
-        return f"{float(x):.2f}"
+        return fmt_price(float(x))
     except ValueError:
         return x
 
@@ -153,16 +155,16 @@ def symbol(sym: str) -> str:
 
 def new_signal(signal: EngineSignal, record_line: str) -> str:
     tp_lines = "\n".join(
-        f"  TP{i + 1}: {lvl.price:.2f} ({lvl.r_multiple:.2f}R, закрыть {pct(lvl.close_fraction)})"
+        f"  TP{i + 1}: {fmt_price(lvl.price, signal.entry_reference)} ({lvl.r_multiple:.2f}R, закрыть {pct(lvl.close_fraction)})"
         for i, lvl in enumerate(signal.tp_ladder)
     )
     if not signal.tp_ladder and signal.max_holding_minutes is not None:
         tp_lines = f"  Без тейк-профита: выход по времени через {signal.max_holding_minutes / 60:g} ч"
     if signal.entry_type == "limit":
         until = f" (действует до {_utc(signal.valid_until_ms)})" if signal.valid_until_ms else ""
-        entry = f"Вход: ЛИМИТ {signal.entry_reference:.2f}{until}"
+        entry = f"Вход: ЛИМИТ {fmt_price(signal.entry_reference)}{until}"
     else:
-        entry = f"Вход (ориентир): {signal.entry_reference:.2f}"
+        entry = f"Вход (ориентир): {fmt_price(signal.entry_reference)}"
     reasons = "\n".join(f"  • {reason(r)}" for r in signal.reasons[:3]) if signal.reasons else "  (не записаны)"
     regime = "" if signal.regime in ("n/a", "") else f"Режим: {signal.regime}\n"
     return (
@@ -170,7 +172,7 @@ def new_signal(signal: EngineSignal, record_line: str) -> str:
         f"{symbol(signal.symbol)} {SIDE[signal.side]}\n"
         f"Стратегия: {signal.strategy_id} {signal.strategy_version}, {_utc(signal.event_time_ms)}\n"
         f"{entry}\n"
-        f"Стоп: {signal.stop:.2f}\n"
+        f"Стоп: {fmt_price(signal.stop, signal.entry_reference)}\n"
         f"{tp_lines}\n"
         f"Риск: {pct(signal.risk_fraction, 2)} депозита (фиксированное правило, одинаково для всех сигналов)\n"
         "Качество: проверенной оценки отдельного сигнала нет\n"
@@ -192,7 +194,7 @@ def record_line(closed: int | None, wins: int, total_r: float, since_ms: int | N
 def signal_update(signal: EngineSignal, update: SignalUpdate) -> str:
     return (
         f"{UPDATE_VERB[update.kind]}: {symbol(signal.symbol)} {SIDE_SHORT[signal.side]} ({signal.strategy_id}), {_utc(update.time_ms)}\n"
-        f"Сигнал от {_utc(signal.event_time_ms)}, вход {signal.entry_reference:.2f}, стоп {signal.stop:.2f}\n"
+        f"Сигнал от {_utc(signal.event_time_ms)}, вход {fmt_price(signal.entry_reference)}, стоп {fmt_price(signal.stop, signal.entry_reference)}\n"
         f"{update_detail(update)}\n\n{DISCLAIMER}"
     )
 

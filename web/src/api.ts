@@ -415,6 +415,24 @@ export function tradeSize(tr: { size_btc?: number; size?: number; size_unit?: st
 }
 
 /** Subtitle naming the current market and where its prices come from. */
+/** The markets the server follows (set once by the app shell when /api/markets answers). */
+let marketList: Market[] = [];
+export function setMarketList(ms: Market[]): void {
+  marketList = ms;
+}
+
+/** The chosen market's plain name ("BTC", "Gold", "Ethereum", "EUR/USD"). */
+export function marketName(id: string = currentMarket): string {
+  if (id === "btc") return "BTC";
+  const m = marketList.find((x) => x.id === id);
+  return m ? m.label.replace(/\s*\(.*\)$/, "") : id;
+}
+
 export function marketSubtitle(): string {
-  return currentMarket === "gold" ? "Gold · XAUUSD (live: Binance XAUUSDT, history: Dukascopy)" : currentMarket === "btc" ? "BTC/USDT" : currentMarket;
+  if (currentMarket === "btc") return "BTC/USDT";
+  if (currentMarket === "gold") return "Gold · XAUUSD (live: Binance XAUUSDT, history: Dukascopy)";
+  const m = marketList.find((x) => x.id === currentMarket);
+  if (!m) return currentMarket;
+  const feed = m.session === "fx" ? "live: Kraken, history: Dukascopy" : m.history_symbol ? `live: Binance ${m.symbol}, history: Dukascopy` : "Binance USD-M perpetual";
+  return `${marketName()} · ${m.history_symbol ?? m.symbol} (${feed})`;
 }

@@ -1,5 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { api, getMarket, setMarketId, type Market } from "./api";
+import { api, getMarket, setMarketId, setMarketList, type Market } from "./api";
 import { Aurora, useSpotlight } from "./fx";
 import { useLoad } from "./hooks";
 import { I18nProvider, useI18n, type Key } from "./i18n";
@@ -59,6 +59,7 @@ function Shell() {
   const [market, setMarketState] = useState(getMarket);
   const marketsLoad = useLoad(api.markets, []);
   const markets: Market[] = marketsLoad.data?.markets ?? [];
+  if (marketsLoad.data) setMarketList(marketsLoad.data.markets);
   const setMarket = useCallback((id: string) => {
     setMarketId(id);
     setMarketState(id);
@@ -182,7 +183,7 @@ function Shell() {
           <Logo />
           <span>
             <span className="brand-name shine">ARVEN</span>
-            <span className="brand-sub">{markets.length > 1 ? "BTC · Gold" : "BTC"} · decision support</span>
+            <span className="brand-sub">{markets.length > 2 ? `${markets.length} ${t("mkCount")}` : markets.length > 1 ? "BTC · Gold" : "BTC"} · decision support</span>
           </span>
         </a>
         <nav className="side-nav" aria-label="Pages">{groups()}</nav>
@@ -290,16 +291,69 @@ function Logo() {
   );
 }
 
-/** BTC / Gold: every market-aware page re-loads for the chosen market (the page is re-mounted by its key). */
+/** A market's short name: BTC, ETH, XAU, EUR/USD ... */
+export function marketShort(m: Market): string {
+  if (m.session === "fx") return `${m.symbol.slice(0, 3)}/${m.symbol.slice(3, 6)}`;
+  return m.symbol.replace(/USDT$/, "");
+}
+
+/** The picker: every market-aware page re-loads for the chosen market (the page is re-mounted by its key). Up to three
+ * markets are a segmented switch; more open a panel grouped into crypto, metals and forex. */
 function MarketSwitch({ markets, value, onChange, label }: { markets: Market[]; value: string; onChange: (id: string) => void; label: string }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => { if (box.current && !box.current.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", away);
+    window.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("mousedown", away); window.removeEventListener("keydown", esc); };
+  }, [open]);
+  if (markets.length <= 3)
+    return (
+      <div className="market-switch" role="radiogroup" aria-label={label}>
+        {markets.map((m) => (
+          <button key={m.id} role="radio" aria-checked={m.id === value} className={`market-opt ${m.id === value ? "on" : ""}`}
+            onClick={() => onChange(m.id)} title={m.label}>
+            {marketShort(m)}
+          </button>
+        ))}
+      </div>
+    );
+  const cur = markets.find((m) => m.id === value) ?? markets[0];
+  const groups: [string, Market[]][] = [
+    [t("mkCrypto"), markets.filter((m) => m.session === "24x7")],
+    [t("mkMetals"), markets.filter((m) => m.session === "cme_metals")],
+    [t("mkFx"), markets.filter((m) => m.session === "fx")],
+  ];
   return (
-    <div className="market-switch" role="radiogroup" aria-label={label}>
-      {markets.map((m) => (
-        <button key={m.id} role="radio" aria-checked={m.id === value} className={`market-opt ${m.id === value ? "on" : ""}`}
-          onClick={() => onChange(m.id)} title={m.label}>
-          {m.id === "btc" ? "BTC" : m.id === "gold" ? "Gold" : m.label}
-        </button>
-      ))}
+    <div className="mk-pick" ref={box}>
+      <button className="btn mk-btn" aria-haspopup="true" aria-expanded={open} aria-label={`${label}: ${cur.label}`} onClick={() => setOpen((o) => !o)} title={cur.label}>
+        <span className={`mk-dot s-${cur.session}`} aria-hidden="true" />
+        <b>{marketShort(cur)}</b>
+        <span className="mk-chev" aria-hidden="true">▾</span>
+      </button>
+      {open && (
+        <div className="mk-panel glass" role="dialog" aria-label={t("mkPick")}>
+          {groups.filter(([, ms]) => ms.length).map(([name, ms]) => (
+            <div key={name} className="mk-group">
+              <div className="mk-group-label">{name}</div>
+              <div className="mk-grid" role="radiogroup" aria-label={name}>
+                {ms.map((m) => (
+                  <button key={m.id} role="radio" aria-checked={m.id === value} className={`mk-opt ${m.id === value ? "on" : ""}`}
+                    onClick={() => { onChange(m.id); setOpen(false); }} title={m.label}>
+                    <span className={`mk-dot s-${m.session}`} aria-hidden="true" />
+                    <b>{marketShort(m)}</b>
+                    <small>{m.label.replace(/\s*\(.*\)$/, "")}</small>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -60,7 +60,7 @@ strategies:
     title: S7 Trend-Break Fib (owner's method)
     enabled: true
     version: v1
-    params:                   # the configuration selected on development (data/s7_study/development.json), unchanged
+    params: &s7_live          # the configuration selected on development (data/s7_study/development.json), unchanged
       tf: 15m
       min_touches: 3
       impulse: fvg
@@ -146,6 +146,24 @@ strategies:
       line_from_major_high: false
       shallow_zone: true
       management: V0
+  - id: s7_30m
+    kind: s7
+    title: S7 Trend-Break Fib 30m
+    enabled: true
+    version: v1
+    # added 2026-10-27 (owner: more timeframes): the live S7 unchanged except tf (lower 5m, higher 4h) - paper, EXPERIMENTAL
+    params:
+      <<: *s7_live
+      tf: 30m
+  - id: s7_1d
+    kind: s7
+    title: S7 Trend-Break Fib 1d
+    enabled: true
+    version: v1
+    # added 2026-10-27 (owner: more timeframes): the live S7 unchanged except tf (lower 4h, no higher) - paper, EXPERIMENTAL
+    params:
+      <<: *s7_live
+      tf: 1d
   - id: crowded_shorts
     kind: crowded_shorts
     title: Crowded Shorts (funding + OI)
@@ -170,7 +188,7 @@ markets:
     cost_profile: costs_cfd_justmarkets_xauusd.yaml
     include_open_interest: false
     run_legacy_paper: true      # the hourly S1-S3 paper run for gold as well
-    strategies:
+    strategies: &market_strategies   # reused by every market added on 2026-10-27
       - id: s4_impulse_retest
         kind: s4_impulse_retest
         title: S4 Impulse-Retest
@@ -270,3 +288,88 @@ markets:
           line_from_major_high: false
           shallow_zone: true
           management: V0
+      - id: s7_30m
+        kind: s7
+        title: S7 Trend-Break Fib 30m
+        enabled: true
+        version: v1
+        # added 2026-10-27 (owner: more timeframes): the live S7 unchanged except tf (lower 5m, higher 4h) - paper, EXPERIMENTAL
+        params:
+          <<: *s7_live
+          tf: 30m
+      - id: s7_1d
+        kind: s7
+        title: S7 Trend-Break Fib 1d
+        enabled: true
+        version: v1
+        # added 2026-10-27 (owner: more timeframes): the live S7 unchanged except tf (lower 4h, no higher) - paper, EXPERIMENTAL
+        params:
+          <<: *s7_live
+          tf: 1d
+
+  # Added 2026-10-27 (owner: "the best-known pairs and coins"). Every one runs exactly the gold list above (S4-S6, S7 and
+  # S7-SMC on 15m, S7 on 30m / 1h / 4h / 1d) with nothing re-tuned: paper, EXPERIMENTAL, its own forward record from its
+  # start. Crypto: Binance USD-M perpetuals, Binance taker costs. Silver: Binance XAGUSDT live, Dukascopy XAGUSD history.
+  # Forex: Dukascopy history + Kraken live minutes (arven.data.kraken_live), CME-free FX week (session "fx").
+  # Crowded Shorts is BTC-only (its open-interest history was not ingested for the other coins).
+  - instrument: ETHUSDT
+    title: Ethereum
+    enabled: true
+    cost_profile: costs.yaml
+    include_open_interest: false
+    strategies: *market_strategies
+  - instrument: SOLUSDT
+    title: Solana
+    enabled: true
+    cost_profile: costs.yaml
+    include_open_interest: false
+    strategies: *market_strategies
+  - instrument: XRPUSDT
+    title: XRP
+    enabled: true
+    cost_profile: costs.yaml
+    include_open_interest: false
+    strategies: *market_strategies
+  - instrument: BNBUSDT
+    title: BNB
+    enabled: true
+    cost_profile: costs.yaml
+    include_open_interest: false
+    strategies: *market_strategies
+  - instrument: DOGEUSDT
+    title: Dogecoin
+    enabled: true
+    cost_profile: costs.yaml
+    include_open_interest: false
+    strategies: *market_strategies
+  - instrument: ADAUSDT
+    title: Cardano
+    enabled: true
+    cost_profile: costs.yaml
+    include_open_interest: false
+    strategies: *market_strategies
+  - instrument: LINKUSDT
+    title: Chainlink
+    enabled: true
+    cost_profile: costs.yaml
+    include_open_interest: false
+    strategies: *market_strategies
+  - instrument: XAGUSDT
+    title: Silver
+    history_instrument: XAGUSD
+    enabled: true
+    cost_profile: costs_cfd_silver.yaml
+    include_open_interest: false
+    strategies: *market_strategies
+  - instrument: EURUSD
+    title: EUR/USD
+    enabled: true
+    cost_profile: costs_cfd_fx.yaml
+    include_open_interest: false
+    strategies: *market_strategies
+  - instrument: GBPUSD
+    title: GBP/USD
+    enabled: true
+    cost_profile: costs_cfd_fx.yaml
+    include_open_interest: false
+    strategies: *market_strategies

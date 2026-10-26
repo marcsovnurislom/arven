@@ -97,3 +97,16 @@ def test_resample_is_idempotent_and_reflects_corrected_1m(con):
 def test_resample_rejects_1m(con):
     with pytest.raises(ValueError):
         resample(con, "BTCUSDT", T0, datetime(2024, 1, 2, tzinfo=UTC), (Timeframe.M1,))
+
+
+def test_30m_and_1d_bars_added_2026_10_27(con):
+    """30m buckets on the half hour, 1d buckets at 00:00 UTC; a day with every minute is complete, a partial one is not."""
+    insert_1m(con, range(1440 + 60))  # one full day and the first hour of the next
+    resample(con, "BTCUSDT", T0, datetime(2024, 1, 2, 1, 0, tzinfo=UTC), (Timeframe.M30, Timeframe.D1))
+    m30 = bars(con, Timeframe.M30)
+    assert len(m30) == 48 + 2 and m30[1][0] == T0_MS + 30 * MIN and m30[0][1] == T0_MS + 30 * MIN
+    assert m30[0][2] == 100.0 and m30[0][5] == 100.0 + 29 + 1 and m30[0][8] == 30 and m30[0][9]
+    d1 = bars(con, Timeframe.D1)
+    assert [(b[0], b[8], b[9]) for b in d1] == [(T0_MS, 1440, True), (T0_MS + 1440 * MIN, 60, False)]
+    assert d1[0][3] == 100.0 + 1439 + 5 and d1[0][4] == 100.0 - 5  # high / low over the whole day
+    assert Timeframe.D1.ms == 86_400_000 and Timeframe.M30.ms == 1_800_000

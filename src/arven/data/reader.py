@@ -7,6 +7,8 @@ convention.
 
 from __future__ import annotations
 
+import os
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -22,8 +24,17 @@ from arven.core.timeframes import Timeframe
 
 
 def open_readonly(database_path: Path | str) -> duckdb.DuckDBPyConnection:
-    """Open the ARVEN database read-only (no schema DDL, safe next to a running writer)."""
-    return duckdb.connect(str(database_path), read_only=True)
+    """Open the ARVEN database read-only (no schema DDL). While another process writes (the live loop, a few seconds
+    per tick) DuckDB refuses the file; long research runs set ``ARVEN_DB_WAIT_SECONDS`` to keep retrying that long
+    instead of failing (default 0: fail at once, as the web API wants - it answers 503 and the page retries)."""
+    deadline = time.monotonic() + float(os.environ.get("ARVEN_DB_WAIT_SECONDS", "0") or 0)
+    while True:
+        try:
+            return duckdb.connect(str(database_path), read_only=True)
+        except duckdb.IOException:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(2.0)
 
 
 def _f64(a: object) -> np.ndarray:
@@ -106,6 +117,20 @@ def load_feature_inputs(
         funding=load_funding(con, symbol, start_ms, end_ms),
         open_interest=load_open_interest(con, symbol, start_ms, end_ms),
     )
+
+
+# Bar series beyond the feature set (REQUIRED_TIMEFRAMES): kept out of MarketInputs so feature fingerprints stay as
+# they were; strategies on these timeframes (S7 30m / 1d, 2026-10-27) read them through load_bar_map.
+EXTRA_TIMEFRAMES: tuple[Timeframe, ...] = (Timeframe.M30, Timeframe.D1)
+
+
+def load_bar_map(
+    con: duckdb.DuckDBPyConnection, cfg: AppConfig, timeframes: tuple[Timeframe, ...], start: datetime | None = None, end: datetime | None = None,
+) -> dict[Timeframe, BarSeries]:
+    """Derived bars of ``timeframes`` over ``[start, end)`` with the same availability rule as load_feature_inputs."""
+    start_ms, end_ms = to_ms(start or cfg.data.history_start), to_ms(end or cfg.data.history_end)
+    delay_ms = cfg.data.bar_availability_delay_seconds * 1000
+    return {tf: load_bars(con, cfg.market.symbol, tf, start_ms, end_ms, delay_ms, cfg.session_calendar()) for tf in timeframes}
 
 
 def load_1m_bars(

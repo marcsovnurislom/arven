@@ -127,3 +127,17 @@ def test_expected_minutes_equals_a_minute_by_minute_count(tf):
     minutes = opens[:, None] + np.arange(per, dtype=np.int64)[None, :] * MIN
     brute = cal.is_open(minutes.ravel()).reshape(len(opens), per).sum(axis=1)
     assert np.array_equal(cal.expected_minutes(tf, opens), brute)
+
+
+def test_fx_week_runs_sunday_to_friday_17_00_new_york_without_a_daily_halt():
+    """Spot forex (2026-10-27): closed Friday 17:00 -> Sunday 17:00 New York time, open through every weekday evening."""
+    from datetime import UTC, datetime
+
+    from arven.core.sessions import SessionCalendar
+
+    cal = SessionCalendar("fx")
+    ms = lambda s: int(datetime.fromisoformat(s).replace(tzinfo=UTC).timestamp() * 1000)  # noqa: E731
+    assert cal.is_open(ms("2026-10-23T20:59")) and not cal.is_open(ms("2026-10-23T21:00"))  # Friday close, summer time (UTC-4)
+    assert not cal.is_open(ms("2026-10-25T20:59")) and cal.is_open(ms("2026-10-25T21:00"))  # Sunday open
+    assert cal.is_open(ms("2026-10-21T21:30"))  # Wednesday 17:30 New York: no daily halt, unlike CME metals
+    assert cal.is_open(ms("2026-01-09T21:59")) and not cal.is_open(ms("2026-01-09T22:00"))  # winter time (UTC-5)

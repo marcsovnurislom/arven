@@ -3,7 +3,7 @@ import { api, getMarket, tradeSize, type S7Trade, type S7TradeLabel } from "../a
 import { useI18n } from "../i18n";
 import { useLoad } from "../hooks";
 import { EquityCurve, TradeChart, ZONE_STYLE, usd } from "../TradesViewer";
-import { Card, Chip, Empty, ErrorBox, PageTitle, SidePill, Skeleton, Stat, fmt, fmtPct, fmtR, fmtTime, signClass } from "../ui";
+import { Card, Chip, Empty, ErrorBox, fmt, fmtPct, fmtPrice, fmtR, fmtTime, PageTitle, SidePill, signClass, Skeleton, Stat } from "../ui";
 
 type Filter = "all" | "wins" | "losses" | "unmarked" | "wrong";
 type Verdict = S7TradeLabel["verdict"];
@@ -132,8 +132,8 @@ export function S7Trades() {
                   })}
                 </div>
                 <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
-                  <dt className="muted">{t("s7tEntry")}</dt><dd className="num">{fmt(tr.entry, 1)}</dd>
-                  <dt className="muted">{t("s7tStop")}</dt><dd className="num">{fmt(tr.stop, 1)}</dd>
+                  <dt className="muted">{t("s7tEntry")}</dt><dd className="num">{fmtPrice(tr.entry)}</dd>
+                  <dt className="muted">{t("s7tStop")}</dt><dd className="num">{fmtPrice(tr.stop, tr.entry)}</dd>
                   <dt className="muted">{t("s7tSize")}</dt><dd className="num">{tradeSize(tr)}</dd>
                   <dt className="muted">{t("s7tExit")}</dt><dd className="num">{fmtTime(tr.exit_time_ms)} · {tr.exit_reasons.join(", ")}</dd>
                 </dl>

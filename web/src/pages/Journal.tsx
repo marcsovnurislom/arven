@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { ApiError, api } from "../api";
 import { useI18n } from "../i18n";
 import { useLoad } from "../hooks";
-import { Card, Chip, Empty, ErrorBox, PageTitle, SidePill, Skeleton, Stat, fmt, fmtPct, fmtR, signClass } from "../ui";
+import { Card, Chip, Empty, ErrorBox, fmt, fmtPct, fmtPrice, fmtR, PageTitle, SidePill, signClass, Skeleton, Stat } from "../ui";
 
 const num = (v: FormDataEntryValue | null) => (v === null || String(v).trim() === "" ? null : Number(v));
 
@@ -82,8 +82,8 @@ export function Journal() {
                       <tr key={e.id}>
                         <td className="num">{e.symbol}</td>
                         <td><SidePill side={e.side} /></td>
-                        <td className="num">{fmt(e.entry)}</td>
-                        <td className="num">{fmt(e.stop)}</td>
+                        <td className="num">{fmtPrice(e.entry)}</td>
+                        <td className="num">{fmtPrice(e.stop, e.entry)}</td>
                         <td className="num">{fmt(e.exit)}</td>
                         <td className={`num ${signClass(e.r_multiple)}`}>{fmtR(e.r_multiple)}</td>
                         <td>{e.tags.map((x) => <Chip key={x}>{x}</Chip>)}</td>

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from arven.core.prices import fmt_price
 from arven.core.time import from_ms
 from arven.engine.signal import EngineSignal
 from arven.engine.signal_events import SignalUpdate, SignalUpdateKind
@@ -28,7 +29,8 @@ _UPDATE_VERB = {
 
 # How a feed symbol is shown to the owner: gold signals are computed on Binance's XAUUSDT perpetual, but the owner
 # trades the XAUUSD CFD - say both, so a price is never mistaken for the broker's quote.
-SYMBOL_LABELS = {"XAUUSDT": "GOLD XAUUSD (prices: Binance XAUUSDT)"}
+SYMBOL_LABELS = {"XAUUSDT": "GOLD XAUUSD (prices: Binance XAUUSDT)", "XAGUSDT": "SILVER XAGUSD (prices: Binance XAGUSDT)",
+                 "EURUSD": "EUR/USD (prices: Dukascopy + Kraken)", "GBPUSD": "GBP/USD (prices: Dukascopy + Kraken)"}
 
 
 def symbol_label(symbol: str) -> str:
@@ -75,22 +77,22 @@ def format_new_signal(signal: EngineSignal, record: TrackRecord | None = None, l
                else ru.record_line(record.closed, record.wins, record.total_r, record.since_ms))
         return ru.new_signal(signal, rec)
     tp_lines = "\n".join(
-        f"  TP{i + 1}: {lvl.price:.2f} ({lvl.r_multiple:.2f}R, close {lvl.close_fraction:.0%})"
+        f"  TP{i + 1}: {fmt_price(lvl.price, signal.entry_reference)} ({lvl.r_multiple:.2f}R, close {lvl.close_fraction:.0%})"
         for i, lvl in enumerate(signal.tp_ladder)
     )
     if not signal.tp_ladder and signal.max_holding_minutes is not None:
         tp_lines = f"  No take-profit: time exit after {signal.max_holding_minutes / 60:g} h"
     if signal.entry_type == "limit":
         until = f" (valid until {_utc(signal.valid_until_ms)})" if signal.valid_until_ms else ""
-        entry = f"Entry: LIMIT {signal.entry_reference:.2f}{until}"
+        entry = f"Entry: LIMIT {fmt_price(signal.entry_reference)}{until}"
     else:
-        entry = f"Entry (ref): {signal.entry_reference:.2f}"
+        entry = f"Entry (ref): {fmt_price(signal.entry_reference)}"
     reasons = "; ".join(signal.reasons[:3]) if signal.reasons else "(none recorded)"
     return (
         f"NEW SIGNAL [{signal.grade.value}]\n"
         f"{symbol_label(signal.symbol)} {_side_word(signal.side)}  ({signal.strategy_id} {_version(signal.strategy_version)})  {_utc(signal.event_time_ms)}\n"
         f"{entry}\n"
-        f"Stop: {signal.stop:.2f}\n"
+        f"Stop: {fmt_price(signal.stop, signal.entry_reference)}\n"
         f"{tp_lines}\n"
         f"Risk: {signal.risk_fraction:.2%} of equity (fixed rule, the same for every signal)\n"
         f"Quality: no validated per-signal estimate\n"
@@ -122,7 +124,7 @@ def format_signal_update(signal: EngineSignal, update: SignalUpdate, lang: str =
     verb = _UPDATE_VERB[update.kind]
     return (
         f"{verb}: {symbol_label(signal.symbol)} {_side_word(signal.side)} ({signal.strategy_id})  {_utc(update.time_ms)}\n"
-        f"Signal of {_utc(signal.event_time_ms)}, entry {signal.entry_reference:.2f}, stop {signal.stop:.2f}\n"
+        f"Signal of {_utc(signal.event_time_ms)}, entry {fmt_price(signal.entry_reference)}, stop {fmt_price(signal.stop, signal.entry_reference)}\n"
         f"{update.detail}\n\n{DISCLAIMER}"
     )
 

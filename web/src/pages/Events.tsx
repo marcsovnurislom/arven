@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, getMarket, type EventHorizonStats, type EventType, type Events as EventsData } from "../api";
+import { api, getMarket, marketName, type EventHorizonStats, type EventType, type Events as EventsData } from "../api";
 import { useI18n, type Key, type Lang } from "../i18n";
 import { useLoad, useNow } from "../hooks";
 import { Card, Chip, Empty, ErrorBox, PageTitle, Skeleton, until } from "../ui";
@@ -65,7 +65,7 @@ export function Events() {
   const reload = ev.reload;
   const passed = next === null && (data?.upcoming.length ?? 0) > 0;
   useEffect(() => { if (passed) reload(); }, [passed]); // eslint-disable-line react-hooks/exhaustive-deps
-  const market = getMarket() === "gold" ? t("evGold") : "BTC";
+  const market = getMarket() === "gold" ? t("evGold") : marketName();
   const sum = data?.summary[typ] ?? {};
   const scale = useMemo(() => Math.max(0.01, ...Object.values(sum).flatMap((s) => [s.median_range ?? 0, s.median_baseline ?? 0])), [sum]);
   const recent = (data?.recent ?? []).filter((r) => r.type === typ).slice(-8).reverse();

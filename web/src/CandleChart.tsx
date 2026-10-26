@@ -5,6 +5,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { useThemeName } from "./hooks";
 import type { Candle } from "./api";
+import { priceDigits } from "./ui";
 
 export type ChartLine = { price: number; color: string; title: string; dashed?: boolean };
 export type ChartMarker = { timeMs: number; side: 1 | -1; text: string; shape?: "circle" | "square"; color?: string; position?: "aboveBar" | "belowBar" };
@@ -93,6 +94,8 @@ export function CandleChart({ candles, lines = [], markers = [], height = 420, f
     const scale = chart.timeScale();
     const prevRange = scale.getVisibleLogicalRange();
     const prevFirst = firstT.current;
+    const digits = priceDigits(candles[candles.length - 1].c);  // EUR/USD 1.11767, DOGE 0.21234, BTC 80945.67
+    series.applyOptions({ priceFormat: { type: "price", precision: digits, minMove: 10 ** -digits } });
     series.setData(candles.map((c) => ({ time: Math.floor(c.t / 1000) as UTCTimestamp, open: c.o, high: c.h, low: c.l, close: c.c })));
     const refit = lastFit.current !== fitKey;
     lastFit.current = fitKey;

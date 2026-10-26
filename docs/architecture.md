@@ -3,6 +3,9 @@
 Status: **approved as target architecture** (2026-09-28). Not every module is built in the MVP; see `roadmap.md`.
 **2026-10-18 (owner request): a second market, gold (XAUUSD), added** - section 18 describes how; BTC behaviour and
 results are unchanged by it.
+**2026-10-27 (owner request): ten more markets and the 30m / 1d timeframes** - section 19. The MVP's "BTC only" scope
+in CLAUDE.md is widened by the owner's explicit request; every rule (no look-ahead, costs, NO_TRADE default, paper only)
+applies to every market unchanged.
 Constraint: DuckDB + Parquet only — no PostgreSQL unless a concrete requirement appears.
 
 ---
@@ -756,3 +759,32 @@ owner's terminal), `funding.source: none`; overnight swap is reported as a separ
 parameters, S1-S3 paper run); one process runs every market with its own cursor, stale flag and alerts; Telegram
 labels gold signals with both the broker symbol and the feed. The web app has a BTC / Gold switch (`market=` on the
 API). Gold's live prices come from XAUUSDT, whose small basis to the broker's XAUUSD is measured in the gold report.
+
+## 19. Twelve markets and the 30m / 1d timeframes (added 2026-10-27)
+
+The owner asked for "the ten best-known pairs and coins" next to BTC and gold, and for more timeframes. Nothing in the
+design had to change: a market is still `config/instruments/<X>.yaml` + an entry in `config/live.yaml` `markets`.
+
+| Group | Markets | Live prices | History | Costs | Session |
+|---|---|---|---|---|---|
+| Crypto | ETH, SOL, XRP, BNB, DOGE, ADA, LINK | Binance USD-M perpetual (REST tail) | Binance bulk files | `costs.yaml` (Binance taker, real funding) | 24x7 |
+| Metals | silver | Binance XAGUSDT | Dukascopy XAGUSD | `costs_cfd_silver.yaml` (unverified spread) | `cme_metals` |
+| Forex | EUR/USD, GBP/USD | Kraken spot OHLC, appended to the Dukascopy symbol (`arven.data.kraken_live`) | Dukascopy | `costs_cfd_fx.yaml` (unverified spread) | `fx` |
+
+- **Forex feed.** Binance has no EUR/USD or GBP/USD contract and Dukascopy publishes a day only after it ends, so the
+  live minutes come from Kraken's public OHLC (a trade every minute on both pairs; USD/JPY had almost none and is not
+  offered). Kraken minutes are appended after the last stored minute of the same symbol (never overwriting history),
+  only closed and in-session minutes; a Kraken outage over 12 h leaves a gap that `arven duka` can fill.
+- **`fx` session** (`arven.core.sessions`): Sunday 17:00 to Friday 17:00 New York time, no daily halt; holidays in
+  `config/sessions/fx_closures.csv` (empty: thin holiday quotes are kept).
+- **Strategies.** Every new market runs gold's list unchanged (S4-S6, S7 and S7-SMC on 15m, S7 on 30m / 1h / 4h / 1d):
+  paper, EXPERIMENTAL, each with its own record in `data/markets/<instrument>/`. Crowded Shorts stays BTC-only (no
+  open-interest history for the others).
+- **Timeframes.** `Timeframe.M30` and `Timeframe.D1` (00:00 UTC days) are derived from 1m like the others
+  (`DERIVED_TIMEFRAMES`) and served to charts (`/api/candles`). They are **not** in `REQUIRED_TIMEFRAMES`, so the v1
+  feature set and every feature fingerprint stay as they were; strategies read them through
+  `arven.data.reader.load_bar_map` (`EXTRA_TIMEFRAMES`). S7 on 30m uses 5m below / 4h above, on 1d 4h below / none.
+  1m bars have always been stored and are now on the chart page; no strategy decides on 1m (see
+  `docs/ANALIZ_VSEH_STRATEGIY.md`: at 1m the round-trip cost is a large share of a typical stop).
+- **Web.** More than three markets turn the switch into a picker grouped by crypto / metals / forex; market ids come
+  from the titles (`eurusd`, `silver`, ...).

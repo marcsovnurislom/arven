@@ -1,0 +1,5 @@
+# Ethereum (ETHUSDT) on Binance USD-M futures: the same pipeline as BTC (bulk history from data.binance.vision, REST tail
+# for live). Added 2026-10-27. Costs: Binance taker profile (config/costs.yaml, 5 bps + volatility slippage + real
+# funding) - the venue the prices come from; a CFD broker's spread for this coin was not checked.
+market:
+  symbol: ETHUSDT

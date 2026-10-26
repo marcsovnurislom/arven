@@ -3,7 +3,7 @@ import { api, type S7Label, type S7Setup } from "../api";
 import type { ChartLine, ChartMarker, ChartOverlay } from "../CandleChart";
 import { useI18n } from "../i18n";
 import { useLoad, useThemeName } from "../hooks";
-import { Card, Chip, Empty, ErrorBox, PageTitle, SidePill, Skeleton, cssVar, fmt, fmtTime } from "../ui";
+import { Card, Chip, cssVar, Empty, ErrorBox, fmt, fmtPrice, fmtTime, PageTitle, SidePill, Skeleton } from "../ui";
 
 const CandleChart = lazy(() => import("../CandleChart").then((m) => ({ default: m.CandleChart })));
 const FIB_COLORS: Record<string, string> = { "0.0": "#9aa3b2", "0.5": "#d9b256", "0.618": "#d9b256", "1.0": "TEXT", "1.272": "#34d399", "1.618": "#34d399", "2.0": "#34d399" };
@@ -127,8 +127,8 @@ export function S7Review() {
               <dl className="grid grid-cols-2 gap-1 text-sm">
                 <dt className="muted">{t("s7Touches")}</dt><dd className="num text-right">{s.touches.length}</dd>
                 <dt className="muted">{t("s7Range")}</dt><dd className="num text-right">{s.range ? `${fmt(s.range.bottom, 0)}–${fmt(s.range.top, 0)}` : "—"}</dd>
-                <dt className="muted">fib 0</dt><dd className="num text-right">{fmt(s.level0.price, 0)}</dd>
-                <dt className="muted">fib 1</dt><dd className="num text-right">{fmt(s.level1.price, 0)}</dd>
+                <dt className="muted">fib 0</dt><dd className="num text-right">{fmtPrice(s.level0.price)}</dd>
+                <dt className="muted">fib 1</dt><dd className="num text-right">{fmtPrice(s.level1.price, s.level0.price)}</dd>
                 <dt className="muted">{t("s7Zone")}</dt><dd className="num text-right">{fmt(s.zone.low, 0)}–{fmt(s.zone.high, 0)}</dd>
                 <dt className="muted">{t("s7Confluence")}</dt><dd className="num text-right">{s.confluence_score}</dd>
               </dl>

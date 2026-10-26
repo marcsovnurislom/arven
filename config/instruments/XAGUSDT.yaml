@@ -1,0 +1,10 @@
+# Silver on Binance USD-M futures (XAGUSDT perpetual, listed 2026-01-07): the live feed for silver signals, like XAUUSDT
+# for gold. Same CME metals session calendar as the Dukascopy XAGUSD history. Added 2026-10-27.
+market:
+  exchange: binance
+  market_type: usdm_perpetual
+  symbol: XAGUSDT
+  session: cme_metals
+  has_funding: false
+
+costs_file: costs_cfd_silver.yaml

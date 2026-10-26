@@ -5,8 +5,8 @@ Conventions (used everywhere in ARVEN):
 - A bar covers the half-open interval ``[open_time, close_time)``.
 - ``close_time = open_time + duration``. (Binance reports ``close_time`` as ``open_time + duration - 1ms``;
   adapters normalise that to this convention.)
-- Bars are aligned to the UTC epoch. For all supported timeframes (<= 4h) this matches exchange
-  alignment, since 4h divides a UTC day.
+- Bars are aligned to the UTC epoch. For all supported timeframes (<= 1d) this matches exchange
+  alignment, since each divides a UTC day (1d bars open at 00:00 UTC; 30m and 1d added 2026-10-27).
 - A bar's information becomes usable only at ``available_at = close_time + delay``. Nothing about a bar
   may be used at any time earlier than that.
 """
@@ -24,8 +24,10 @@ class Timeframe(StrEnum):
     M1 = "1m"
     M5 = "5m"
     M15 = "15m"
+    M30 = "30m"
     H1 = "1h"
     H4 = "4h"
+    D1 = "1d"
 
     @property
     def duration(self) -> timedelta:
@@ -40,8 +42,10 @@ _DURATIONS: dict[Timeframe, timedelta] = {
     Timeframe.M1: timedelta(minutes=1),
     Timeframe.M5: timedelta(minutes=5),
     Timeframe.M15: timedelta(minutes=15),
+    Timeframe.M30: timedelta(minutes=30),
     Timeframe.H1: timedelta(hours=1),
     Timeframe.H4: timedelta(hours=4),
+    Timeframe.D1: timedelta(days=1),
 }
 
 

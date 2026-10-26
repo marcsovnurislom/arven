@@ -1,8 +1,13 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
 
 const en = {
-  appTagline: "Decision support for BTC/USDT and gold (XAUUSD). Signals only - never orders.",
+  appTagline: "Decision support for crypto, metals and forex: BTC, ETH, SOL, gold, silver, EUR/USD and more. Signals only - never orders.",
   market: "Market",
+  mkCrypto: "Crypto",
+  mkMetals: "Metals",
+  mkFx: "Forex",
+  mkCount: "markets",
+  mkPick: "Choose a market",
   marketClosed: "Market closed (weekend, daily halt or holiday) - no signals until it reopens",
   goldFeed: "Gold signals use Binance XAUUSDT prices; your broker's XAUUSD quote can differ slightly.",
   honesty: "Paper simulation on real market data. Not an exchange account, not advice, not evidence of profitability.",
@@ -423,8 +428,13 @@ const en = {
 };
 
 const ru: typeof en = {
-  appTagline: "Поддержка решений по BTC/USDT и золоту (XAUUSD). Только сигналы, никаких ордеров.",
+  appTagline: "Поддержка решений по криптовалютам, металлам и форексу: BTC, ETH, SOL, золото, серебро, EUR/USD и другие. Только сигналы, никаких ордеров.",
   market: "Рынок",
+  mkCrypto: "Крипто",
+  mkMetals: "Металлы",
+  mkFx: "Форекс",
+  mkCount: "рынков",
+  mkPick: "Выберите рынок",
   marketClosed: "Рынок закрыт (выходные, ежедневная пауза или праздник): сигналов нет до открытия",
   goldFeed: "Сигналы по золоту считаются по ценам Binance XAUUSDT; котировка XAUUSD у брокера может немного отличаться.",
   honesty: "Бумажная симуляция на реальных данных. Это не биржевой счёт, не совет и не доказательство прибыльности.",

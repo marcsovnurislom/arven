@@ -66,9 +66,9 @@ from arven.engine.signal import EngineSignal, SignalVersions, TPLevel  # noqa: E
 from arven.engine.strategy_s7_plan import MANAGEMENTS, S7TradeParams  # noqa: E402
 from arven.live.strategies import S7Strategy  # noqa: E402
 
-INSTRUMENT = "XAUUSD"
+INSTRUMENT = os.environ.get("ARVEN_INSTRUMENT", "XAUUSD")  # another research instrument (all_markets.py)
 CONFIG_DIR = os.environ.get("ARVEN_CONFIG_DIR")  # another configuration (e.g. a scratch data directory for a dry run)
-APP = load_config(CONFIG_DIR, instrument=INSTRUMENT)
+APP = load_config(CONFIG_DIR, instrument=None if INSTRUMENT == "BTCUSDT" else INSTRUMENT)
 OUT = APP.market_root / "research"
 PERIODS = {"development": BacktestPeriod.DEVELOPMENT, "validation": BacktestPeriod.VALIDATION, "forward": BacktestPeriod.FORWARD}
 PROFILES = {"cfd": False, "cfd_x4": True}

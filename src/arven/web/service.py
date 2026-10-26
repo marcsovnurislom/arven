@@ -15,7 +15,7 @@ import duckdb
 from arven.engine.signal_events import SignalUpdateKind
 from arven.engine.signal_store import read_signals, read_updates
 
-CANDLE_TIMEFRAMES = ("1m", "5m", "15m", "1h", "4h")
+CANDLE_TIMEFRAMES = ("1m", "5m", "15m", "30m", "1h", "4h", "1d")
 MAX_CANDLES = 2000
 
 

@@ -35,7 +35,7 @@ from arven.core.features_config import load_features_config
 from arven.core.splitguard import BacktestPeriod
 from arven.core.time import from_ms
 from arven.core.timeframes import Timeframe
-from arven.data.reader import load_feature_inputs, open_readonly
+from arven.data.reader import EXTRA_TIMEFRAMES, load_bar_map, load_feature_inputs, open_readonly
 from arven.engine.grading import Grade
 from arven.engine.signal import EngineSignal, SignalVersions, TPLevel
 from arven.engine.strategy_s7 import S7Params, S7Setup, detect_setups
@@ -46,9 +46,7 @@ SEED = 7
 SOURCES = ("src/arven/engine/strategy_s7.py", "src/arven/engine/strategy_s7_plan.py", "src/arven/backtest/strategy_s7_sim.py",
            "src/arven/backtest/paper_tracker.py", "src/arven/backtest/costs.py", "scripts/s7_study.py", "config/costs_cfd_justmarkets.yaml")
 MIN_TRADES = 100
-TFS = {"15m": Timeframe.M15, "1h": Timeframe.H1, "4h": Timeframe.H4}
-LOWER = {"15m": Timeframe.M5, "1h": Timeframe.M15, "4h": Timeframe.H1}
-HIGHER = {"15m": Timeframe.H1, "1h": Timeframe.H4, "4h": None}
+from arven.live.strategies import S7_HIGHER as HIGHER, S7_LOWER as LOWER, S7_TFS as TFS  # noqa: E402  # one map for study and live
 
 # (question, key, options) in the spec's table order; the first option is the baseline
 QUESTIONS: list[tuple[str, str, list[Any]]] = [
@@ -105,7 +103,8 @@ class Study:
             self.market = load_inputs(self.app, fcfg, self.window).market
         con = open_readonly(self.app.data.database_path)
         try:
-            self.bars = load_feature_inputs(con, self.app, start=self.app.data.history_start, end=from_ms(self.window.end_ms)).bars
+            self.bars = {**load_feature_inputs(con, self.app, start=self.app.data.history_start, end=from_ms(self.window.end_ms)).bars,
+                         **load_bar_map(con, self.app, EXTRA_TIMEFRAMES, start=self.app.data.history_start, end=from_ms(self.window.end_ms))}
         finally:
             con.close()
         print(f"data loaded in {time.time() - t0:.0f}s: {len(self.market)} 1m bars, window {from_ms(self.window.start_ms)} -> {from_ms(self.window.end_ms)}")

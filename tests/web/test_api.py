@@ -117,7 +117,8 @@ def test_strategies_and_research_read_artifacts(env):
 def test_screener_lists_every_followed_market_and_only_real_rows(env):
     _, client, _ = env
     s = client.get("/api/screener").json()
-    assert s["supported_symbols"] == ["BTCUSDT", "XAUUSDT"]
+    assert s["supported_symbols"][:2] == ["BTCUSDT", "XAUUSDT"]  # then the markets added on 2026-10-27
+    assert {"ETHUSDT", "XAGUSDT", "EURUSD", "GBPUSD"} <= set(s["supported_symbols"]) and len(s["supported_symbols"]) == 12
     assert len(s["rows"]) == 1 and s["rows"][0]["price"] == 129.0 and s["rows"][0]["market"] == "btc"  # no gold bars stored here
 
 

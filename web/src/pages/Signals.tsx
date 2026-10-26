@@ -5,7 +5,7 @@ import type { ChartLine } from "../CandleChart";
 import { RiskLadder } from "../Charts2";
 import { useI18n, type Key } from "../i18n";
 import { useCandleFeed, useLoad, useNow } from "../hooks";
-import { Card, Chip, Empty, ErrorBox, PageTitle, SidePill, Skeleton, fmt, fmtTime, shortId } from "../ui";
+import { Card, Chip, Empty, ErrorBox, fmt, fmtPrice, fmtTime, PageTitle, shortId, SidePill, Skeleton } from "../ui";
 
 const CandleChart = lazy(() => import("../CandleChart").then((m) => ({ default: m.CandleChart })));
 const MIN15 = 15 * 60_000;
@@ -41,11 +41,11 @@ function Detail({ s }: { s: Signal }) {
           <table>
             <tbody>
               <tr><th>{t("entryType")}</th><td>{s.entry_type === "limit" ? t("entryLimit") : t("entryMarket")}</td></tr>
-              <tr><th>{t("entry")}</th><td className="num">{fmt(s.entry_reference)}</td></tr>
+              <tr><th>{t("entry")}</th><td className="num">{fmtPrice(s.entry_reference)}</td></tr>
               {s.valid_until_ms ? <tr><th>{t("validUntil")}</th><td className="num">{fmtTime(s.valid_until_ms)}</td></tr> : null}
-              <tr><th>{t("stop")}</th><td className="num down">{fmt(s.stop)}</td></tr>
+              <tr><th>{t("stop")}</th><td className="num down">{fmtPrice(s.stop, s.entry_reference)}</td></tr>
               {s.tp_ladder.map(([r, frac, price], i) => (
-                <tr key={i}><th>TP{i + 1}</th><td className="num up">{fmt(price)} <span className="faint">({r.toFixed(2)}R, {Math.round(frac * 100)}%)</span></td></tr>
+                <tr key={i}><th>TP{i + 1}</th><td className="num up">{fmtPrice(price, s.entry_reference)} <span className="faint">({r.toFixed(2)}R, {Math.round(frac * 100)}%)</span></td></tr>
               ))}
               {s.tp_ladder.length === 0 && s.max_holding_minutes ? (
                 <tr><th>{t("timeExit")}</th><td className="num">{t("timeExitNote")} {Math.round(s.max_holding_minutes / 60)} h</td></tr>
@@ -118,7 +118,7 @@ export function Signals() {
                   <Chip tone={s.status === "closed" || s.status === "cancelled" ? "" : "gold"}>{(s.status === "open" || s.status === "partial" || s.status === "pending") && <span className="dot ring-pulse" style={{ width: 7, height: 7, color: "var(--gold)" }} />}{t(`st_${s.status}` as Key)}</Chip>
                 </div>
                 <div className="num mt-1 text-sm">{s.strategy_id}</div>
-                <div className="num text-xs faint">{fmtTime(s.event_time_ms)} · {fmt(s.entry_reference, 0)}</div>
+                <div className="num text-xs faint">{fmtTime(s.event_time_ms)} · {fmtPrice(s.entry_reference)}</div>
               </button>
             ))}
           </div>

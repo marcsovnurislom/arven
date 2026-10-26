@@ -1,0 +1,21 @@
+# Euro / US dollar (EURUSD) history for research: Dukascopy 1m BID/ASK candles -> mid price, 2020 onward. Added 2026-10-27.
+# Live minutes: Kraken spot OHLC appended to this same symbol (arven.data.kraken_live).
+market:
+  exchange: dukascopy
+  market_type: spot_otc
+  symbol: EURUSD
+  session: fx
+  has_funding: false
+  has_trade_flow: false
+
+costs_file: costs_cfd_fx.yaml
+
+dukascopy:
+  base_url: https://datafeed.dukascopy.com/datafeed
+  instrument: EURUSD
+  point: 100000
+  request_interval_seconds: 1.0
+  workers: 4
+  timeout_seconds: 30
+  max_attempts: 6
+  backoff_max_seconds: 60

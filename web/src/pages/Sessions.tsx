@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
-import { api, getMarket, type Activity, type CentreSession, type MarketSession } from "../api";
+import { api, getMarket, marketName, type Activity, type CentreSession, type MarketSession } from "../api";
 import { useI18n, type Lang } from "../i18n";
 import { useLoad, useNow } from "../hooks";
 import { Card, Chip, ErrorBox, PageTitle, Skeleton, fmtTime, until } from "../ui";
@@ -132,7 +132,7 @@ function Heatmap({ now }: { now: number }) {
   const top = cells.map((c, k) => ({ ...c, k })).filter((c) => c.v !== null).sort((x, y) => (y.v ?? 0) - (x.v ?? 0)).slice(0, 3);
   const slotName = (k: number) => `${days[Math.floor(k / 24)]} ${String(k % 24).padStart(2, "0")}:00`;
   const tz = local ? `UTC${offH >= 0 ? "+" : ""}${offH}` : "UTC";
-  const market = getMarket() === "gold" ? (lang === "ru" ? "Золото" : "Gold") : "BTC";
+  const market = getMarket() === "gold" ? (lang === "ru" ? "Золото" : "Gold") : marketName();
 
   return (
     <Card

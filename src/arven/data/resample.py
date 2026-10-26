@@ -1,4 +1,4 @@
-"""Deterministic 1m -> higher-timeframe resampling (5m, 15m, 1h, 4h).
+"""Deterministic 1m -> higher-timeframe resampling (5m, 15m, 30m, 1h, 4h, 1d; 30m and 1d since 2026-10-27).
 
 Each 1m bar belongs to bucket ``open_time - open_time % tf_ms`` (UTC-epoch aligned; matches Binance).
 open = first 1m open, close = last 1m close, high = max, low = min, volumes and trade counts summed.
@@ -25,7 +25,7 @@ from arven.core.time import to_ms
 from arven.core.timeframes import Timeframe, ceil_to_bar, floor_to_bar
 from arven.data.storage.db import now_ms
 
-DERIVED_TIMEFRAMES: tuple[Timeframe, ...] = (Timeframe.M5, Timeframe.M15, Timeframe.H1, Timeframe.H4)
+DERIVED_TIMEFRAMES: tuple[Timeframe, ...] = (Timeframe.M5, Timeframe.M15, Timeframe.M30, Timeframe.H1, Timeframe.H4, Timeframe.D1)
 
 
 def _exact_sum(column: str) -> str:

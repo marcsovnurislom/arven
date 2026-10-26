@@ -1,0 +1,19 @@
+# Silver (XAGUSD) as a CFD (spread only, zero commission), added 2026-10-27. NOT verified on the owner's terminal: a
+# typical retail spread of ~3 cents at ~$50 (~6 bps round trip) -> 3 bps per side. Replace with half of (Ask - Bid) /
+# price in bps from MT5 Market Watch. Swap not modelled.
+fees:
+  maker_fee_bps: 0.0
+  taker_fee_bps: 0.0
+  entry_order_type: taker
+  exit_order_type: taker
+  stop_order_type: taker
+slippage:
+  model: fixed_plus_volatility
+  fixed_bps: 3.0
+  volatility_multiplier: 0.0
+  stress_multiplier: 4.0
+funding:
+  source: none
+  missing_policy: assume_rate
+  assumed_rate_bps: 0.0
+  default_interval_hours: 8

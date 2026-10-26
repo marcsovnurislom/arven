@@ -36,7 +36,7 @@ from arven.core.live_config import LiveConfig
 from arven.core.splitguard import BacktestPeriod, SplitViolation
 from arven.core.time import to_ms, utc_now
 from arven.core.timeframes import Timeframe
-from arven.data.reader import load_1m_bars, load_feature_inputs, load_funding_window, open_readonly
+from arven.data.reader import EXTRA_TIMEFRAMES, load_1m_bars, load_bar_map, load_feature_inputs, load_funding_window, open_readonly
 from arven.data.rest_ingestion import RestTailSummary
 from arven.data.storage.db import connect, git_commit
 from arven.engine.signal import EngineSignal
@@ -157,7 +157,7 @@ def run_live_tick(
 
     con = open_readonly(app.data.database_path)
     try:
-        bars = load_feature_inputs(con, app, end=now).bars
+        bars = {**load_feature_inputs(con, app, end=now).bars, **load_bar_map(con, app, EXTRA_TIMEFRAMES, end=now)}
         ranges: list[dict[str, Any]] = []
         m1 = load_1m_bars(con, app.market.symbol, window, ranges)
         f_t, f_r = load_funding_window(con, app.market.symbol, window, ranges)

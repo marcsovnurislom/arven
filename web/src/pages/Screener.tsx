@@ -1,7 +1,7 @@
 import { api } from "../api";
 import { useI18n } from "../i18n";
 import { useLoad } from "../hooks";
-import { Card, Empty, ErrorBox, PageTitle, Skeleton, Sparkline, fmt, signClass } from "../ui";
+import { Card, Empty, ErrorBox, fmt, fmtPrice, PageTitle, signClass, Skeleton, Sparkline } from "../ui";
 
 export function Screener() {
   const { t } = useI18n();
@@ -25,7 +25,7 @@ export function Screener() {
                   {data.rows.map((r) => (
                     <tr key={r.symbol}>
                       <td className="num">{r.symbol}</td>
-                      <td className="num">{fmt(r.price)}</td>
+                      <td className="num">{fmtPrice(r.price)}</td>
                       <td className={`num ${signClass(r.change_24h_pct)}`}>{r.change_24h_pct === null ? "n/a" : `${r.change_24h_pct >= 0 ? "+" : ""}${r.change_24h_pct.toFixed(2)}%`}</td>
                       <td className="num">{fmt(r.quote_volume_24h, 0)}</td>
                       <td><Sparkline values={r.sparkline} up={(r.change_24h_pct ?? 0) >= 0} /></td>

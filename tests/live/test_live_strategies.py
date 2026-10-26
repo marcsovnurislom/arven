@@ -17,8 +17,17 @@ from arven.live.strategies import natural_key, s7_outcome, s7_params
 def test_repo_live_config_is_valid_and_every_kind_is_registered():
     live = load_live_config()
     assert [s.id for s in live.strategies] == ["s4_impulse_retest", "s5_squeeze_breakout", "s6_trend_pullback", "s7_trend_break_fib", "s7_smc",
-                                               "s7_1h", "s7_4h", "crowded_shorts"]
+                                               "s7_1h", "s7_4h", "s7_30m", "s7_1d", "crowded_shorts"]
     assert all(s.kind in KINDS for s in live.strategies)
+    # the 30m / 1d variants are the live S7 with only tf changed (YAML merge key), so the 15m strategy stays the reference
+    base = dict(live.strategies[3].params)
+    for sid, tf in (("s7_30m", "30m"), ("s7_1d", "1d")):
+        assert dict(next(s for s in live.strategies if s.id == sid).params) == base | {"tf": tf}
+    # every market added on 2026-10-27 runs gold's list unchanged
+    gold = [s.id for s in live.markets[0].strategies]
+    assert len(live.markets) == 12 - 1 and all([s.id for s in m.strategies] == gold for m in live.markets)
+    for m in live.markets:
+        build_strategies(live.for_market(m))
     strategies = build_strategies(live)
     assert [s.strategy_id for s in strategies] == [s.id for s in live.enabled()]
     assert needs_features(live)
@@ -156,3 +165,18 @@ def test_min_smc_types_is_validated():
     for bad in (4, -1, "2"):
         with pytest.raises(ValueError, match="min_smc_types"):
             s7_params(s7 | {"min_smc_types": bad})
+
+
+def test_s7_runs_on_30m_and_1d_with_a_finer_lower_and_a_coarser_higher_frame():
+    """2026-10-27: S7 on 30m (lower 5m, higher 4h) and 1d (lower 4h, no higher); every lower frame divides its frame and
+    every higher frame is a multiple of it, as for 15m / 1h / 4h."""
+    from arven.live.strategies import S7_HIGHER, S7_LOWER, S7_TFS
+
+    base = dict(next(s for s in load_live_config().strategies if s.id == "s7_trend_break_fib").params)
+    for tf in ("15m", "30m", "1h", "4h", "1d"):
+        assert s7_params(base | {"tf": tf})[0] == tf
+        main, lower, higher = S7_TFS[tf], S7_LOWER[tf], S7_HIGHER[tf]
+        assert main.ms % lower.ms == 0 and main.ms > lower.ms
+        assert higher is None or (higher.ms % main.ms == 0 and higher.ms > main.ms)
+    with pytest.raises(ValueError):
+        s7_params(base | {"tf": "1m"})  # no S7 on 1m: costs vs the 1m bar range (docs/ANALIZ_VSEH_STRATEGIY.md)
