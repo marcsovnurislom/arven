@@ -421,6 +421,13 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    (docs/ANALIZ_VSEH_STRATEGIY.md section 10): on the new data S7 15m -63.0 R / 207 (losing), every other model
    inconclusive or too few; ~57 % of trades stop out before TP1; longs worse than shorts in every period.
 
+33. **S7 v2 (2026-10-28).** From the owner's 44 trade verdicts (`scripts/research/s7_label_review.py`; his reasons checked on
+   development only): S7 15m + `line_from_major_high: true`, `max_wick_pierce_atr: 0.5`, `cluster_min_bars: 10` (the last
+   two now accepted in live S7 params). Pre-registered in `scripts/research/s7_v2.py` (commit 023105e) before any run.
+   Pooled: validation 552 trades -60.4 R (mean -0.11, CI [-0.22, -0.00]; v1 -0.26), new data 158 / -21.2 R (mean -0.13;
+   v1 -0.30). Verdict NOT SUPPORTED (logged in data/s7_study/evaluations.log): better than v1, still negative; not put
+   into the live loop. Trades on the S7 trades page as "S7 v2 15m".
+
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - confirmed on the full history: S4-S6 trade
 normally there (docs/RESULTS_GOLD.md).

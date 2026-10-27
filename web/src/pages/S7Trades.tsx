@@ -10,8 +10,9 @@ type Verdict = S7TradeLabel["verdict"];
 
 /** The live S7 models (config/live.yaml), in the order of the page's switch. */
 export const S7_MODELS: [string, string][] = [
-  ["s7_trend_break_fib", "S7 15m"], ["s7_smc", "S7-SMC 15m"], ["s7_30m", "S7 30m"], ["s7_1h", "S7 1h"], ["s7_4h", "S7 4h"], ["s7_1d", "S7 1d"],
-];
+  ["s7_trend_break_fib", "S7 15m"], ["s7_v2", "S7 v2 15m"], ["s7_smc", "S7-SMC 15m"], ["s7_30m", "S7 30m"], ["s7_1h", "S7 1h"], ["s7_4h", "S7 4h"],
+  ["s7_1d", "S7 1d"],
+];  // s7_v2: research only (scripts/research/s7_v2.py, 2026-10-28) - not a live strategy
 const PERIODS = ["development", "validation", "forward"] as const;
 
 /** One cell of the summary tables: trades and total R (coloured), the $1000 account's return below. */
