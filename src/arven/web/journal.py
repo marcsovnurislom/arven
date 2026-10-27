@@ -44,7 +44,8 @@ class ReviewLabelIn(BaseModel):
 class TradeLabelIn(BaseModel):
     """The owner's verdict on one backtested S7 trade (page "S7 trades"): was the trade taken correctly?"""
 
-    trade_id: str = Field(min_length=3, max_length=64, pattern=r"^(15m|1h|4h)-\d+-[LS]$")
+    # "15m-<arm ms>-L" (main model, BTC / gold), "s7_smc-<arm ms>-S" (other S7 models), "ETHUSDT:15m-..." (other markets)
+    trade_id: str = Field(min_length=3, max_length=80, pattern=r"^([A-Z0-9]{3,16}:)?(15m|30m|1h|4h|1d|s7_[a-z0-9_]{1,24})-\d+-[LS]$")
     verdict: str = Field(pattern=r"^(ok|wrong|unsure)$")
     note: str = Field(default="", max_length=2000)
 

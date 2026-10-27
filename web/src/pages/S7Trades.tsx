@@ -42,6 +42,7 @@ export function S7Trades() {
   const [id, setId] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   useEffect(() => setLabels(labelsLoad.data?.labels ?? {}), [labelsLoad.data]);
   useEffect(() => { setId(null); setFilter("all"); }, [period, model]);
 
@@ -70,10 +71,13 @@ export function S7Trades() {
   const save = useCallback(async (verdict: Verdict, advance = true) => {
     if (!tr || saving) return;
     setSaving(true);
+    setSaveError(null);
     try {
       await api.s7TradeLabel(tr.id, verdict, note);
       setLabels((l) => ({ ...l, [tr.id]: { verdict, note, at_ms: Date.now() } }));
       if (advance && filter !== "unmarked") step(1);
+    } catch (e) {  // never fail silently: the owner must see that a verdict was not stored
+      setSaveError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
@@ -198,6 +202,7 @@ export function S7Trades() {
                   {verdictBtn("wrong", t("s7tMarkWrong"), "N", "var(--down)")}
                   {verdictBtn("unsure", t("s7tMarkUnsure"), "U", "var(--border)")}
                 </div>
+                {saveError && <p role="alert" className="mt-3 text-sm down">{t("s7tSaveFailed")} ({saveError})</p>}
                 <label className="mt-3 grid gap-1 text-sm">{t("notes")}<textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("s7tNotePh")} /></label>
                 <div className="mt-3 flex flex-wrap justify-between gap-2">
                   <button className="btn" onClick={() => step(-1)} disabled={idx === 0}>← {t("tourPrev")}</button>

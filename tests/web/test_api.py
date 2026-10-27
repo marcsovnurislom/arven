@@ -227,6 +227,10 @@ def test_s7_trade_labels_store_the_owners_verdicts(env):
     assert got["verdict"] == "wrong" and got["note"] == "entry too early"
     assert client.post("/api/s7/trade_labels", json={"trade_id": "15m-1-S", "verdict": "maybe"}).status_code == 422
     assert client.post("/api/s7/trade_labels", json={"trade_id": "../x", "verdict": "ok"}).status_code == 422
+    # every S7 model and every market (2026-10-28: S7-SMC verdicts were refused by the old 15m / 1h / 4h-only rule)
+    for tid in ("s7_smc-1782981900000-L", "ETHUSDT:15m-1782981900000-S", "SOLUSDT:s7_30m-1782981900000-L", "XAUUSD:s7_1d-1-S"):
+        assert client.post("/api/s7/trade_labels", json={"trade_id": tid, "verdict": "ok"}).status_code == 200, tid
+    assert client.post("/api/s7/trade_labels", json={"trade_id": "eth:15m-1-S", "verdict": "ok"}).status_code == 422
 
 
 def test_strategy_trades_index_and_files_read_only(env):
