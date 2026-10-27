@@ -11,13 +11,14 @@ from arven.backtest.strategy_s5_provider import SqueezeBreakoutProvider
 from arven.backtest.strategy_s6_provider import TrendPullbackProvider
 from arven.core.live_config import LiveConfig, LiveStrategyConfig
 from arven.live.base import LiveStrategy
-from arven.live.strategies import CrowdedShortsStrategy, ProviderStrategy, S7Strategy
+from arven.live.strategies import CrowdedShortsStrategy, ProviderStrategy, S7FitStrategy, S7Strategy
 
 KINDS: dict[str, Callable[[LiveStrategyConfig], LiveStrategy]] = {
     "s4_impulse_retest": lambda c: ProviderStrategy(c, ImpulseRetestProvider),
     "s5_squeeze_breakout": lambda c: ProviderStrategy(c, SqueezeBreakoutProvider),
     "s6_trend_pullback": lambda c: ProviderStrategy(c, TrendPullbackProvider),
     "s7": S7Strategy,
+    "s7_fit": S7FitStrategy,
     "crowded_shorts": CrowdedShortsStrategy,
 }
 

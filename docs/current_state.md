@@ -434,6 +434,18 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    section 13: stop tuning S7 on history; v2 is the best candidate (could run as an observation-only paper strategy if
    the owner decides so). `scripts/s7_all_trades_export.py export(keep=)` takes a setup filter.
 
+35. **S7-Fit A (2026-10-28, owner: "find the ideal S7 by fitting: win rate >= 70 % with profit, >= 3-4 signals a month,
+   use everything").** `scripts/research/s7_fit.py` stores, per S7 fill (3 tf x 4 detector variants x 3 entries, 9
+   markets 2020-2024, 12 markets new data), the first minute each favourable / adverse ATR level was reached plus causal
+   features (incl. RSI(2) / RSI(14) at the fill - Connors - and ADX); `s7_fit_search2.py` scores every stop x target x
+   hold x filter (single + pairs) instantly (a first version had an overflow bug - "never reached" + 1 - caught by the
+   exact check and fixed); `s7_fit_verify2.py` re-resolves with the project's tracker. Per-market fits failed on the new
+   data; one rule for all markets held: 1h S7 (impulse none), 4h-trend agreement, E1 entry, ADX(14) > 25 at the fill,
+   stop 1.5 ATR, one target 0.9 ATR, 3 days max. Exact: dev 188 / 72 % / +15.7 R, val 87 / 72 % / +6.1 R, new data 23 /
+   83 % / +5.6 R. Live: `S7FitStrategy` (kind `s7_fit`, id `s7_fit_a`) on all 12 markets; its catch-up reproduced the
+   research exactly (23 / 83 % / +5.57 R). Chosen among 30 candidates partly on the new data: clean forward starts
+   2026-10-28. docs/ANALIZ_VSEH_STRATEGIY.md section 14.
+
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - confirmed on the full history: S4-S6 trade
 normally there (docs/RESULTS_GOLD.md).

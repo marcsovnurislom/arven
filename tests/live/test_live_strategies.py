@@ -17,7 +17,7 @@ from arven.live.strategies import natural_key, s7_outcome, s7_params
 def test_repo_live_config_is_valid_and_every_kind_is_registered():
     live = load_live_config()
     assert [s.id for s in live.strategies] == ["s4_impulse_retest", "s5_squeeze_breakout", "s6_trend_pullback", "s7_trend_break_fib", "s7_smc",
-                                               "s7_1h", "s7_4h", "s7_30m", "s7_1d", "crowded_shorts"]
+                                               "s7_1h", "s7_4h", "s7_30m", "s7_1d", "s7_fit_a", "crowded_shorts"]
     assert all(s.kind in KINDS for s in live.strategies)
     # the 30m / 1d variants are the live S7 with only tf changed (YAML merge key), so the 15m strategy stays the reference
     base = dict(live.strategies[3].params)
@@ -204,3 +204,18 @@ def test_s7_detection_on_the_warmup_tail_finds_exactly_the_full_history_setups()
     full = [key(s, 0) for s in detect_setups(open_, high, low, close, p, volume=vol) if s.arm_index >= fwd]
     tail = [key(s, i0) for s in detect_setups(open_[i0:], high[i0:], low[i0:], close[i0:], p, volume=vol[i0:]) if s.arm_index + i0 >= fwd]
     assert full and tail == full
+
+
+def test_s7_fit_a_is_configured_as_fitted_and_rejects_missing_fit_params():
+    """S7-Fit A (2026-10-28): 1h S7 setups, E1 entry, 4h-trend and ADX filters, stop 1.5 ATR, one target 0.9 ATR, 3 days
+    at most - on BTC and on every further market (gold's list)."""
+    from arven.live.strategies import S7FitStrategy
+
+    live = load_live_config()
+    cfg = next(s for s in live.strategies if s.id == "s7_fit_a")
+    st = S7FitStrategy(cfg)
+    assert (st.tf, st.stop_atr, st.tp_atr, st.hold, st.trend_ema, st.adx_min) == ("1h", 1.5, 0.9, 4320, 50, 25.0)
+    assert not st.p.impulse_fvg and st.tp.entry == "E1"
+    assert all(any(s.id == "s7_fit_a" for s in m.strategies) for m in live.markets)
+    with pytest.raises(ValueError):
+        S7FitStrategy(LiveStrategyConfig(id="x", kind="s7_fit", params={"tf": "1h", "stop_atr": 1.5}))

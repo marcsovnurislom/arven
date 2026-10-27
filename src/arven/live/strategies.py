@@ -312,4 +312,96 @@ class CrowdedShortsStrategy:
         return LiveOutcome(signal, (SignalUpdate(signal.signal_id, int(trade.exit_ms), SignalUpdateKind.CLOSED, detail),), "closed", trade.r)  # type: ignore[arg-type]
 
 
-__all__ = ["CrowdedShortsStrategy", "ProviderStrategy", "S7Strategy", "natural_key", "s7_outcome", "s7_params"]
+# --- S7-Fit ---------------------------------------------------------------------------------------------------------
+
+S7_FIT_KEYS = {"stop_atr", "tp_atr", "hold_minutes", "trend_ema", "adx_min"}
+
+
+class S7FitStrategy:
+    """S7-Fit (2026-10-28, owner: "find the S7 with a win rate >= 70 % and profit by fitting"; scripts/research/s7_fit*.py,
+    docs/ANALIZ_VSEH_STRATEGIY.md section 14). The S7 detector finds the setup on its timeframe; it is kept only if the
+    4h trend agrees (the last closed 4h bar's close vs its EMA(trend_ema)) at the arming close; the entry is S7's E1 (market
+    once a lower-timeframe bar closes back beyond fib 0.5); at the fill the ADX(14) of the last closed bar of the setup's
+    timeframe must exceed adx_min (a trending market). Then a market entry with a stop ``stop_atr`` ATR and one target
+    ``tp_atr`` ATR away (ATR of the setup's timeframe at arming), out after ``hold_minutes`` at the latest - resolved like
+    S4-S6 by the paper tracker. Fitted on 2020-2024 on nine markets; paper, EXPERIMENTAL."""
+
+    def __init__(self, cfg: LiveStrategyConfig) -> None:
+        self.strategy_id = cfg.id
+        self.title = cfg.title or cfg.id
+        self.version = cfg.version
+        self.params_hash = cfg.params_hash()
+        fit = {k: v for k, v in cfg.params.items() if k in S7_FIT_KEYS}
+        missing = S7_FIT_KEYS - set(fit)
+        if missing:
+            raise ValueError(f"{cfg.id}: S7-Fit needs {sorted(missing)}")
+        self.stop_atr, self.tp_atr = float(fit["stop_atr"]), float(fit["tp_atr"])
+        self.hold, self.trend_ema, self.adx_min = int(fit["hold_minutes"]), int(fit["trend_ema"]), float(fit["adx_min"])
+        self.tf, self.p, _ = s7_params({k: v for k, v in cfg.params.items() if k not in S7_FIT_KEYS})
+        self.tp = S7TradeParams(entry="E1", stop="S3", management="V0")  # S3: the widest stop, so S7's own stop never pre-empts the fill
+
+    def _signals(self, ctx: LiveContext) -> list[EngineSignal]:
+        key = f"s7fit:{self.strategy_id}"
+        if key in ctx.cache:
+            return ctx.cache[key]
+        from arven.features.indicators import adx, ema
+
+        tf = S7_TFS[self.tf]
+        b = ctx.bars[tf]
+        first = int(np.searchsorted(b.open_time_ms + tf.ms, ctx.window.start_ms))
+        b = b.tail_from(max(0, first - S7_WARMUP_BARS))
+        close_ms = b.open_time_ms + tf.ms
+        setups = [s for s in detect_setups(b.open, b.high, b.low, b.close, self.p, volume=b.volume)
+                  if ctx.window.start_ms <= int(close_ms[s.arm_index]) <= ctx.through_ms]
+        h4 = ctx.bars[Timeframe.H4]
+        ok4 = h4.complete & np.isfinite(h4.close)
+        t4, c4 = h4.open_time_ms[ok4] + Timeframe.H4.ms, h4.close[ok4]
+        e4 = ema(c4, self.trend_ema, min_count=self.trend_ema)
+        adx_tf = adx(b.high, b.low, b.close, 14)
+        higher = S7_HIGHER[self.tf]
+        sim = make_context(S7Bars.from_series(b), S7Bars.from_series(ctx.bars[S7_LOWER[self.tf]]), ctx.market, ctx.costs, self.p, self.tp,
+                           higher=None if higher is None else S7Bars.from_series(ctx.bars[higher]), calendar=ctx.app.session_calendar())
+        out: list[EngineSignal] = []
+        for k, s in enumerate(setups):
+            arm = int(close_ms[s.arm_index])
+            i4 = int(np.searchsorted(t4, arm, side="right")) - 1  # the last 4h bar closed by the arming close
+            if i4 < 0 or not np.isfinite(e4[i4]) or np.sign(c4[i4] - e4[i4]) != s.side:
+                continue
+            o = simulate_setup(sim, s, k)
+            if not o.fills:
+                continue
+            f = o.fills[0]
+            j = int(np.searchsorted(close_ms, f.time_ms, side="right")) - 1  # the last setup-timeframe bar closed by the fill
+            if j < 0 or not np.isfinite(adx_tf[j]) or adx_tf[j] <= self.adx_min or not (s.atr and np.isfinite(s.atr)):
+                continue
+            entry = float(f.price)
+            stop, target = entry - s.side * self.stop_atr * s.atr, entry + s.side * self.tp_atr * s.atr
+            try:
+                out.append(EngineSignal(
+                    symbol=ctx.app.market.symbol, side=s.side, strategy_id=self.strategy_id, strategy_version=self.version,
+                    grade=Grade.EXPERIMENTAL, event_time_ms=int(f.time_ms), entry_reference=entry, stop=stop,
+                    tp_ladder=(TPLevel(self.tp_atr / self.stop_atr, 1.0, target),), risk_fraction=SYMBOL_RISK_FRACTION, confidence=0.5,
+                    regime="n/a",
+                    reasons=(f"{self.tf} trend line broken (S7 setup), with the 4h trend (close vs EMA{self.trend_ema})",
+                             f"entry: market now - price came back beyond fib 0.5 (E1); ADX(14) {adx_tf[j]:.0f} > {self.adx_min:g} (trending)",
+                             f"stop {self.stop_atr:g} ATR, one target {self.tp_atr:g} ATR ({self.tp_atr / self.stop_atr:.2f} R), out after "
+                             f"{self.hold // 60} h at the latest"),
+                    risk_checks=(), versions=SignalVersions(ctx.feature_version, self.params_hash, ctx.git_commit),
+                    max_holding_minutes=self.hold,
+                ))
+            except ValueError:
+                continue
+        ctx.cache[key] = out
+        return out
+
+    def scan(self, ctx: LiveContext, after_ms: int, through_ms: int, stored: list[EngineSignal]) -> list[EngineSignal]:
+        return [sig for sig in self._signals(ctx) if after_ms < sig.event_time_ms <= through_ms]
+
+    def resolve(self, ctx: LiveContext, signal: EngineSignal) -> LiveOutcome | None:
+        out = resolve_signal(signal, ctx.market, ctx.costs)
+        if out is None:
+            return None
+        return LiveOutcome(signal, out.updates, "closed" if out.closed else "open", out.net_r if out.closed else None)
+
+
+__all__ = ["CrowdedShortsStrategy", "ProviderStrategy", "S7FitStrategy", "S7Strategy", "natural_key", "s7_outcome", "s7_params"]

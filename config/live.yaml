@@ -165,6 +165,22 @@ strategies:
     params:
       <<: *s7_live
       tf: 1d
+  - id: s7_fit_a
+    kind: s7_fit
+    title: S7-Fit A (1h, with the 4h trend, ADX > 25)
+    enabled: true
+    version: v1
+    # added 2026-10-28 (owner: "find the S7 with win rate >= 70 % and profit by fitting"): chosen on 2020-2024 over nine
+    # markets (scripts/research/s7_fit_search2.py, verified by s7_fit_verify2.py); docs/ANALIZ_VSEH_STRATEGIY.md section 14
+    params:
+      <<: *s7_live
+      tf: 1h
+      impulse: none
+      stop_atr: 1.5
+      tp_atr: 0.9
+      hold_minutes: 4320
+      trend_ema: 50
+      adx_min: 25
   - id: crowded_shorts
     kind: crowded_shorts
     title: Crowded Shorts (funding + OI)
@@ -307,6 +323,22 @@ markets:
         params:
           <<: *s7_live
           tf: 1d
+      - id: s7_fit_a
+        kind: s7_fit
+        title: S7-Fit A (1h, with the 4h trend, ADX > 25)
+        enabled: true
+        version: v1
+        # added 2026-10-28 (owner: "find the S7 with win rate >= 70 % and profit by fitting"): chosen on 2020-2024 over nine
+        # markets (scripts/research/s7_fit_search2.py, verified by s7_fit_verify2.py); docs/ANALIZ_VSEH_STRATEGIY.md section 14
+        params:
+          <<: *s7_live
+          tf: 1h
+          impulse: none
+          stop_atr: 1.5
+          tp_atr: 0.9
+          hold_minutes: 4320
+          trend_ema: 50
+          adx_min: 25
 
   # Added 2026-10-27 (owner: "the best-known pairs and coins"). Every one runs exactly the gold list above (S4-S6, S7 and
   # S7-SMC on 15m, S7 on 30m / 1h / 4h / 1d) with nothing re-tuned: paper, EXPERIMENTAL, its own forward record from its
