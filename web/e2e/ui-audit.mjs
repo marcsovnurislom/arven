@@ -1,6 +1,7 @@
 // UI audit: every page x desktop / phone x dark / light on the running site (default http://127.0.0.1:8000): console
 // errors, horizontal page scroll, text cut by its box, and whether the menu fits. Prints only the problems.
-//   node e2e/ui-audit.mjs
+//   node e2e/ui-audit.mjs            (BTC)
+//   MARKET=eurusd node e2e/ui-audit.mjs   (another market id from /api/markets)
 import { chromium, devices } from "@playwright/test";
 const PAGES = ["home","overview","sessions","events","charts","screener","signals","s7trades","s7review","strategies","universes","replay","mistakes","lab","journal","settings"];
 const browser = await chromium.launch({ channel: "chrome", headless: true });
@@ -8,7 +9,7 @@ const report = [];
 for (const [dev, opts] of [["desktop", { viewport: { width: 1366, height: 768 } }], ["phone", devices["Pixel 7"]]]) {
   for (const theme of ["dark", "light"]) {
     const ctx = await browser.newContext({ ...opts, colorScheme: theme });
-    await ctx.addInitScript((th) => { try { localStorage.setItem("arven.lang", "ru"); localStorage.setItem("arven.theme", th); } catch {} }, theme);
+    await ctx.addInitScript(([th, mk]) => { try { localStorage.setItem("arven.lang", "ru"); localStorage.setItem("arven.theme", th); localStorage.setItem("arven.market", mk); } catch {} }, [theme, process.env.MARKET || "btc"]);
     const page = await ctx.newPage();
     for (const p of PAGES) {
       const errs = [];

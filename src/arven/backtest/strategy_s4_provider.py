@@ -103,7 +103,7 @@ class ImpulseRetestProvider:
         cached across ticks that fall within the same, still-current setup_tf bar. Returns
         ``(setup, atr_at_as_of, impulse, zone, trendline)`` or ``None`` if no impulse/zone/trendline
         exists yet (the 4h-slope-agreement filter is applied separately, by the caller)."""
-        setup = self._setup_bars.available_until(now_ms).regularized()
+        setup = self._setup_bars.regularized_until(now_ms)
         if len(setup) < MIN_SETUP_BARS:
             return None
         if self._setup_cache_len == len(setup):
@@ -131,7 +131,7 @@ class ImpulseRetestProvider:
         return setup_cached, atr_at_as_of, impulse, zone, trendline
 
     def _compute_decision(self, now_ms: int) -> ImpulseRetestDecision | None:
-        trigger = self._trigger_bars.available_until(now_ms).regularized()
+        trigger = self._trigger_bars.regularized_until(now_ms)
         if len(trigger) < 2:
             return None
 

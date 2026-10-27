@@ -90,6 +90,10 @@ class BarSeries:
             self.calendar,
         )
 
+    def tail_from(self, start: int) -> BarSeries:
+        """The bars from index ``start`` on (a shorter history for a detector with a bounded look-back)."""
+        return self._take(slice(int(start), None))
+
     @property
     def session(self) -> bool:
         """True for a session market (not traded around the clock)."""
@@ -138,6 +142,29 @@ class BarSeries:
         complete = np.zeros(len(grid), dtype=bool)
         complete[pos[keep]] = True
         return BarSeries(self.timeframe, self.delay_ms, grid, complete=complete, calendar=self.calendar, **cols)
+
+    def regularized_until(self, t_ms: int) -> BarSeries:
+        """Exactly ``self.available_until(t_ms).regularized()``, without redoing the whole grid each time: the grid of a
+        prefix of the stored bars is the prefix of the full grid up to the prefix's last stored bar, with the same values
+        (added 2026-10-27; a strategy asking at every 15m step used to regularize its whole history every time)."""
+        n = int(np.searchsorted(self.available_at_ms, t_ms, side="right"))
+        if n == 0:
+            return self._take(slice(0, 0))
+        full = self.__dict__.get("_regular_full")
+        if full is None:
+            full = self.regularized()
+            object.__setattr__(self, "_regular_full", full)
+        k = int(np.searchsorted(full.open_time_ms, self.open_time_ms[n - 1], side="right"))
+        return full._prefix(k)
+
+    def _prefix(self, k: int) -> BarSeries:
+        """The first ``k`` bars as views, without re-validating columns that are already valid."""
+        out = object.__new__(BarSeries)
+        for name in ("timeframe", "delay_ms", "calendar"):
+            object.__setattr__(out, name, getattr(self, name))
+        for name in ("open_time_ms", *_BAR_VALUE_FIELDS, "complete"):
+            object.__setattr__(out, name, getattr(self, name)[:k])
+        return out
 
 
 @dataclass(frozen=True, eq=False)

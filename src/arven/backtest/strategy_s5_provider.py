@@ -65,7 +65,7 @@ class SqueezeBreakoutProvider:
         return None
 
     def _range_state(self, now_ms: int) -> RangeState | None:
-        setup = self._setup_bars.available_until(now_ms).regularized()
+        setup = self._setup_bars.regularized_until(now_ms)
         if len(setup) < MIN_SETUP_BARS:
             return None
         if self._cache_len != len(setup):
@@ -74,7 +74,7 @@ class SqueezeBreakoutProvider:
         return self._cache_state
 
     def _compute_decision(self, now_ms: int) -> RangeBreakoutDecision | None:
-        trigger = self._trigger_bars.available_until(now_ms).regularized()
+        trigger = self._trigger_bars.regularized_until(now_ms)
         if len(trigger) < 2:
             return None
         try:

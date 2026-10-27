@@ -83,6 +83,7 @@ class ProviderStrategy:
 S7_TFS = {"15m": Timeframe.M15, "30m": Timeframe.M30, "1h": Timeframe.H1, "4h": Timeframe.H4, "1d": Timeframe.D1}
 S7_LOWER = {"15m": Timeframe.M5, "30m": Timeframe.M5, "1h": Timeframe.M15, "4h": Timeframe.H1, "1d": Timeframe.H4}
 S7_HIGHER = {"15m": Timeframe.H1, "30m": Timeframe.H4, "1h": Timeframe.H4, "4h": None, "1d": None}
+S7_WARMUP_BARS = 3000  # bars of the S7 timeframe before the forward window the detector is given (see S7Strategy._state)
 S7_DETECTOR_KEYS = {"min_touches", "freeze_pullback", "count_every_touch", "level0_range_bottom", "skip_beyond_line_start",
                     "break_on_cross", "line_from_major_high", "shallow_zone"}
 S7_TRADE_KEYS = {"entry", "stop", "breakeven_after_tp1", "min_tp1_r", "management"}
@@ -132,6 +133,12 @@ class S7Strategy:
         if key not in ctx.cache:
             tf = S7_TFS[self.tf]
             b = ctx.bars[tf]
+            # only the last S7_WARMUP_BARS bars before the forward window: the detector looks back at most lookback_bars
+            # (400) and its Wilder ATR forgets its seed within a few hundred bars, so the setups are exactly those of the
+            # full history (checked 2026-10-27 on BTC, gold and ETH, all six S7 variants, with 1000 bars already) at a
+            # fraction of the time - every tick used to re-scan 2020 onward (~16 s per variant per market)
+            first = int(np.searchsorted(b.open_time_ms + tf.ms, ctx.window.start_ms))
+            b = b.tail_from(max(0, first - S7_WARMUP_BARS))
             close_ms = b.open_time_ms + tf.ms
             found = detect_setups(b.open, b.high, b.low, b.close, self.p, volume=b.volume)
             setups = [s for s in found if ctx.window.start_ms <= int(close_ms[s.arm_index]) <= ctx.through_ms
@@ -144,7 +151,7 @@ class S7Strategy:
                 sig = self._signal(ctx, sim, s)
                 if sig is not None:
                     planned.append((s, sig))
-            ctx.cache[key] = {"sim": sim, "setups": setups, "planned": planned, "by_key": {natural_key(sig): s for s, sig in planned}}
+            ctx.cache[key] = {"sim": sim, "setups": setups, "planned": planned, "by_key": {natural_key(sig): s for s, sig in planned}, "bars": b}
         return ctx.cache[key]
 
     def _signal(self, ctx: LiveContext, sim: Any, s: S7Setup) -> EngineSignal | None:
@@ -196,7 +203,7 @@ class S7Strategy:
         s = st["by_key"].get(natural_key(signal))
         if s is None:
             return None
-        b, tf_ms = ctx.bars[S7_TFS[self.tf]], S7_TFS[self.tf].ms
+        b, tf_ms = st.get("bars", ctx.bars[S7_TFS[self.tf]]), S7_TFS[self.tf].ms  # the bars the setup's indices refer to
         t = lambda i: int(b.open_time_ms[i]) + tf_ms  # noqa: E731 - bar close times, as the picture's candles
         touches = tuple((t(i), float(b.high[i] if s.side == 1 else b.low[i])) for i in s.touches)
         return ChartOverlay(

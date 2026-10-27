@@ -13,7 +13,7 @@ has >= 30 trades, mean R > 0 after costs, mean R above the control's 95th percen
 development. Everything else is **not supported**. With 11 markets x 9 strategies about 5 "supported" rows are
 expected by chance alone at the 95 % level, so a single supported row is a lead, not a result.
 
-Usage: PYTHONPATH=src python scripts/research/all_markets.py <INSTRUMENT> [periods...]
+Usage: PYTHONPATH=src python scripts/research/all_markets.py <INSTRUMENT> [periods...] [--s7-only]
        (BTCUSDT uses the default configuration; history instruments: XAUUSD, XAGUSD, EURUSD, GBPUSD, crypto symbols)
 Output: data/markets/<INSTRUMENT>/research/all_markets_<period>.json (BTC: data/research/all_markets_<period>.json)
 """
@@ -118,17 +118,65 @@ def random_control(c: gs.Ctx, trades: list[dict]) -> dict[str, Any] | None:
     return {"draws": DRAWS, "seed": SEED, "p05": float(q[0]), "median": float(q[1]), "p95": float(q[2])}
 
 
+class LightCtx:
+    """The 1m market and the bars only (no Stage 3 feature cache): enough for S7, whose detector reads bars alone.
+    Used with ``--s7-only`` on a machine that cannot hold a feature build per market (2026-10-27: 7 GB RAM)."""
+
+    def __init__(self, period: str) -> None:
+        from arven.backtest.errors import DataError
+        from arven.backtest.marketdata import MarketData, funding_schedule
+        from arven.core.time import from_ms
+        from arven.data.reader import EXTRA_TIMEFRAMES, load_1m_bars, load_bar_map, load_feature_inputs, load_funding_window, open_readonly
+        from arven.paper.runs import latest_forward_window_end_ms
+        from arven.runs import make_guard
+
+        t0 = time.perf_counter()
+        guard = make_guard(gs.APP)
+        pk = gs.PERIODS[period]
+        self.window = guard.resolve(pk, end_ms=latest_forward_window_end_ms(gs.APP)) if pk == gs.BacktestPeriod.FORWARD else guard.resolve(pk)
+        con = open_readonly(gs.APP.data.database_path)
+        try:
+            b = load_1m_bars(con, gs.APP.market.symbol, self.window)
+            f_t, f_r = load_funding_window(con, gs.APP.market.symbol, self.window)
+            end = from_ms(self.window.end_ms)
+            self.bars = {**load_feature_inputs(con, gs.APP, start=gs.APP.data.history_start, end=end).bars,
+                         **load_bar_map(con, gs.APP, EXTRA_TIMEFRAMES, start=gs.APP.data.history_start, end=end)}
+        finally:
+            con.close()
+        self.note = ""
+        try:
+            ft, fr, interval_ms = funding_schedule(gs.APP.costs.funding, f_t, f_r, self.window.start_ms, self.window.end_ms)
+        except DataError:  # SOL, Nov 2022 (FTX): Binance charged funding every 2-4 h for a while; the cost model has one interval
+            on_grid = np.asarray(f_t) % (8 * 3_600_000) == 0
+            self.note = f"{int((~on_grid).sum())} off-grid funding settlements left out (shorter interval during a crash)"
+            print("  note:", self.note, flush=True)
+            ft, fr, interval_ms = funding_schedule(gs.APP.costs.funding, np.asarray(f_t)[on_grid], np.asarray(f_r)[on_grid],
+                                                   self.window.start_ms, self.window.end_ms)
+        self.m = MarketData(b["time_ms"], b["open"], b["high"], b["low"], b["close"], self.window.start_ms, self.window.end_ms, ft, fr,
+                            interval_ms, calendar=gs.APP.session_calendar())
+        self.through = (int(self.m.time_ms[-1]) + 60_000) // 900_000 * 900_000 if len(self.m) else self.window.start_ms
+        self.costs = gs.APP.costs
+        print(f"{period}: loaded in {time.perf_counter() - t0:.0f}s, {len(self.m)} 1m bars", flush=True)
+
+
 def run(period: str) -> None:
-    c = gs.Ctx(period)
+    s7_only = "--s7-only" in sys.argv
+    c = LightCtx(period) if s7_only else gs.Ctx(period)
+    if len(c.m) == 0:
+        print(f"  {period}: no 1m data for {INSTRUMENT} - skipped", flush=True)
+        return
     if INSTRUMENT == "BTCUSDT":  # BTC's live signals are tracked with the CFD profile (config/live.yaml cost_profile)
         c.costs = st.CostsConfig.model_validate(st.yaml.safe_load(Path("config/costs_cfd_justmarkets.yaml").read_text(encoding="utf-8")))
-    try:
-        recorded = gs.load(f"signals_{period}.json")["signals"]
-    except FileNotFoundError:
-        gs.record(period)
-        recorded = gs.load(f"signals_{period}.json")["signals"]
+    if s7_only:
+        recorded = {}
+    else:
+        try:
+            recorded = gs.load(f"signals_{period}.json")["signals"]
+        except FileNotFoundError:
+            gs.record(period)
+            recorded = gs.load(f"signals_{period}.json")["signals"]
     res: dict[str, Any] = {"instrument": INSTRUMENT, "period": period, "window_ms": [c.window.start_ms, c.window.end_ms],
-                           "buy_and_hold_pct": float(c.m.close[-1] / c.m.open[0] - 1) * 100, "costs": c.costs.model_dump(),
+                           "buy_and_hold_pct": float(c.m.close[-1] / c.m.open[0] - 1) * 100, "costs": c.costs.model_dump(), "note": getattr(c, "note", ""),
                            "strategies": {}}
     for sid, sigs in recorded.items():
         t0 = time.perf_counter()
@@ -147,6 +195,6 @@ def run(period: str) -> None:
 
 
 if __name__ == "__main__":
-    for p in sys.argv[2:] or ["development", "validation", "forward"]:
+    for p in [a for a in sys.argv[2:] if not a.startswith("--")] or ["development", "validation", "forward"]:
         print(f"== {INSTRUMENT} {p}", flush=True)
         run(p)

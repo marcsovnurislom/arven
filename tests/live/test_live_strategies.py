@@ -180,3 +180,27 @@ def test_s7_runs_on_30m_and_1d_with_a_finer_lower_and_a_coarser_higher_frame():
         assert higher is None or (higher.ms % main.ms == 0 and higher.ms > main.ms)
     with pytest.raises(ValueError):
         s7_params(base | {"tf": "1m"})  # no S7 on 1m: costs vs the 1m bar range (docs/ANALIZ_VSEH_STRATEGIY.md)
+
+
+def test_s7_detection_on_the_warmup_tail_finds_exactly_the_full_history_setups():
+    """The live S7 gives its detector only S7_WARMUP_BARS bars before the forward window (2026-10-27, speed): on a long
+    random walk the setups armed after the cut are identical to those found on the whole history."""
+    import numpy as np
+
+    from arven.engine.strategy_s7 import detect_setups
+    from arven.live.strategies import S7_WARMUP_BARS
+
+    rng = np.random.default_rng(3)
+    n = S7_WARMUP_BARS + 6000
+    close = 100 * np.exp(np.cumsum(rng.normal(0, 0.004, n)))
+    open_ = np.concatenate([[close[0]], close[:-1]])
+    high = np.maximum(open_, close) * (1 + np.abs(rng.normal(0, 0.002, n)))
+    low = np.minimum(open_, close) * (1 - np.abs(rng.normal(0, 0.002, n)))
+    vol = rng.uniform(1, 3, n)
+    _, p, _ = s7_params(dict(next(s for s in load_live_config().strategies if s.id == "s7_smc").params))
+    fwd = n - 3000  # the "forward window" starts here
+    i0 = fwd - S7_WARMUP_BARS
+    key = lambda s, off: (s.arm_index + off, s.side, s.level0, s.level1, s.zone_low, s.zone_high)  # noqa: E731
+    full = [key(s, 0) for s in detect_setups(open_, high, low, close, p, volume=vol) if s.arm_index >= fwd]
+    tail = [key(s, i0) for s in detect_setups(open_[i0:], high[i0:], low[i0:], close[i0:], p, volume=vol[i0:]) if s.arm_index + i0 >= fwd]
+    assert full and tail == full

@@ -359,6 +359,39 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    (fixed); its "text cut" rule now skips screen-reader-only labels (a false alarm on Signals); only remaining messages
    are 503s while the live writer held the database (retried by the site). e2e: 93 passed, 5 skipped (screenshot tests).
 
+29. **Twelve markets, 30m / 1d, full analysis (2026-10-26/27, owner: "add the ten best-known pairs and coins, timeframes
+   1m / 30m / 1d, a full analysis of every strategy, finish the project").** Design: `docs/architecture.md` section 19.
+   - Markets: ETH, SOL, XRP, BNB, DOGE, ADA, LINK (Binance USD-M, bulk history 2020 -> 2026-10-26, Binance taker costs),
+     silver (Binance XAGUSDT live; Dukascopy XAGUSD history NOT downloaded yet), EUR/USD and GBP/USD (Dukascopy history
+     2026-05 -> 10 only, live minutes from Kraken `arven.data.kraken_live`, session `fx`). USD/JPY left out: Kraken has
+     almost no trades in it. Each runs gold's strategy list unchanged (`config/live.yaml` anchor `*market_strategies`).
+   - Timeframes: `Timeframe.M30` / `D1` derived from 1m (resampled for every symbol incl. BTC / gold), on the chart page
+     with 1m; S7 30m and 1d added on every market (paper, EXPERIMENTAL). No 1m strategy: costs are 0.4-1.9 of a median
+     1m bar (`scripts/research/one_minute_costs.py`); `s7_params(tf=1m)` is rejected on purpose.
+   - Speed (needed for 12 markets in a 15-minute cycle): S7 detection gets the last 3000 bars before the forward window
+     instead of 2020 onward (setups identical - checked on BTC / gold / ETH, all six variants, and a test);
+     `BarSeries.regularized_until` replaces `available_until(t).regularized()` in S4-S6 (exactly equal - test). A new
+     market's first catch-up: ~25 min -> ~3.5 min; a steady tick ~12 s per market.
+   - Prices are written with decimals for their size (`arven.core.prices`, web `fmtPrice`, chart precision): EUR/USD
+     1.11767, DOGE 0.21234, BTC / gold unchanged at 2.
+   - Web: grouped market picker (crypto / metals / forex) when > 3 markets; market names in subtitles; e2e test.
+   - Operations: memory is the limit on this laptop (7.3 GB, ~0.5 GB free): Claude Code killed background jobs twice;
+     ingestion ran with the live loop and the web paused (stop file / disabled task) and both were restarted after.
+     `open_readonly` waits for the writer when `ARVEN_DB_WAIT_SECONDS` is set (research scripts; default unchanged).
+   - Analysis: `docs/ANALIZ_VSEH_STRATEGIY.md` (Russian). Forward 2026-07-01 -> 10-26, 12 markets: 2854 closed signals,
+     -522.6 R, mean -0.18 R, 95 % CI [-0.23, -0.14] = "losing". S6 -322.5 R / 1970 (losing), S4 -57.2 R / 91 (losing),
+     S7 15m -70.6 R / 232 (losing); S5, S7-SMC, S7 30m / 1h inconclusive. History (`scripts/research/all_markets.py
+     --s7-only`, rule pre-registered in 7a51f49): S7 15m on 9 markets dev -117.5 R, val -188.7 R; one row passed the
+     rule (LINK S7 30m val +16.3 R / 34) - expected by chance among 54 tests. BTC S7 reproduced exactly (167 / +47.6 R,
+     102 / -3.0 R). Nothing was switched off: recommendations (S6, S4 off; S7 v2) are the owner's decision.
+   - Not done / to do: forex history 2020 -> 2026-05 and silver XAGUSD (Dukascopy throttles: `arven --instrument EURUSD
+     duka download --start 2020-01-01 --end 2026-05-01`, then `duka ingest` with the live loop paused, then
+     `scripts/research/all_markets.py EURUSD development validation --s7-only`); S4-S6 history for the new markets
+     needs a feature build per market (`arven --instrument ETHUSDT features build`, ~1-2 GB RAM each).
+   - Tests: full Python suite + new tests (Kraken, fx session, 30m / 1d resample, prices, regularized_until, S7 warm-up,
+     read-only wait); e2e 95 incl. the market picker; UI audit clean for BTC, EUR/USD, DOGE, silver (only 503s while the
+     live loop wrote).
+
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - confirmed on the full history: S4-S6 trade
 normally there (docs/RESULTS_GOLD.md).

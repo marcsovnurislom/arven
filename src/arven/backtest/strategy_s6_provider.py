@@ -75,7 +75,7 @@ class TrendPullbackProvider:
         return None
 
     def _state(self, now_ms: int) -> PullbackState | None:
-        setup = self._setup_bars.available_until(now_ms).regularized()
+        setup = self._setup_bars.regularized_until(now_ms)
         if len(setup) < MIN_SETUP_BARS:
             return None
         if self._cache_len != len(setup):
@@ -86,7 +86,7 @@ class TrendPullbackProvider:
     def _compute_decision(self, now_ms: int) -> TrendPullbackDecision | None:
         if self._last_signal_ms is not None and self._elapsed_ms(self._last_signal_ms, now_ms) < COOLDOWN_HOURS * HOUR_MS:
             return None
-        trigger = self._trigger_bars.available_until(now_ms).regularized()
+        trigger = self._trigger_bars.regularized_until(now_ms)
         try:
             slope = self._multitf.row_at(Timeframe.H4, now_ms)["ema_slope_50"]
         except LookAheadError:
