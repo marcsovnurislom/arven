@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { ApiError, api } from "../api";
+import { api, ApiError, marketTicker } from "../api";
 import { useI18n } from "../i18n";
 import { useLoad } from "../hooks";
 import { Card, Chip, Empty, ErrorBox, fmt, fmtPct, fmtPrice, fmtR, PageTitle, SidePill, signClass, Skeleton, Stat } from "../ui";
@@ -15,7 +15,7 @@ export function Journal() {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     const body = {
-      symbol: String(f.get("symbol") || "BTCUSD"),
+      symbol: String(f.get("symbol") || marketTicker()),
       side: Number(f.get("side")),
       entry: num(f.get("entry")),
       stop: num(f.get("stop")),
@@ -42,7 +42,7 @@ export function Journal() {
       <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
         <Card title={t("addTrade")}>
           <form onSubmit={submit} className="grid gap-3" aria-label={t("addTrade")}>
-            <label className="grid gap-1 text-sm">Symbol<input name="symbol" defaultValue="BTCUSD" required /></label>
+            <label className="grid gap-1 text-sm">Symbol<input name="symbol" defaultValue={marketTicker()} required /></label>
             <label className="grid gap-1 text-sm">{t("side")}
               <select name="side" defaultValue="1"><option value="1">{t("long")}</option><option value="-1">{t("short")}</option></select>
             </label>

@@ -316,6 +316,9 @@ export type Activity = {
   note: string;
 };
 
+export type SystemInfo = { markets: number; markets_enabled: number; strategies: string[]; timeframes: string[]; signals_total: number;
+  signals_by_market: Record<string, number>; test_functions: number | null; real_orders: number };
+
 export type Market = { id: string; label: string; symbol: string; history_symbol: string | null; session: string; enabled: boolean };
 
 /** The market every market-aware request is about ("btc" or e.g. "gold"); remembered per browser. */
@@ -375,6 +378,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   markets: () => request<{ markets: Market[]; default: string }>("/api/markets"),
+  system: () => request<SystemInfo>("/api/system"),
   overview: () => request<Overview>(withMarket("/api/overview")),
   candles: (tf: string, limit = 400, before?: number) =>
     request<{ candles: Candle[]; source?: string }>(withMarket(`/api/candles?tf=${tf}&limit=${limit}${before ? `&before=${before}` : ""}`)),
@@ -426,6 +430,13 @@ export function marketName(id: string = currentMarket): string {
   if (id === "btc") return "BTC";
   const m = marketList.find((x) => x.id === id);
   return m ? m.label.replace(/\s*\(.*\)$/, "") : id;
+}
+
+/** The broker-style symbol of the chosen market for the journal form (BTCUSD, XAUUSD, ETHUSD, EURUSD ...). */
+export function marketTicker(): string {
+  if (currentMarket === "btc") return "BTCUSD";
+  const m = marketList.find((x) => x.id === currentMarket);
+  return m ? (m.history_symbol ?? m.symbol).replace(/USDT$/, "USD") : "BTCUSD";
 }
 
 export function marketSubtitle(): string {

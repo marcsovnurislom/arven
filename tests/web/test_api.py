@@ -348,3 +348,12 @@ def test_mistakes_serves_the_report_read_only(env):
     (root / "mistakes.json").write_text(json.dumps({"market": "btc", "strategies": {"s7": {"history": {"trades": 3}}}, "proposals": []}))
     assert client.get("/api/mistakes").json()["strategies"]["s7"]["history"]["trades"] == 3
     assert client.get("/api/mistakes", params={"market": "gold"}).json()["strategies"] == {}  # gold's own root
+
+
+def test_system_counts_markets_strategies_timeframes_and_signals(env):
+    """The home page's numbers (2026-10-27): all counted by the server, nothing typed in by hand."""
+    _, client, _ = env
+    s = client.get("/api/system").json()
+    assert s["markets"] == 12 and s["timeframes"] == ["1m", "5m", "15m", "30m", "1h", "4h", "1d"] and s["real_orders"] == 0
+    assert {"s6_trend_pullback", "s7_30m", "s7_1d", "crowded_shorts"} <= set(s["strategies"])
+    assert s["signals_total"] == sum(s["signals_by_market"].values()) and s["test_functions"] > 1000

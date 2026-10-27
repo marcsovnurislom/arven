@@ -111,6 +111,26 @@ def create_app(cfg: AppConfig, config_dir: Path | str | None = None, dist_dir: P
     def markets_list() -> dict[str, Any]:
         return {"markets": [m.describe() for m in markets.values()], "default": "btc"}
 
+    tests_dir = Path(__file__).resolve().parents[3] / "tests"
+    test_count = sum(f.read_text(encoding="utf-8", errors="ignore").count("\ndef test_") for f in tests_dir.rglob("test_*.py")) if tests_dir.is_dir() else None
+    try:
+        live_cfg = load_live_config(config_dir)
+        live_ids = sorted({s.id for s in live_cfg.enabled()} | {s.id for m in live_cfg.markets if m.enabled for s in m.strategies if s.enabled})
+    except FileNotFoundError:
+        live_ids = []
+
+    @app.get("/api/system")
+    def system() -> dict[str, Any]:
+        """The whole system at a glance (the home page's numbers): markets, live strategies, timeframes, signals recorded on
+        every market, test functions in the repository - all counted, nothing typed in by hand."""
+        per_market = {}
+        for m in markets.values():
+            root = m.live_root / "signals"
+            per_market[m.id] = sum(len(svc.read_signals(root, sid)) for sid in svc.known_strategy_ids(root))
+        return {"markets": len(markets), "markets_enabled": sum(1 for m in markets.values() if m.enabled), "strategies": live_ids,
+                "timeframes": list(svc.CANDLE_TIMEFRAMES), "signals_total": sum(per_market.values()), "signals_by_market": per_market,
+                "test_functions": test_count, "real_orders": 0}
+
     def overview_payload(market: str = "btc") -> dict[str, Any]:
         m = resolve(market)
         now_ms = to_ms(utc_now())

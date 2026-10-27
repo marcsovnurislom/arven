@@ -183,7 +183,7 @@ function Shell() {
           <Logo />
           <span>
             <span className="brand-name shine">ARVEN</span>
-            <span className="brand-sub">{markets.length > 2 ? `${markets.length} ${t("mkCount")}` : markets.length > 1 ? "BTC · Gold" : "BTC"} · decision support</span>
+            <span className="brand-sub">{markets.length > 2 ? `${markets.length} ${t("mkCount")}` : markets.length > 1 ? "BTC · Gold" : "BTC"} · {t("brandSub")}</span>
           </span>
         </a>
         <nav className="side-nav" aria-label="Pages">{groups()}</nav>

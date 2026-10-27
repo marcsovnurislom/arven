@@ -21,7 +21,7 @@ export function Home({ go, startTour }: { go: (p: string) => void; startTour: ()
   const ov = useLoad(api.overview, [], 30000);
   const sum = ov.data?.strategies_summary ?? null;
   const trades = (sum as unknown as { trades?: { t: number; strategy: string; side: number; r: number }[] } | null)?.trades ?? [];
-  const totalSignals = ov.data?.signals_total ?? 0;
+  const sys = useLoad(api.system, [], 60000).data;
   const totalR = trades.reduce((a, x) => a + x.r, 0);
 
   return (
@@ -43,12 +43,13 @@ export function Home({ go, startTour }: { go: (p: string) => void; startTour: ()
       </section>
 
       <Reveal>
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-          {[
-            { v: 2200, s: "+", l: t("statTests") },
-            { v: 6, s: "", l: t("statStrategies") },
-            { v: 4, s: "", l: t("statTf") },
-            { v: totalSignals || 199, s: "", l: t("statSignals") },
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+          {[  /* every number is counted by the server (/api/system), nothing is typed in by hand */
+            { v: sys?.markets ?? 0, s: "", l: t("statMarkets") },
+            { v: sys?.timeframes.length ?? 0, s: "", l: t("statTf") },
+            { v: sys?.strategies.length ?? 0, s: "", l: t("statStrategies") },
+            { v: sys?.signals_total ?? 0, s: "", l: t("statSignals") },
+            { v: sys?.test_functions ?? 0, s: "", l: t("statTests") },
             { v: 0, s: "", l: t("statOrders") },
           ].map((x) => (
             <Tilt key={x.l} className="glass p-4 text-center sm:p-5">
