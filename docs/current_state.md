@@ -428,6 +428,12 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    v1 -0.30). Verdict NOT SUPPORTED (logged in data/s7_study/evaluations.log): better than v1, still negative; not put
    into the live loop. Trades on the S7 trades page as "S7 v2 15m".
 
+34. **S7 v3 (2026-10-28).** v2 + daily trend filter (long only above the last closed 1d bar's EMA50, short only below),
+   pre-registered in `scripts/research/s7_v3.py` (commit 11df183). Validation 279 trades -33.9 R (mean -0.12), new data
+   81 / -14.7 R (mean -0.18): NOT SUPPORTED, no better than v2. Recommendation written in docs/ANALIZ_VSEH_STRATEGIY.md
+   section 13: stop tuning S7 on history; v2 is the best candidate (could run as an observation-only paper strategy if
+   the owner decides so). `scripts/s7_all_trades_export.py export(keep=)` takes a setup filter.
+
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - confirmed on the full history: S4-S6 trade
 normally there (docs/RESULTS_GOLD.md).
