@@ -202,12 +202,20 @@ def test_s7_review_of_gold_has_its_own_setups_and_labels(env):
 
 def test_s7_trades_serves_the_study_export_read_only(env):
     cfg, client, _ = env
-    assert client.get("/api/s7/trades").json() == {"period": "development", "trades": [], "summary": None}
+    assert client.get("/api/s7/trades").json() == {"period": "development", "model": "s7_trend_break_fib", "trades": [], "summary": None}
     study = cfg.data.data_dir / "s7_study"
     study.mkdir(parents=True)
     (study / "trades_validation.json").write_text(json.dumps({"period": "validation", "summary": {"trades": 1}, "trades": [{"n": 1}]}))
-    assert client.get("/api/s7/trades", params={"period": "validation"}).json()["trades"] == [{"n": 1}]
+    assert client.get("/api/s7/trades", params={"period": "validation"}).json()["trades"] == [{"n": 1}]  # the older export
     assert client.get("/api/s7/trades", params={"period": "test"}).status_code == 422  # the sealed test is never served
+    # every model and the new data (2026-10-27): trades_<model>_<period>.json plus an index
+    (study / "trades_s7_30m_forward.json").write_text(json.dumps({"period": "forward", "model": "s7_30m", "trades": [{"n": 7}]}))
+    (study / "trades_index.json").write_text(json.dumps({"s7_30m|forward": {"model": "s7_30m", "period": "forward", "trades": 1, "total_r": 0.5}}))
+    assert client.get("/api/s7/trades", params={"period": "forward", "model": "s7_30m"}).json()["trades"] == [{"n": 7}]
+    assert client.get("/api/s7/trades", params={"model": "bad model"}).status_code == 422
+    assert client.get("/api/s7/trades/index").json()["entries"][0]["total_r"] == 0.5
+    overview = client.get("/api/s7/trades/overview").json()["markets"]
+    assert overview[0]["id"] == "btc" and overview[0]["entries"][0]["model"] == "s7_30m" and len(overview) == 12
 
 
 def test_s7_trade_labels_store_the_owners_verdicts(env):

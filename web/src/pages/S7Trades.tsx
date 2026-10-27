@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, getMarket, tradeSize, type S7Trade, type S7TradeLabel } from "../api";
+import { api, getMarket, marketName, setMarketId, tradeSize, type S7IndexEntry, type S7Trade, type S7TradeLabel } from "../api";
 import { useI18n } from "../i18n";
 import { useLoad } from "../hooks";
 import { EquityCurve, TradeChart, ZONE_STYLE, usd } from "../TradesViewer";
@@ -8,10 +8,34 @@ import { Card, Chip, Empty, ErrorBox, fmt, fmtPct, fmtPrice, fmtR, fmtTime, Page
 type Filter = "all" | "wins" | "losses" | "unmarked" | "wrong";
 type Verdict = S7TradeLabel["verdict"];
 
+/** The live S7 models (config/live.yaml), in the order of the page's switch. */
+export const S7_MODELS: [string, string][] = [
+  ["s7_trend_break_fib", "S7 15m"], ["s7_smc", "S7-SMC 15m"], ["s7_30m", "S7 30m"], ["s7_1h", "S7 1h"], ["s7_4h", "S7 4h"], ["s7_1d", "S7 1d"],
+];
+const PERIODS = ["development", "validation", "forward"] as const;
+
+/** One cell of the summary tables: trades and total R (coloured), the $1000 account's return below. */
+function Cell({ e, on, onClick }: { e?: S7IndexEntry; on: boolean; onClick: () => void }) {
+  if (!e) return <td className="faint">—</td>;
+  return (
+    <td>
+      <button className={`s7-cell ${on ? "on" : ""}`} onClick={onClick} aria-pressed={on} title={`${e.trades} / ${fmtR(e.total_r)}`}>
+        <span className="num">{e.trades}</span> · <span className={`num ${signClass(e.total_r)}`}>{fmtR(e.total_r)}</span>
+        <span className={`num block text-[11px] ${signClass(e.account_return)}`}>{e.trades ? fmtPct(e.account_return) : ""}</span>
+      </button>
+    </td>
+  );
+}
+
 export function S7Trades() {
   const { t } = useI18n();
-  const [period, setPeriod] = useState("development");
-  const load = useLoad(() => api.s7Trades(period), [period]);
+  const [period, setPeriod] = useState<string>("forward");
+  const [model, setModel] = useState("s7_trend_break_fib");
+  const load = useLoad(() => api.s7Trades(period, model), [period, model]);
+  const index = useLoad(() => api.s7TradesIndex(), []);
+  const overview = useLoad(() => api.s7TradesOverview(), []);
+  const periodLabel: Record<string, string> = { development: t("s7tDev"), validation: t("s7tVal"), forward: t("s7tFwd") };
+  const byKey = useMemo(() => Object.fromEntries((index.data?.entries ?? []).map((e) => [`${e.model}|${e.period}`, e])), [index.data]);
   const labelsLoad = useLoad(() => api.s7TradeLabels(), []);
   const [labels, setLabels] = useState<Record<string, S7TradeLabel>>({});
   const [filter, setFilter] = useState<Filter>("all");
@@ -19,7 +43,7 @@ export function S7Trades() {
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   useEffect(() => setLabels(labelsLoad.data?.labels ?? {}), [labelsLoad.data]);
-  useEffect(() => { setId(null); setFilter("all"); }, [period]);
+  useEffect(() => { setId(null); setFilter("all"); }, [period, model]);
 
   const all = load.data?.trades ?? [];
   const sum = load.data?.summary ?? null;
@@ -79,11 +103,37 @@ export function S7Trades() {
 
   return (
     <>
-      <PageTitle sub={t(getMarket() === "gold" ? "s7tHelpGold" : "s7tHelp")}>{t("nav_s7trades")}</PageTitle>
-      <div className="mb-5 flex flex-wrap items-center gap-2">
+      <PageTitle sub={t("s7tHelpAll")}>{t("nav_s7trades")}</PageTitle>
+
+      <Card title={`${t("s7tAllModels")} · ${marketName()}`}>
+        {index.data && index.data.entries.length === 0 && <Empty>{t("s7tEmpty")}</Empty>}
+        {(index.data?.entries.length ?? 0) > 0 && (
+          <div className="overflow-x-auto">
+            <table className="s7-table">
+              <thead><tr><th>{t("s7tModel")}</th>{PERIODS.map((p) => <th key={p}>{periodLabel[p]}</th>)}</tr></thead>
+              <tbody>
+                {S7_MODELS.map(([m, label]) => (
+                  <tr key={m}>
+                    <th scope="row">{label}</th>
+                    {PERIODS.map((p) => <Cell key={p} e={byKey[`${m}|${p}`]} on={m === model && p === period} onClick={() => { setModel(m); setPeriod(p); }} />)}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="mt-2 text-xs faint">{t("s7tCellHelp")}</p>
+      </Card>
+
+      <div className="my-5 flex flex-wrap items-center gap-2">
+        <div className="seg" role="group" aria-label={t("s7tModel")}>
+          {S7_MODELS.map(([k, label]) => (
+            <button key={k} className={k === model ? "on" : ""} aria-pressed={k === model} onClick={() => setModel(k)}>{label}</button>
+          ))}
+        </div>
         <div className="seg" role="group" aria-label={t("nav_s7trades")}>
-          {[["development", t("s7tDev")], ["validation", t("s7tVal")]].map(([k, label]) => (
-            <button key={k} className={k === period ? "on" : ""} aria-pressed={k === period} onClick={() => setPeriod(k)}>{label}</button>
+          {PERIODS.map((k) => (
+            <button key={k} className={k === period ? "on" : ""} aria-pressed={k === period} onClick={() => setPeriod(k)}>{periodLabel[k]}</button>
           ))}
         </div>
         {all.length > 0 && (
@@ -128,7 +178,7 @@ export function S7Trades() {
                   {(tr.smc_zones ?? []).length === 0 && <span className="faint">{t("s7tNoZones")}</span>}
                   {(tr.smc_zones ?? []).map((z, k) => {
                     const st = ZONE_STYLE[z.kind] ?? ZONE_STYLE.level;
-                    return <span key={k} className="chip num" style={{ borderColor: st.color, color: st.color }}>{st.label} {fmt(z.low, 0)}{z.high !== z.low ? `–${fmt(z.high, 0)}` : ""}</span>;
+                    return <span key={k} className="chip num" style={{ borderColor: st.color, color: st.color }}>{st.label} {fmtPrice(z.low, tr.entry)}{z.high !== z.low ? `–${fmtPrice(z.high, tr.entry)}` : ""}</span>;
                   })}
                 </div>
                 <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
@@ -179,6 +229,29 @@ export function S7Trades() {
           </Card>
         </div>
       )}
+
+      <div className="mt-5">
+        <Card title={`${t("s7tAllMarkets")} · ${S7_MODELS.find(([m]) => m === model)?.[1] ?? model}`}>
+          <div className="overflow-x-auto">
+            <table className="s7-table">
+              <thead><tr><th>{t("market")}</th>{PERIODS.map((p) => <th key={p}>{periodLabel[p]}</th>)}</tr></thead>
+              <tbody>
+                {(overview.data?.markets ?? []).map((mk) => {
+                  const e = Object.fromEntries(mk.entries.filter((x) => x.model === model).map((x) => [x.period, x]));
+                  const here = mk.id === getMarket();
+                  return (
+                    <tr key={mk.id} className={here ? "here" : ""}>
+                      <th scope="row">{mk.label.replace(/\s*\(.*\)$/, "")}</th>
+                      {PERIODS.map((p) => <Cell key={p} e={e[p]} on={here && p === period} onClick={() => { if (here) setPeriod(p); else { setMarketId(mk.id); window.location.reload(); } }} />)}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-2 text-xs faint">{t("s7tMarketsHelp")}</p>
+        </Card>
+      </div>
     </>
   );
 }

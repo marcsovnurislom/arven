@@ -410,6 +410,17 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    (`PULSE_SECONDS`, test). Sleep itself is not a bug: nothing runs while the laptop sleeps; to avoid it, set Windows
    "sleep when plugged in: never" (docs/ARVEN_BEZ_CLAUDE.md section 1).
 
+32. **S7: every model, every market, every trade on the site (2026-10-27, owner: "full S7 analysis on the new data, show
+   every trade so I can judge it - all S7 models").** `scripts/s7_all_trades_export.py <INSTRUMENT> [periods]` exports the
+   six live S7 models (15m, SMC, 30m, 1h, 4h, 1d - parameters unchanged) on development / validation / forward (new data
+   from 2026-07-01; the sealed test never) for all 12 markets: setup geometry, entry / stop / targets, exit reasons, net R,
+   $1000 account replay, candles; `trades_<model>_<period>.json` + `trades_index.json` in each research root (gold /
+   silver forward next to their history). Light loading (no feature cache). Trade ids keep the old "15m-..." form for the
+   main model on BTC / gold (old verdicts stay valid), others are prefixed by model and market. API `/api/s7/trades?model=`,
+   `/api/s7/trades/index`, `/api/s7/trades/overview`; the page has model x period and market x period tables. Result
+   (docs/ANALIZ_VSEH_STRATEGIY.md section 10): on the new data S7 15m -63.0 R / 207 (losing), every other model
+   inconclusive or too few; ~57 % of trades stop out before TP1; longs worse than shorts in every period.
+
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - confirmed on the full history: S4-S6 trade
 normally there (docs/RESULTS_GOLD.md).

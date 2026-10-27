@@ -191,6 +191,9 @@ export type S7AccountSummary = {
   start_equity: number; final_equity: number; return: number; trades: number; skipped: number; wins: number; losses: number;
   max_drawdown: number; best_trade_usd: number; worst_trade_usd: number;
 };
+/** One model x period of the S7 trade export (scripts/s7_all_trades_export.py). */
+export type S7IndexEntry = { model: string; period: string; trades: number; setups: number; win_rate: number; total_r: number; mean_r: number | null;
+  profit_factor: number | null; account_return: number; max_drawdown: number };
 export type S7Trades = {
   period: string;
   window_ms?: [number, number];
@@ -401,7 +404,9 @@ export const api = {
   deleteJournal: (id: string) => request<{ deleted: string }>(`/api/journal/${id}`, { method: "DELETE" }),
   telegram: () => request<TelegramStatus>("/api/telegram"),
   s7Review: (tf: string) => request<S7Review>(withMarket(`/api/s7/review?tf=${tf}`)),
-  s7Trades: (period: string) => request<S7Trades>(withMarket(`/api/s7/trades?period=${period}`)),
+  s7Trades: (period: string, model = "s7_trend_break_fib") => request<S7Trades>(withMarket(`/api/s7/trades?period=${period}&model=${model}`)),
+  s7TradesIndex: () => request<{ entries: S7IndexEntry[] }>(withMarket("/api/s7/trades/index")),
+  s7TradesOverview: () => request<{ markets: { id: string; label: string; entries: S7IndexEntry[] }[] }>("/api/s7/trades/overview"),
   strategyTradesIndex: () => request<{ entries: StrategyTradesEntry[] }>(withMarket("/api/strategy_trades/index")),
   strategyTrades: (strategy: string, period: string) => request<StrategyTradesFile>(withMarket(`/api/strategy_trades?strategy=${strategy}&period=${period}`)),
   s7TradeLabels: () => request<{ labels: Record<string, S7TradeLabel> }>("/api/s7/trade_labels"),

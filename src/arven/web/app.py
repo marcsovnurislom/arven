@@ -345,15 +345,31 @@ def create_app(cfg: AppConfig, config_dir: Path | str | None = None, dist_dir: P
         path.write_text(json.dumps(labels, indent=1, sort_keys=True), encoding="utf-8")
         return {"saved": payload.setup_id, "count": len(labels)}
 
-    study_periods = ("development", "validation")
+    study_periods = ("development", "validation", "forward")
 
     @app.get("/api/s7/trades")
-    def s7_trades(period: str = Query("development"), market: str = market_param) -> dict[str, Any]:
-        """Every trade of the development-selected S7 configuration (``scripts/s7_trades_export.py``), read-only."""
+    def s7_trades(period: str = Query("development"), model: str = Query("s7_trend_break_fib", pattern=r"^s7[a-z0-9_]{0,30}$"),
+                  market: str = market_param) -> dict[str, Any]:
+        """Every trade of one live S7 model on one period (``scripts/s7_all_trades_export.py``; the main model falls back
+        to the older single-model export ``trades_<period>.json``), read-only."""
         if period not in study_periods:
             raise HTTPException(status_code=422, detail=f"period must be one of {study_periods}")
-        payload = svc.read_json(resolve(market).research_root / "s7_study" / f"trades_{period}.json")
-        return payload if payload is not None else {"period": period, "trades": [], "summary": None}
+        root = resolve(market).research_root / "s7_study"
+        payload = svc.read_json(root / f"trades_{model}_{period}.json")
+        if payload is None and model == "s7_trend_break_fib":
+            payload = svc.read_json(root / f"trades_{period}.json")
+        return payload if payload is not None else {"period": period, "model": model, "trades": [], "summary": None}
+
+    @app.get("/api/s7/trades/index")
+    def s7_trades_index(market: str = market_param) -> dict[str, Any]:
+        """Per model and period of this market: trades, win rate, total / mean R, account return, max drawdown."""
+        return {"entries": list((svc.read_json(resolve(market).research_root / "s7_study" / "trades_index.json") or {}).values())}
+
+    @app.get("/api/s7/trades/overview")
+    def s7_trades_overview() -> dict[str, Any]:
+        """The same summaries for every market at once (the cross-market table of the S7 trades page)."""
+        return {"markets": [{"id": m.id, "label": m.label, "entries": list((svc.read_json(m.research_root / "s7_study" / "trades_index.json") or {}).values())}
+                            for m in markets.values()]}
 
     trade_periods = ("development", "validation", "devval", "test", "forward")
 

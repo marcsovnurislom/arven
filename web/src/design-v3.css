@@ -190,3 +190,15 @@ th { letter-spacing: 0.1em; }
 .mk-opt.on { border-color: transparent; background: linear-gradient(135deg, color-mix(in srgb, #f2b14e 26%, transparent), color-mix(in srgb, #8b5cf6 14%, transparent)); box-shadow: var(--glow); }
 .mk-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (max-width: 640px) { .mk-panel { position: fixed; left: 12px; right: 12px; top: 70px; width: auto; } }
+
+/* S7 trades page: model x period and market x period tables (2026-10-27) */
+.s7-table { width: 100%; border-collapse: separate; border-spacing: 4px; font-size: 13px; }
+.s7-table th { text-align: left; white-space: nowrap; padding: 4px 8px; font-weight: 600; }
+.s7-table thead th { font-size: 11px; color: var(--faint); text-transform: uppercase; }
+.s7-table td { padding: 0; min-width: 120px; }
+.s7-table tr.here th { color: var(--gold); }
+.s7-cell { width: 100%; text-align: left; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--border); background: color-mix(in srgb, var(--card-solid) 50%, transparent);
+  color: var(--text); cursor: pointer; transition: border-color 0.2s, background 0.2s; }
+.s7-cell:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.s7-cell.on { border-color: transparent; background: linear-gradient(135deg, color-mix(in srgb, #f2b14e 24%, transparent), color-mix(in srgb, #8b5cf6 12%, transparent)); box-shadow: var(--glow); }
+.s7-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
