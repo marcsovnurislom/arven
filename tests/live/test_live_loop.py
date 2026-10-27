@@ -163,3 +163,21 @@ def test_data_is_refreshed_every_minute_between_closes_without_running_strategie
     off, n = LiveConfig(data_refresh_seconds=None), []
     run(poll_once(off, rec.deps(refresh_data=lambda now: n.append(now) or {}), LoopState(), from_ms(T + 16 * MIN), log))
     assert n == []
+
+
+def test_a_long_poll_keeps_the_heartbeat_alive(tmp_path, make_config, monkeypatch):
+    """2026-10-27: a catch-up poll after sleep ran for minutes and the web app said "pulse stale" for a live process;
+    now the heartbeat says "working" every PULSE_SECONDS while a poll runs, then the poll's own status."""
+    import time as _time
+
+    import arven.live.loop as loop
+
+    app = make_config()
+    rec = Recorder()
+    seen = []
+    real = loop.write_heartbeat
+    monkeypatch.setattr(loop, "PULSE_SECONDS", 0.05)
+    monkeypatch.setattr(loop, "write_heartbeat", lambda path, **kw: seen.append(kw["status"]) or real(path, **kw))
+    deps = rec.deps(live_tick=lambda now: _time.sleep(0.4) or FakeOut("ok", due_close_ms(int(now.timestamp() * 1000), 5_000)))
+    run(run_live_forever(app, LiveConfig(poll_seconds=1), deps, now_fn=lambda: from_ms(T + 15 * MIN + 10_000), max_iterations=1))
+    assert seen.count("working") >= 3 and seen[-1] == "ok"

@@ -42,6 +42,7 @@ from arven.paper.runtime import log_event, write_heartbeat
 MIN15 = Timeframe.M15.ms
 HOUR_MS = 3_600_000
 ERROR_ALERT_AFTER = 3  # consecutive failed ticks before a system alert
+PULSE_SECONDS = 30.0  # heartbeat cadence while one poll runs long
 
 
 def live_dir(app: AppConfig) -> Path:
@@ -292,11 +293,24 @@ async def run_live_forever(
                    f"ARVEN live signals started at {from_ms(started).isoformat()}; last evaluated 15m close: "
                    f"{from_ms(state.done_through_ms).isoformat() if state.done_through_ms else 'none (first run)'}")
     iterations = 0
+
+    async def pulse(poll_started: datetime) -> None:
+        """While a long poll runs (a catch-up after sleep, a full pass over 12 markets) the heartbeat says "working"
+        every PULSE_SECONDS, so the web app and /status do not report a live process as dead (2026-10-27)."""
+        while True:
+            await asyncio.sleep(PULSE_SECONDS)
+            write_heartbeat(heartbeat_path, status="working", checked_at_ms=to_ms(now_fn()), last_tick_ms=state.last_tick_ms,
+                            detail=f"poll in progress since {from_ms(to_ms(poll_started)).isoformat()}")
+
     while not stop_event.is_set():
         now = now_fn()
-        status, detail = await poll_once(live, deps, state, now, log_path)
+        beat = asyncio.create_task(pulse(now))
+        try:
+            status, detail = await poll_once(live, deps, state, now, log_path)
+        finally:
+            beat.cancel()
         state.save(state_path)
-        write_heartbeat(heartbeat_path, status=status, checked_at_ms=to_ms(now), last_tick_ms=state.last_tick_ms, detail=detail)
+        write_heartbeat(heartbeat_path, status=status, checked_at_ms=to_ms(now_fn()), last_tick_ms=state.last_tick_ms, detail=detail)
         iterations += 1
         if max_iterations is not None and iterations >= max_iterations:
             break

@@ -403,6 +403,13 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
    Measured: 10-60 s typically, up to ~90-115 s during the 15m pass (was up to 900 s). Tests: refresh (offline), loop
    cadence, writer wait; full suite 2557 passed.
 
+31. **"Pulse stale" (2026-10-27).** The laptop was in modern standby from 15:55 and asleep 17:11-19:47 local (Windows
+   Kernel-Power 42 / Power-Troubleshooter 1): no ticks 10:45-14:47 UTC. After wake one poll caught up 4 hours on 12
+   markets and ran the missed daily backup - 10 minutes - and the heartbeat was written only when a poll ended, so the
+   web app said "pulse stale" for a live process. Now a pulse task writes status "working" every 30 s while a poll runs
+   (`PULSE_SECONDS`, test). Sleep itself is not a bug: nothing runs while the laptop sleeps; to avoid it, set Windows
+   "sleep when plugged in: never" (docs/ARVEN_BEZ_CLAUDE.md section 1).
+
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - confirmed on the full history: S4-S6 trade
 normally there (docs/RESULTS_GOLD.md).
