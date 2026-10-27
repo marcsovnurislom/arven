@@ -61,35 +61,45 @@ def select_new(rows: Sequence[tuple], last_stored_ms: int | None, now_ms_: int, 
     return [r for r in rows if r[0] + MIN_MS <= now_ms_ and (last_stored_ms is None or r[0] > last_stored_ms) and bool(is_open(r[0]))]
 
 
-def kraken_tail(app: AppConfig, con: duckdb.DuckDBPyConnection, now_ms_: int, downloader: Downloader | None = None) -> RestTailSummary:
-    """Append Kraken's new closed minutes for ``app.market.symbol`` to ``ohlcv_1m`` (see the module docstring)."""
-    summary = RestTailSummary()
-    symbol = app.market.symbol
-    pair = KRAKEN_PAIRS.get(symbol)
+def fetch_new(app: AppConfig, last_ms: int | None, now_ms_: int, downloader: Downloader, summary: RestTailSummary) -> list[tuple]:
+    """Kraken's closed, in-session minutes after ``last_ms`` (network only, no database); errors go to ``summary``."""
+    pair = KRAKEN_PAIRS.get(app.market.symbol)
     if pair is None:
-        summary.errors.append(f"kraken: no live pair for {symbol}")
-        return summary
-    row = con.execute("SELECT max(open_time_ms) FROM ohlcv_1m WHERE symbol = ?", [symbol]).fetchone()
-    last = int(row[0]) if row and row[0] is not None else None
-    downloader = downloader or Downloader(RetryPolicy.from_config(app.download))
+        summary.errors.append(f"kraken: no live pair for {app.market.symbol}")
+        return []
     try:
-        payload = json.loads(downloader.fetch_bytes(f"{KRAKEN_OHLC_URL}?pair={pair}&interval=1"))
-        rows = parse_ohlc(payload)
+        rows = parse_ohlc(json.loads(downloader.fetch_bytes(f"{KRAKEN_OHLC_URL}?pair={pair}&interval=1")))
     except Exception as exc:  # noqa: BLE001 - recorded, the tick then sees stale data and stays NO_TRADE
         summary.errors.append(f"kraken {pair}: {exc}")
-        return summary
-    summary.pages = 1
-    summary.klines_fetched = len(rows)
-    cal = app.session_calendar()
-    new = select_new(rows, last, now_ms_, cal.is_open)
+        return []
+    summary.pages += 1
+    summary.klines_fetched += len(rows)
+    return select_new(rows, last_ms, now_ms_, app.session_calendar().is_open)
+
+
+def write_new(con: duckdb.DuckDBPyConnection, symbol: str, new: list[tuple]) -> int:
+    """Store rows from :func:`fetch_new` (never overwriting: they all lie after the last stored minute)."""
     if not new:
-        return summary
+        return 0
     key = f"kraken/{symbol}/{new[0][0]}"
     ingested = now_ms()
     data = [(symbol, t, t + MIN_MS, o, h, lo, c, v, v * c, n, 0.0, 0.0, key, ingested) for t, o, h, lo, c, v, n in new]
     bulk_insert_or_replace(con, "ohlcv_1m", _COLS, _TYPES, data)
-    summary.klines_written = len(data)
+    return len(data)
+
+
+def kraken_tail(app: AppConfig, con: duckdb.DuckDBPyConnection, now_ms_: int, downloader: Downloader | None = None) -> RestTailSummary:
+    """Append Kraken's new closed minutes for ``app.market.symbol`` to ``ohlcv_1m`` (see the module docstring)."""
+    summary = RestTailSummary()
+    symbol = app.market.symbol
+    if symbol not in KRAKEN_PAIRS:
+        summary.errors.append(f"kraken: no live pair for {symbol}")
+        return summary
+    row = con.execute("SELECT max(open_time_ms) FROM ohlcv_1m WHERE symbol = ?", [symbol]).fetchone()
+    last = int(row[0]) if row and row[0] is not None else None
+    new = fetch_new(app, last, now_ms_, downloader or Downloader(RetryPolicy.from_config(app.download)), summary)
+    summary.klines_written = write_new(con, symbol, new)
     return summary
 
 
-__all__ = ["KRAKEN_PAIRS", "kraken_tail", "parse_ohlc", "select_new"]
+__all__ = ["KRAKEN_PAIRS", "fetch_new", "kraken_tail", "parse_ohlc", "select_new", "write_new"]

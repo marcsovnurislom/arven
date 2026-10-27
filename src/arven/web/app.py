@@ -9,6 +9,7 @@ import asyncio
 import json
 import os
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -89,10 +90,14 @@ def create_app(cfg: AppConfig, config_dir: Path | str | None = None, dist_dir: P
         return markets[market]
 
     def open_db() -> duckdb.DuckDBPyConnection:
-        try:
-            return duckdb.connect(str(cfg.data.database_path), read_only=True)
-        except duckdb.IOException as exc:  # a writer (REST update / paper tick) currently holds the file
-            raise HTTPException(status_code=503, detail=f"market database busy, retry in a moment ({exc})") from exc
+        deadline = time.monotonic() + 3.0  # the live loop writes for 1-3 s at a time: wait that out before saying busy
+        while True:
+            try:
+                return duckdb.connect(str(cfg.data.database_path), read_only=True)
+            except duckdb.IOException as exc:  # a writer (REST update / paper tick) currently holds the file
+                if time.monotonic() >= deadline or not cfg.data.database_path.exists():
+                    raise HTTPException(status_code=503, detail=f"market database busy, retry in a moment ({exc})") from exc
+                time.sleep(0.2)
 
     def heartbeat_state() -> dict[str, Any]:
         """The live signal process's heartbeat (``arven live run``), else the older Phase 5 paper runtime's."""
@@ -142,13 +147,15 @@ def create_app(cfg: AppConfig, config_dir: Path | str | None = None, dist_dir: P
             finally:
                 con.close()
         except HTTPException:
-            pass
+            if cfg.data.database_path.exists():
+                raise  # busy (the live loop is writing): 503, the page retries - never "stale data" for a busy file
         signals_root = m.live_root / "signals"
         ids = svc.known_strategy_ids(signals_root)
         signals = svc.list_signals(signals_root, ids, limit=1000)
         day_ago = now_ms - 86_400_000
         # data age in trading time: a session market (gold) is not "stale" over a weekend
-        age_ms = None if last_bar is None else int(m.calendar.trading_ms(now_ms)) - int(m.calendar.trading_ms(last_bar))
+        # measured from the bar's close (open + 1 min): a bar that has just closed is 0 s old, not 60 s
+        age_ms = None if last_bar is None else max(0, int(m.calendar.trading_ms(now_ms)) - int(m.calendar.trading_ms(last_bar + 60_000)))
         market_open = bool(m.calendar.is_open(now_ms // 60_000 * 60_000))
         return {
             "now_ms": now_ms, "market": m.id, "symbol": m.symbol, "market_open": market_open, "last_1m_bar_open_ms": last_bar,
@@ -437,7 +444,11 @@ def create_app(cfg: AppConfig, config_dir: Path | str | None = None, dist_dir: P
         async def gen():
             sent = 0
             while not await request.is_disconnected():
-                payload = await asyncio.to_thread(overview_payload, market)
+                try:
+                    payload = await asyncio.to_thread(overview_payload, market)
+                except HTTPException:  # database busy for a moment: skip this beat, the next one will have it
+                    await asyncio.sleep(min(interval, 2.0))
+                    continue
                 yield f"event: overview\ndata: {json.dumps(payload)}\n\n"
                 sent += 1
                 if max_events and sent >= max_events:

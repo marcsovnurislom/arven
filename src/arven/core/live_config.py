@@ -83,6 +83,9 @@ class LiveConfig(_StrictModel):
     poll_seconds: float = Field(default=20.0, ge=1.0, le=600.0)
     event_delay_seconds: int = Field(default=5, ge=0, le=600)  # wait this long after a 15m close before evaluating it
     max_data_age_seconds: int = Field(default=180, ge=60)  # newest 1m bar older than this => stale => no new signals
+    # between 15m closes, fetch every market's new 1m bars this often (charts and the data-age gauge stay current;
+    # strategies still run only at 15m closes). None = only at the 15m closes, as before 2026-10-27.
+    data_refresh_seconds: float | None = Field(default=60.0, ge=20.0)
     alert_recency_hours: float = Field(default=6.0, gt=0)  # catch-up signals older than this are stored, never alerted
     cost_profile: str = "costs_cfd_justmarkets.yaml"  # file in config/ used to resolve signals in R
     include_open_interest: bool = True  # REST-tail open interest (needed by Crowded Shorts' oi_z)

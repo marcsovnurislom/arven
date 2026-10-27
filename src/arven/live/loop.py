@@ -24,9 +24,10 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -99,6 +100,7 @@ class LoopDeps:
     market_legacy_ticks: dict[str, Callable[[datetime], Any]] = field(default_factory=dict)
     queue_event_reminder: Callable[[MacroEvent], None] | None = None  # one FOMC / CPI / NFP reminder
     macro_events: tuple[MacroEvent, ...] = ()  # config/macro_events.csv
+    refresh_data: Callable[[datetime], dict[str, str]] | None = None  # 1m data of every market -> {market: error}
 
 
 async def _run(fn: Callable[..., Any], *args: Any) -> tuple[Any, str | None]:
@@ -108,8 +110,27 @@ async def _run(fn: Callable[..., Any], *args: Any) -> tuple[Any, str | None]:
         return None, f"{type(exc).__name__}: {exc}"
 
 
+async def _maybe_refresh(live: LiveConfig, deps: LoopDeps, state: LoopState, now: datetime, started: float, log_path: Path) -> None:
+    """Fresh 1m data for every market (no strategy runs) once ``data_refresh_seconds`` have passed, so charts and the
+    data-age gauge stay current between 15m closes and during a long pass over the markets. ``now`` is the poll's time;
+    the real time elapsed since the poll began is added, so a refresh late in a long pass fetches up to the present."""
+    every = live.data_refresh_seconds
+    if deps.refresh_data is None or not every:
+        return
+    at = now + timedelta(seconds=time.monotonic() - started)
+    at_ms = to_ms(at)
+    last = state.extra.get("data_refresh_ms")
+    if last is not None and at_ms - int(last) < every * 1000:
+        return
+    errors, err = await _run(deps.refresh_data, at)
+    state.extra["data_refresh_ms"] = at_ms
+    if err is not None or errors:
+        log_event(log_path, event="data_refresh", status="error", detail=err or "; ".join(f"{k}: {v}" for k, v in errors.items()))
+
+
 async def poll_once(live: LiveConfig, deps: LoopDeps, state: LoopState, now: datetime, log_path: Path) -> tuple[str, str]:
     """One poll; returns ``(heartbeat status, detail)``."""
+    started = time.monotonic()
     now_ms = to_ms(now)
     status, detail = "idle", ""
     due = due_close_ms(now_ms, live.event_delay_seconds * 1000)
@@ -138,7 +159,9 @@ async def poll_once(live: LiveConfig, deps: LoopDeps, state: LoopState, now: dat
             log_event(log_path, event="live_tick", status="error", detail=detail)
 
     for name, tick in deps.market_ticks.items():
+        await _maybe_refresh(live, deps, state, now, started, log_path)  # also between markets: a full pass takes minutes
         await _market_tick(name, tick, deps, state, now, due, log_path)
+    await _maybe_refresh(live, deps, state, now, started, log_path)
 
     if deps.legacy_tick is not None and live.run_legacy_paper:
         hour = now_ms // HOUR_MS * HOUR_MS

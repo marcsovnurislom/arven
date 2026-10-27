@@ -392,6 +392,17 @@ Claude session get stopped when memory is low (7.2 GB machine) - launch long job
      read-only wait); e2e 95 incl. the market picker; UI audit clean for BTC, EUR/USD, DOGE, silver (only 503s while the
      live loop wrote).
 
+30. **Data age (2026-10-27, owner: "data age 730 seconds - why is ARVEN 12 minutes behind?").** The loop fetched 1m bars
+   only at each 15m close, so the gauge (and charts) aged 0 -> 15 min; signals were never late (a tick fetches up to its
+   close). Now: `arven.live.refresh` fetches every market's new closed minutes in parallel (no database open), then
+   writes them and rebuilds derived bars in one short connection, every `data_refresh_seconds` (30) - also between
+   markets during the 15m pass; `poll_seconds` 20 -> 10. Lock fixes found on the way: the web app reads the database many
+   times a minute and DuckDB then refuses the writer, so writers wait up to 15 s (`connect(wait_seconds=)`), the web
+   waits up to 3 s before answering 503, the overview answers 503 instead of claiming "stale" when the file is busy, and
+   the SSE stream skips a busy beat. Data age is now measured from the bar's close (a just-closed bar is 0 s, not 60 s).
+   Measured: 10-60 s typically, up to ~90-115 s during the 15m pass (was up to 900 s). Tests: refresh (offline), loop
+   cadence, writer wait; full suite 2557 passed.
+
 Smoke run on partial data (scratch dir): ingest/quality/features fine; S4-S6 gave 0 signals only because the partial
 data has holes (the 4h EMA filter needs 250 consecutive 4h bars) - confirmed on the full history: S4-S6 trade
 normally there (docs/RESULTS_GOLD.md).

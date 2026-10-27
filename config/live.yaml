@@ -1,9 +1,10 @@
 # ARVEN live signal loop (`arven live run`; docs/LIVE_SIGNALS.md). Decision support only - paper signals, never an order.
 # Telegram secrets (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_IDS) live in .env; sending is still governed by config/telegram.yaml.
 
-poll_seconds: 20              # how often the process wakes up (REST data, Telegram)
+poll_seconds: 10              # how often the process wakes up (REST data, Telegram); 10 since 2026-10-27 (fresher data)
 event_delay_seconds: 5        # evaluate a 15m close this many seconds after it (Binance needs a moment to publish the bar)
 max_data_age_seconds: 180     # newest stored 1m bar older than this => data stale => no new signals (CLAUDE.md rule 5)
+data_refresh_seconds: 30      # between 15m closes, fetch new 1m bars of every market this often (charts, data age); null = off
 alert_recency_hours: 6        # signals found while catching up after downtime are stored but only alerted if this recent
 cost_profile: costs_cfd_justmarkets.yaml   # costs used to track every signal in R (broker CFD, spread only)
 include_open_interest: true   # REST-tail open interest every tick (Crowded Shorts needs oi_z)

@@ -25,6 +25,7 @@ from arven.live.service import run_live_tick
 from arven.paper.runs import paper_dir
 
 DAY_MS = 86_400_000
+WRITER_WAIT_S = 15.0  # the loop's writes wait this long for the web app's reads to finish instead of failing at once
 
 
 def telegram_token_configured() -> bool:
@@ -143,12 +144,12 @@ def build_deps(
         return run_live_tick(app, fcfg, live, config_dir, now=now, chat_ids=chat_ids if alerts_on else frozenset(), strategies=strategies)
 
     def send() -> Any:
-        with connect(db) as con:
+        with connect(db, wait_seconds=WRITER_WAIT_S) as con:
             return run_telegram_send_tick(con, tcfg, charts_root=charts_dir(app.data.data_dir))
 
     def commands(last_update_id: int) -> int:
         quick = tcfg.model_copy(update={"command_poll_timeout_seconds": 0})  # never block the loop on a long poll
-        with connect(db) as con:
+        with connect(db, wait_seconds=WRITER_WAIT_S) as con:
             _, new_id = run_telegram_commands_tick(con, quick, app.data.data_dir / "signals", live_dir(app) / "heartbeat.json",
                                                    last_update_id=last_update_id, allowed_chats=chat_ids, lang=lang,
                                                    extra_signal_roots=tuple((labels[n], a.market_root / "signals") for n, (_, a) in markets.items()))
@@ -156,7 +157,7 @@ def build_deps(
 
     def queue_system(key: str, title: str, detail: str) -> None:
         now_ms = to_ms(utc_now())
-        with connect(db) as con:
+        with connect(db, wait_seconds=WRITER_WAIT_S) as con:
             for chat in sorted(chat_ids):
                 enqueue(con, signal_id="system", event_type=key, chat_id=chat, text=format_system_alert(title, detail, lang), now_ms=now_ms)
 
@@ -166,7 +167,7 @@ def build_deps(
             x for n, (_, a) in markets.items() for x in daily_summary_sections(a, day, labels[n]))
         text = format_daily_summary(day, sections, lang)
         now_ms = to_ms(utc_now())
-        with connect(db) as con:
+        with connect(db, wait_seconds=WRITER_WAIT_S) as con:
             for chat in sorted(chat_ids):
                 enqueue(con, signal_id="daily_summary", event_type=day, chat_id=chat, text=text, now_ms=now_ms)
 
@@ -179,7 +180,7 @@ def build_deps(
         rows = weekly_report_rows(app, today) + tuple(x for n, (_, a) in markets.items() for x in weekly_report_rows(a, today, labels[n]))
         text = format_weekly_report(label, since, rows, lang)
         now_ms = to_ms(utc_now())
-        with connect(db) as con:
+        with connect(db, wait_seconds=WRITER_WAIT_S) as con:
             for chat in sorted(chat_ids):
                 enqueue(con, signal_id="weekly_report", event_type=today, chat_id=chat, text=text, now_ms=now_ms)
         # learning from mistakes: read what scripts/research/mistakes.py last built (nothing is computed here)
@@ -192,7 +193,7 @@ def build_deps(
             data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
             blocks.append((name, data.get("created_at"), tuple(data.get("proposals", []))))
         note = format_mistakes_summary(tuple(blocks), lang)
-        with connect(db) as con:
+        with connect(db, wait_seconds=WRITER_WAIT_S) as con:
             for chat in sorted(chat_ids):
                 enqueue(con, signal_id="mistakes_report", event_type=today, chat_id=chat, text=note, now_ms=now_ms)
 
@@ -200,6 +201,13 @@ def build_deps(
         return run_maintenance(app, live, config_dir, now, tuple(a for _, a in markets.values()))
 
     macro_events = load_macro_events(config_dir)
+
+    def refresh_data(now: datetime) -> dict[str, str]:
+        """New 1m bars (and their derived bars) for BTC and every enabled further market, fetched in parallel and
+        written in one short connection (arven.live.refresh). Errors per market are returned, never raised."""
+        from arven.live.refresh import refresh_markets
+
+        return refresh_markets([("BTC", app)] + [(n, a) for n, (_, a) in markets.items()], db, now, wait_seconds=WRITER_WAIT_S)
 
     def queue_event_reminder(event: MacroEvent) -> None:
         from arven import event_moves as evm
@@ -209,14 +217,14 @@ def build_deps(
         feeds = [("BTC", (app.market.symbol,), app.session_calendar())] + [
             (labels[n], tuple(s for s in (m.history_instrument, a.market.symbol) if s), a.session_calendar()) for n, (m, a) in markets.items()]
         rows = []
-        with connect(db) as con:  # the loop's own single writer; nothing else runs during this step
+        with connect(db, wait_seconds=WRITER_WAIT_S) as con:  # the loop's own single writer; nothing else runs during this step
             for label, symbols, cal in feeds:
                 stats = evm.summarize(evm.event_rows(evm.load_bars(con, symbols), macro_events, now_ms, horizons=(60,), calendar=cal),
                                       horizons=(60,))[event.event_type]["60"] if event.event_type in evm.EVENT_TYPES else {"n": 0}
                 rows.append(EventReminderRow(label, stats["n"], stats.get("median_range"), stats.get("max_range"), stats.get("median_baseline")))
         minutes = max(1, round((event.scheduled_at_ms - now_ms) / 60_000))
         text = format_event_reminder(event.event_type, event.scheduled_at_ms, minutes, tuple(rows), lang)
-        with connect(db) as con:
+        with connect(db, wait_seconds=WRITER_WAIT_S) as con:
             for chat in sorted(chat_ids):
                 enqueue(con, signal_id="event_reminder", event_type=f"{event.event_type}:{event.scheduled_at_ms}", chat_id=chat, text=text, now_ms=now_ms)
 
@@ -233,6 +241,7 @@ def build_deps(
         market_legacy_ticks=dict(market_legacy_ticks or {}),
         queue_event_reminder=queue_event_reminder if alerts_on else None,
         macro_events=macro_events,
+        refresh_data=refresh_data if live.data_refresh_seconds else None,
     )
 
 

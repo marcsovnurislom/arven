@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import time
 import uuid
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
@@ -13,12 +14,22 @@ from arven.core.time import to_ms, utc_now
 from arven.data.storage.schema import DDL, SCHEMA_VERSION
 
 
-def connect(database_path: Path | str) -> duckdb.DuckDBPyConnection:
-    """Open (creating if needed) the ARVEN database and ensure the schema exists."""
+def connect(database_path: Path | str, wait_seconds: float = 0.0) -> duckdb.DuckDBPyConnection:
+    """Open (creating if needed) the ARVEN database and ensure the schema exists. ``wait_seconds``: keep retrying that
+    long while another process has the file open (the web app reads it many times a minute; a writer that gives up at
+    once would skip its update)."""
     path = Path(database_path)
     if str(path) != ":memory:":
         path.parent.mkdir(parents=True, exist_ok=True)
-    con = duckdb.connect(str(path))
+    deadline = time.monotonic() + wait_seconds
+    while True:
+        try:
+            con = duckdb.connect(str(path))
+            break
+        except duckdb.IOException:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.25)
     con.execute("SET TimeZone = 'UTC'")
     for statement in DDL:
         con.execute(statement)

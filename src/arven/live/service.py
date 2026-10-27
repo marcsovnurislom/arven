@@ -148,7 +148,7 @@ def run_live_tick(
     cursor_path, summary_path = root / "strategies_cursor.json", root / "strategies_summary.json"
 
     end_ms = latest_forward_window_end_ms(app, now)
-    with connect(app.data.database_path) as con:
+    with connect(app.data.database_path, wait_seconds=15.0) as con:  # the web app may be reading for a moment
         rest = update_market_data(app, con, end_ms, downloader, now, include_open_interest=live.include_open_interest)
     try:
         window = make_guard(app).resolve(BacktestPeriod.FORWARD, end_ms=end_ms)

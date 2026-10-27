@@ -143,3 +143,23 @@ def test_event_reminder_once_per_release_inside_its_lead_time(tmp_path):
     assert got == [ev] and state.extra["event_reminders"] == [f"FOMC:{ev.scheduled_at_ms}"]
     run(poll_once(LiveConfig(telegram={"event_reminder_minutes": None}), deps, LoopState(), from_ms(T + H + MIN), tmp_path / "l"))
     assert got == [ev]  # switched off
+
+
+def test_data_is_refreshed_every_minute_between_closes_without_running_strategies(tmp_path):
+    """2026-10-27: fresh 1m data once a minute (charts, data age); strategies still run only at 15m closes; a failing
+    feed is logged, never raised; data_refresh_seconds: null switches it off."""
+    import json
+
+    rec, live, state = Recorder(), LiveConfig(), LoopState()
+    log = tmp_path / "log.jsonl"
+    calls = []
+    deps = rec.deps(refresh_data=lambda now: calls.append(now) or {})
+    for sec in (10, 30, 50, 75, 95, 140):  # seconds after a 15m close + 1 minute
+        run(poll_once(live, deps, state, from_ms(T + 16 * MIN + sec * 1000), log))
+    assert len(calls) == 3 and len(rec.ticks) == 1  # at +10 s, +75 s, +140 s; one tick for the one due close
+    failing = rec.deps(refresh_data=lambda now: {"ETHUSDT": "HTTP 503"})
+    run(poll_once(live, failing, LoopState(), from_ms(T + 16 * MIN), log))
+    assert any(json.loads(x).get("event") == "data_refresh" and "ETHUSDT" in json.loads(x)["detail"] for x in log.read_text().splitlines())
+    off, n = LiveConfig(data_refresh_seconds=None), []
+    run(poll_once(off, rec.deps(refresh_data=lambda now: n.append(now) or {}), LoopState(), from_ms(T + 16 * MIN), log))
+    assert n == []
