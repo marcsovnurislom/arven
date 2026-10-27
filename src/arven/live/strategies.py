@@ -85,7 +85,8 @@ S7_LOWER = {"15m": Timeframe.M5, "30m": Timeframe.M5, "1h": Timeframe.M15, "4h":
 S7_HIGHER = {"15m": Timeframe.H1, "30m": Timeframe.H4, "1h": Timeframe.H4, "4h": None, "1d": None}
 S7_WARMUP_BARS = 3000  # bars of the S7 timeframe before the forward window the detector is given (see S7Strategy._state)
 S7_DETECTOR_KEYS = {"min_touches", "freeze_pullback", "count_every_touch", "level0_range_bottom", "skip_beyond_line_start",
-                    "break_on_cross", "line_from_major_high", "shallow_zone"}
+                    "break_on_cross", "line_from_major_high", "shallow_zone",
+                    "cluster_min_bars", "max_wick_pierce_atr"}  # the last two: S7 v2 (2026-10-28), from the owner's trade verdicts
 S7_TRADE_KEYS = {"entry", "stop", "breakeven_after_tp1", "min_tp1_r", "management"}
 # setup filter (live only, 2026-10-22): keep a setup only if at least this many *different* SMC zone types overlap its
 # entry zone at the arming close - the rule pre-registered and checked once on BTC in scripts/research/s7_smc_btc.py
