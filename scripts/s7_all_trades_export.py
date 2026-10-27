@@ -91,7 +91,9 @@ class Data:
                             calendar=self.app.session_calendar())
 
 
-def export(d: Data, instrument: str, model: str, cfg: dict[str, Any], period: str, out_dir: Path) -> dict[str, Any]:
+def export(d: Data, instrument: str, model: str, cfg: dict[str, Any], period: str, out_dir: Path,
+           keep: Any = None) -> dict[str, Any]:
+    """``keep(setup, arm_close_ms) -> bool``: an extra setup filter applied before the simulator (S7 v3's trend filter)."""
     tf, p, tp = s7_params(cfg)
     need = int(cfg.get("min_smc_types", 0))
     b = d.bars[S7_TFS[tf]]
@@ -99,7 +101,8 @@ def export(d: Data, instrument: str, model: str, cfg: dict[str, Any], period: st
     close_ms = t_ms + S7_TFS[tf].ms
     through = (int(d.m.time_ms[-1]) + 60_000) // 900_000 * 900_000
     setups = [s for s in detect_setups(b.open, b.high, b.low, b.close, p, volume=b.volume)
-              if d.window.start_ms <= int(close_ms[s.arm_index]) <= through and smc_types(s) >= need]
+              if d.window.start_ms <= int(close_ms[s.arm_index]) <= through and smc_types(s) >= need
+              and (keep is None or keep(s, int(close_ms[s.arm_index])))]
     higher = S7_HIGHER[tf]
     ctx = sim.make_context(sim.S7Bars.from_series(b), sim.S7Bars.from_series(d.bars[S7_LOWER[tf]]), d.m, d.costs, p, tp,
                            higher=None if higher is None else sim.S7Bars.from_series(d.bars[higher]), calendar=d.app.session_calendar())
